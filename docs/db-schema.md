@@ -80,7 +80,8 @@
 | `email` | `text` not null | 🔒 kopia z `auth.users`, synchronizowana triggerem (do list w panelu admina). |
 | `phone` | `text` | format E.164. Klient: bez weryfikacji (D34). |
 | `is_blocked` | `boolean` not null default false | 🔒 blokada konta przez admina. |
-| `privacy_accepted_at` | `timestamptz` | zgoda GDPR przy rejestracji. |
+| `terms_accepted_at`, `terms_version` | `timestamptz`, `text` | 🔒 akceptacja „Termini e condizioni” i wersja dokumentu (D42). Oba null albo oba wypełnione. |
+| `privacy_accepted_at`, `privacy_version` | `timestamptz`, `text` | 🔒 zgoda Privacy (GDPR) i wersja dokumentu (D42). Oba null albo oba wypełnione. |
 | `created_at`, `updated_at` | `timestamptz` | |
 
 Indeksy: `unique(email)`, `(role)`.
@@ -93,14 +94,14 @@ Indeksy: `unique(email)`, `(role)`.
 | `customer_type` | `customer_type` not null | wybierany przy rejestracji; zmiana tylko przez admina 🔒 (żeby nie przełączać IVA wstecz). |
 | `company_name` | `text` | ragione sociale (wymagane dla `business`). |
 | `vat_number` | `text` | P.IVA (wymagane dla `business`). |
-| `fiscal_code` | `text` | codice fiscale (wymagane dla `private`). |
+| `fiscal_code` | `text` | codice fiscale (`private`: zbierany w „Riepilogo” przed płatnością, nie przy rejestracji — D43). |
 | `sdi_code` | `text` | codice destinatario (7 znaków). |
 | `pec` | `text` | |
 | `billing_street`, `billing_city`, `billing_postal_code`, `billing_province` | `text` | `billing_province` = sigla (np. `MI`). |
 | `billing_country` | `char(2)` default `'IT'` | |
 | `created_at`, `updated_at` | | |
 
-Check: `business` → `company_name` i `vat_number` not null; `private` → `fiscal_code` not null. Walidacja formatu CF/P.IVA odbywa się w aplikacji.
+Check: `business` → `company_name` i `vat_number` not null oraz `sdi_code` lub `pec` not null (D44). Dla `private` brak wymogu w bazie — codice fiscale wymagany przez serwer przed utworzeniem Checkout (D43). Walidacja formatu CF/P.IVA/SDI odbywa się w aplikacji.
 **RLS:** klient czyta i edytuje swój wiersz (bez `customer_type`), admin wszystko. Przewoźnik nie ma dostępu.
 
 #### `customer_addresses` — zapisane adresy klienta
@@ -233,6 +234,7 @@ PK `(price_list_id, code)`. Check: dokładnie jedno z `amount_cents` / `percent_
 | `free_cancellation_hours` | `integer` not null default 24 | D33: bezpłatne anulowanie do X h przed `pickup_window_start` |
 | `late_cancellation_fee_bp` | `integer` not null default 5000 check 0–10000 | D33: opłata Y % (50 %) przy późnym anulowaniu |
 | `company_name`, `company_vat_number`, `company_fiscal_code`, `company_street`, `company_city`, `company_postal_code`, `company_province`, `company_pec`, `company_sdi_code`, `company_email`, `company_phone` | `text` | dane Transigo do faktur |
+| `terms_version`, `privacy_version` | `text` not null default `'2026-11-01'` | aktualne wersje „Termini” i „Privacy” zapisywane przy zgodzie (D42) |
 | `updated_at`, `updated_by` | | |
 
 **RLS:** odczyt tylko admin. Wartości potrzebne publicznie, np. dane firmy w stopce, serwer podaje osobno. Zapis tylko admin.
@@ -697,6 +699,8 @@ Zasady:
 | *(poza migracją)* | Nadanie roli admin: ręcznie w SQL Editor — `update public.profiles set role = 'admin' where email = lower('…') returning id, email, role;` — nigdy w migracji ani formularzu. Konto musi istnieć (rejestracja lub Dashboard → Authentication → Add user). |
 
 **Status: wykonane 2026-11-08** — migracje `20261108150851_accounts`, `20261108150853_vehicles_documents`, `20261108150855_settings_audit`; testy bezpieczeństwa `npm run test:rls` (`tests/rls/stage1.test.ts`, 54 testy) zielone.
+
+Uzupełnienie Etapu 1: migracja `consents` — kolumny zgód w `profiles` (D42), wersje dokumentów w `settings`, usunięcie wymogu `fiscal_code` dla `private` (D43), check SDI/PEC dla `business` (D44). Testy: `tests/rls/consents.test.ts`.
 
 Weryfikacja po `db:push`: konto testowe `cliente` i `padroncino` przez rejestrację; sprawdzenie, że rola z metadanych `admin` daje `cliente`, że użytkownik nie zmieni `role`/`status`, że nie widzi cudzych wierszy, że przewoźnik nie czyta cudzego folderu w Storage. Ekrany logowania/rejestracji z rolami — kolejny krok Etapu 1 po migracjach.
 

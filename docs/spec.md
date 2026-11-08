@@ -49,6 +49,11 @@
 | D39 | Rezygnacja przewoźnika z kursu | Przewoźnik nie rezygnuje sam. W PWA przycisk **„Segnala un problema”** przy kursie: powód z listy + opis → zgłoszenie (`order_issues`) widoczne przy zleceniu, powiadomienie dla admina. Admin może odpiąć przewoźnika (zlecenie wraca do `paid`). Etap 4. *(A2)* |
 | D40 | Kwota dla przewoźnika przy anulowaniu | Kwota ustalona przez admina w `cancellation_review` tworzy zwykłą wypłatę: wymaga faktury przewoźnika na tę kwotę, bez wymogu POD, okno liczone od decyzji admina. *(A3)* |
 | D41 | `cancelled` vs `refunded` | Anulowanie (D33) zawsze kończy się `cancelled` (zwrócona kwota w `refunded_cents`). `refunded` = pełny zwrot zlecenia z innego powodu, decyzją admina. *(A4)* |
+| D42 | Zgody prawne | Przy rejestracji dwa osobne checkboxy: „Termini e condizioni” i „Privacy”. W `profiles` zapisujemy `terms_accepted_at` + `terms_version` oraz `privacy_accepted_at` + `privacy_version` (wersja jako tekst, np. `2026-11-01`). Aktualne wersje dokumentów w `settings` (`terms_version`, `privacy_version`), edytowane przez admina. Zgody zapisuje tylko serwer. Wymuszanie ponownej zgody po zmianie wersji — osobna decyzja. |
+| D43 | Rejestracja klienta prywatnego | Nome, cognome, e-mail, hasło, telefon opcjonalny. **Codice fiscale i adres do faktury** zbierane w kroku „Riepilogo” przed płatnością (Etap 2/3); serwer nie tworzy sesji Checkout dla `private` bez codice fiscale. W bazie brak wymogu `fiscal_code` dla `private`. |
+| D44 | Rejestracja firmy (cliente azienda) | Nome, cognome, e-mail, hasło, telefon opcjonalny + ragione sociale, P.IVA oraz **codice SDI lub PEC** (co najmniej jedno; check w bazie). Adres do faktury w „Riepilogo”. |
+| D45 | Rejestracja przewoźnika | Nome, cognome, e-mail, hasło, telefon (wymagany; weryfikacja SMS w Etapie 4) + ragione sociale, P.IVA, codice fiscale, adres siedziby (via, città, CAP, provincia), PEC lub codice SDI. Dokumenty, pojazdy i Stripe Connect w Etapie 4. Konto startuje jako `pending_review`. |
+| D46 | Trasy kont i ochrona | `/registrati`, `/accedi`, `/password-dimenticata`, `/reimposta-password`, `/auth/confirm`, `/account-sospeso`; panele `/cliente`, `/padroncino`, `/admin`. Kontrola dostępu po stronie serwera w każdej stronie (DAL), proxy tylko optymistycznie (brak sesji → `/accedi`). Zła rola → własny panel; zablokowany → „Account sospeso”; przewoźnik nieaktywny → ekran „Account in attesa di verifica”. |
 
 ## 1. Słownik
 
@@ -188,8 +193,8 @@ Kroki (pasek postępu, cena na żywo w panelu bocznym / dolnym na mobile):
 3. **Merce e veicolo** — opis towaru, liczba sztuk, wymiary/waga orientacyjnie, wybór typu pojazdu.
 4. **Servizi extra** — piętro i winda na odbiorze/dostawie, liczba tragarzy, pakowanie, magazyn (typ, liczba dni/palet).
 5. **Contatti** — dane osoby kontaktowej przy odbiorze i dostawie (imię, telefon), notatki.
-6. **Riepilogo** — rozbicie ceny wg typu klienta (D3), dane do faktury (osoba prywatna: codice fiscale; firma: ragione sociale, P.IVA, codice SDI/PEC), akceptacja regulaminu.
-7. **Account** — logowanie lub rejestracja (wybór Privato/Azienda). Wycena zostaje zachowana; po zalogowaniu cena przeliczana na serwerze i, jeśli typ klienta się zmienił, pokazywana ponownie.
+6. **Riepilogo** — rozbicie ceny wg typu klienta (D3), dane do faktury (osoba prywatna: codice fiscale + adres — wymagane tu, bo nie ma ich przy rejestracji, D43; firma: adres, dane z rejestracji do sprawdzenia/zmiany, D36, D44), akceptacja regulaminu.
+7. **Account** — logowanie lub rejestracja (wybór Privato/Azienda; pola wg D43/D44). Wycena zostaje zachowana; po zalogowaniu cena przeliczana na serwerze i, jeśli typ klienta się zmienił, pokazywana ponownie.
 8. **Pagamento** — przekierowanie do Stripe Checkout → strona „Grazie” (status czeka na webhook, odświeża się przez Realtime).
 
 Kroki 1–6 (wycena) dostępne bez logowania; konto jest obowiązkowe przed płatnością (D8). Brak zamówień jako gość. Kreator niezalogowanego użytkownika trzymany po stronie klienta (localStorage), zlecenie w bazie powstaje dopiero po zalogowaniu.

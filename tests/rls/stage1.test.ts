@@ -28,7 +28,7 @@ beforeAll(async () => {
     service.from("profiles").update({ is_blocked: true }).eq("id", blocked.id),
     service.from("customers").insert([
       { profile_id: clienteA.id, customer_type: "private", fiscal_code: "RSSMRA80A01H501U" },
-      { profile_id: clienteB.id, customer_type: "business", company_name: "Beta Srl", vat_number: vat() },
+      { profile_id: clienteB.id, customer_type: "business", company_name: "Beta Srl", vat_number: vat(), sdi_code: "M5UXCR1" },
       { profile_id: blocked.id, customer_type: "private", fiscal_code: "BLCKDU80A01H501U" },
     ]),
     service.from("carriers").insert([
