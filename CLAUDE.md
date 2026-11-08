@@ -105,6 +105,15 @@ Uwagi techniczne:
     - Panel Supabase: szablony e-mail używają `{{ .RedirectTo }}?token_hash=…&type=email|recovery`; każdy adres aplikacji (localhost, Vercel) musi być w Redirect URLs jako `…/auth/confirm`.
     - Wymuszony jasny motyw (`globals.css`); tryb ciemny przy pracy nad wyglądem.
 - [ ] 2. Silnik cenowy, kreator rezerwacji, strona publiczna
+  - [x] **2a. Silnik cenowy** (D47–D63): migracje `pricing` i `service_area_holidays`; `calculatePrice()` / `storageCost()` w `src/lib/pricing/` (czyste, z testami), `loadPricingConfig()` (serwer); adapter Google Maps `src/lib/maps/` (tylko serwer) + `/api/maps/autocomplete`, `/api/maps/place`; panele admina `/admin/listini`, `/admin/veicoli`, `/admin/area-di-servizio`, `/admin/festivita`; testy RLS `tests/rls/pricing.test.ts`.
+    - Pamiętać:
+      - Cennik tylko admin (D59) — publiczna wycena czyta go klientem service role przez `loadPricingConfig(createServiceClient())`.
+      - Opublikowanego cennika nie da się edytować (trigger, także service role); zmiana = „Crea bozza” → edycja → „Pubblica”.
+      - Wszystkie prowincje są nieaktywne — bez włączenia regionu w „Area di servizio” każda wycena zwraca `pickup_province`.
+      - Stawki wersji 1 to placeholdery. Test RLS publikacji tworzy przy każdym uruchomieniu nową aktywną kopię listy (numer wersji rośnie).
+      - `/api/maps/*` są publiczne — przed produkcją dodać rate limiting.
+  - [ ] **2b. Kreator rezerwacji** — warunek ukończenia: zielone testy RLS zleceń (D63); odcinki zlecenia wg D47; ważność wyceny D62.
+  - [ ] **2c. Strona publiczna**
   - **Przed Etapem 3:** Kupić domenę, skonfigurować Resend (DNS SPF/DKIM), podpiąć SMTP w Supabase i podnieść Rate Limits.
 - [ ] 3. Płatność klienta (Stripe Checkout + webhook)
 - [ ] 4. PWA przewoźnika (rejestracja, Stripe Connect, kursy, realizacja, GPS, faktura)
