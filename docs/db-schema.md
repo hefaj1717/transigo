@@ -256,114 +256,142 @@ PK `(price_list_id, code)`. Check: dokładnie jedno z `amount_cents` / `percent_
 `id`, `name text`, `email text`, `phone text`, `pickup_address text`, `delivery_address text`, `distance_m integer`, `reason out_of_area_reason`, `message text`, `handled_at timestamptz`, `handled_by uuid`, `created_at`.
 **RLS:** brak bezpośredniego zapisu z przeglądarki. Formularz wysyła dane do route handlera (walidacja + rate limit + e-mail do admina), a ten zapisuje przez serwer. Odczyt i obsługa: admin.
 
+#### `quotes` — wyceny kreatora (D76)
+`id uuid` PK, `price_list_id uuid` FK → `price_lists` on delete cascade, `customer_type customer_type not null`, `input jsonb not null` (dane kreatora + miejsca i trasy rozwiązane przez serwer), `quote jsonb not null` (pełny `Quote`, z kwotami przewoźnika), `created_at`, `valid_until timestamptz not null` (`created_at + settings.quote_valid_minutes`).
+Indeks: `(created_at)` do czyszczenia (> 24 h usuwa serwer).
+**RLS:** włączone, bez polityk; rolom `anon`/`authenticated` odebrane wszystkie uprawnienia — tylko service role. Przeglądarka zna tylko `id`.
+
 ### 3.3 Zlecenia
 
-#### `orders`
+> **Model zleceń wg D77 (Etap 2b).** RLS działa na wiersze, więc dane zlecenia są podzielone wg tego, kto je widzi: wspólne (`orders`, `order_legs`, `order_status_history`), cena klienta (`order_charges`, `order_lines`) i kwoty przewoźnika (`order_leg_carrier_terms`). Zlecenie tworzy wyłącznie `create_order(jsonb)` (sekcja 4) — rolom API (`anon`, `authenticated`, `service_role`) odebrano `INSERT` na wszystkich tych tabelach oraz `UPDATE/DELETE` na tabelach podrzędnych.
+
+#### `orders` — dane wspólne (klient, przypisany przewoźnik, admin)
 | Kolumna | Typ | Uwagi |
 |---|---|---|
 | `id` | `uuid` PK | |
-| `order_number` | `text` unique not null | 🔒 np. `TG-2026-000123` (sekwencja) |
-| `customer_id` | `uuid` FK → `customers` not null | |
-| `status` | `order_status` not null default `draft` | 🔒 |
-| `customer_type` | `customer_type` not null | 🔒 snapshot z chwili wyceny |
-| **Trasa** | | |
-| `pickup_address`, `delivery_address` | `text` not null | pełny adres |
-| `pickup_place_id`, `delivery_place_id` | `text` | Google Place ID |
-| `pickup_lat`, `pickup_lng`, `delivery_lat`, `delivery_lng` | `double precision` not null | |
-| `pickup_city`, `delivery_city` | `text` not null | do zanonimizowanej listy kursów |
-| `pickup_postal_code`, `delivery_postal_code` | `text` | |
-| `pickup_province`, `delivery_province` | `char(2)` | `pickup_province` musi być w `service_area_provinces` (D13; sprawdza serwer) |
-| `distance_m` | `integer` not null | 🔒 z Google Routes (serwer) |
-| `duration_s` | `integer` | 🔒 |
-| **Termin** | | |
-| `pickup_date` | `date` not null | |
-| `pickup_window_start`, `pickup_window_end` | `timestamptz` not null | |
-| `is_urgent` | `boolean` not null default false | |
-| **Towar i pojazd** | | |
-| `vehicle_type_id` | `uuid` FK → `vehicle_types` not null | |
+| `order_number` | `text` unique not null | 🔒 `TG-RRRR-NNNNNN` (D71), trigger przy wstawieniu, niezmienny |
+| `customer_id` | `uuid` FK → `customers` not null, on delete restrict | niezmienny (D77) |
+| `status` | `order_status` not null default `pending_payment` | 🔒 (D77: w 2b zapis od razu jako `pending_payment`) |
+| `vehicle_type_id` | `uuid` FK → `vehicle_types` not null | ten sam typ dla wszystkich odcinków |
+| `pickup_window_start` | `timestamptz` not null | 🔒 kopia z odcinka 0 (punkt odniesienia D33), ustawia `create_order` |
+| **Towar** | | |
 | `goods_description` | `text` not null | |
-| `items_count` | `integer` | |
-| `weight_kg` | `integer` | orientacyjnie |
+| `items_count`, `weight_kg` | `integer` check > 0 | orientacyjnie |
 | `goods_dimensions_note` | `text` | |
-| **Usługi extra** | | |
-| `pickup_floor`, `delivery_floor` | `smallint` default 0 | |
-| `pickup_has_elevator`, `delivery_has_elevator` | `boolean` | |
-| `porter_package_code` | `porter_package_code` | null = bez tragarzy (D67) |
-| `porters_count` | `smallint` not null default 0 | ≥ osób z kategorii |
-| `porters_included_hours`, `porter_overtime_rate_cents`, `porter_overtime_grace_minutes` | | snapshot warunków z `Quote.porters` (D68) |
-| `porters_worked_minutes` | `integer` | Etap 4: załadunek + rozładunek, bez jazdy (D69) |
+| **Usługi** | | tragarze per odcinek — w `order_legs` (D74) |
 | `packing_items_count` | `integer` not null default 0 | 0 = bez pakowania |
 | `storage_type` | `storage_type` | null = bez magazynu |
 | `storage_billing_unit` | `storage_billing_unit` | |
-| `storage_days` | `integer` | |
-| `storage_pallets` | `integer` | |
+| `storage_days` | `integer` check ≥ 0 | 0 = transbordo |
+| `storage_pallets` | `integer` check > 0 | wymagane przy `pallet_day` |
+| `warehouse_id` | `uuid` FK → `warehouses` | wymagane, gdy jest magazyn (D72) |
 | **Kontakty** | | |
-| `pickup_contact_name`, `pickup_contact_phone`, `delivery_contact_name`, `delivery_contact_phone` | `text` not null | |
+| `pickup_contact_name`, `pickup_contact_phone`, `delivery_contact_name`, `delivery_contact_phone` | `text` not null | odbiór w A / dostawa do B |
 | `customer_notes` | `text` | |
-| **Fakturowanie (snapshot)** | | |
-| `billing_details` | `jsonb` not null | 🔒 kopia danych z `customers` w chwili zamówienia (CF / P.IVA / SDI / PEC / adres) |
-| `terms_accepted_at` | `timestamptz` not null | |
-| **Cena (snapshot)** | | |
-| `price_list_id` | `uuid` FK → `price_lists` not null | 🔒 wersja cennika |
-| `subtotal_cents` | `integer` not null check ≥ 0 | 🔒 netto |
-| `vat_cents` | `integer` not null check ≥ 0 | 🔒 |
-| `total_cents` | `integer` not null check ≥ 0 | 🔒 brutto = kwota w Stripe |
-| `carrier_amount_cents` | `integer` not null check ≥ 0 | 🔒 suma `order_lines.carrier_amount_cents` |
-| `refunded_cents` | `integer` not null default 0 | 🔒 suma udanych zwrotów |
 | **Realizacja** | | |
-| `carrier_id` | `uuid` FK → `carriers`, null | 🔒 przypisuje `accept_job()` lub admin |
+| `carrier_id` | `uuid` FK → `carriers`, null, on delete restrict | 🔒 przypisanie per zlecenie (D75) |
 | `carrier_vehicle_id` | `uuid` FK → `carrier_vehicles`, null | 🔒 |
-| `assigned_at`, `picked_up_at`, `in_transit_at`, `delivered_at`, `completed_at`, `cancelled_at` | `timestamptz` | 🔒 |
-| `paid_at` | `timestamptz` | 🔒 tylko z webhooka Stripe |
-| `cancel_reason` | `text` | 🔒 |
-| `cancellation_requested_at` | `timestamptz` | 🔒 zgłoszenie anulowania przez klienta (D33) |
-| `cancellation_requested_by` | `uuid` FK → `profiles` | 🔒 |
-| `cancellation_fee_cents` | `integer` check ≥ 0 | 🔒 opłata zatrzymana przez Transigo (późne anulowanie / decyzja admina) |
-| `cancellation_carrier_amount_cents` | `integer` check ≥ 0 | 🔒 kwota dla przewoźnika ustalona przez admina w `cancellation_review` (domyślnie brak) |
-| `cancellation_decided_by`, `cancellation_decided_at` | | 🔒 decyzja admina |
-| `tracking_token` | `text` unique | 🔒 publiczny link trackingu (W8) |
+| `paid_at`, `assigned_at`, `picked_up_at`, `in_transit_at`, `delivered_at`, `completed_at`, `cancelled_at` | `timestamptz` | 🔒 (`paid_at` tylko z webhooka Stripe) |
+| `tracking_token` | `text` unique | 🔒 (D24) |
 | `created_at`, `updated_at` | | |
 
-Indeksy: `(customer_id, created_at desc)`, `(carrier_id, status)`, `(status, pickup_date)` dla listy dostępnych kursów, `(status, paid_at)` dla alertu „bez przewoźnika”, `unique(tracking_token)`.
-Checki: `paid_at is not null` gdy status ∈ {`paid` … `completed`}; `carrier_id is not null` gdy status ∈ {`assigned`, `picked_up`, `in_transit`, `delivered`, `completed`, `cancellation_review`}.
-Anulowanie (D33) realizuje serwer: route handler liczy opłatę wg `settings`, wykonuje zwrot w Stripe i zapisuje status.
-**RLS:**
-- **cliente:** `select` swoich zleceń (`customer_id = auth.uid()`). Bez bezpośredniego `insert/update`: zlecenie tworzy i aktualizuje serwer, bo cena musi pochodzić z serwera (W3).
-- **padroncino:** `select` zleceń, w których `carrier_id = auth.uid()`. Kursów `paid` nieprzypisanych **nie** widzi w tej tabeli, tylko przez funkcję `available_jobs()` (sekcja 4). Zmiany statusów robi wyłącznie przez RPC.
-- **admin:** `select` wszystkiego; zmiany przez serwer (panel admina → route handler).
+Kolumny anulowania (`cancel_reason`, `cancellation_requested_*`, `cancellation_decided_*`, `cancellation_fee_cents` → `order_charges`, `cancellation_carrier_amount_cents` → tabela przewoźnika) dochodzą z funkcją anulowania w Etapie 3 (D77).
+Indeksy: `(customer_id, created_at desc)`, `(carrier_id, status)`, `(status, pickup_window_start)`.
+Checki: magazyn — `storage_type`, `storage_billing_unit`, `storage_days`, `warehouse_id` wszystkie albo żadne, `storage_pallets` przy `pallet_day`; `paid_at is not null` gdy status ∈ {`paid` … `completed`}; `carrier_id is not null` gdy status ∈ {`assigned`, `picked_up`, `in_transit`, `delivered`, `completed`, `cancellation_review`}. Liczba odcinków (1 bez magazynu, 2 z magazynem) — sprawdza `create_order`.
+Triggery: `order_number`; `order_number`, `customer_id`, `created_at` niezmienne; `DELETE` tylko dla `draft`/`pending_payment`/`expired` (także service role) — kaskadowo usuwa tabele podrzędne.
+**RLS:** cliente `select` swoich (`customer_id = auth.uid()`); padroncino `select` przypisanych (`carrier_id = auth.uid()`; kursy dostępne tylko przez `available_jobs()`, Etap 4); admin `select` wszystkiego. Brak zapisu z przeglądarki; zmiany statusu robi serwer / RPC.
 
-#### `order_lines` — rozbicie ceny (snapshot)
+#### `order_legs` — odcinki zlecenia (D47; dane wspólne)
+| Kolumna | Typ | Uwagi |
+|---|---|---|
+| `order_id` | `uuid` FK → `orders` on delete cascade | |
+| `leg_index` | `smallint` check 0–1 | PK `(order_id, leg_index)` |
+| `pickup_address`, `delivery_address` | `text` not null | pełny adres (strona magazynu: adres magazynu) |
+| `pickup_place_id`, `delivery_place_id` | `text` | |
+| `pickup_lat`, `pickup_lng`, `delivery_lat`, `delivery_lng` | `double precision` not null | |
+| `pickup_city`, `delivery_city` | `text` not null | do zanonimizowanej listy kursów |
+| `pickup_postal_code`, `delivery_postal_code` | `text` | |
+| `pickup_province` | `char(2)` not null | w obszarze obsługi (D13, D61; sprawdza serwer) |
+| `delivery_province` | `char(2)` | |
+| `pickup_warehouse_id`, `delivery_warehouse_id` | `uuid` FK → `warehouses`, null | która strona odcinka to magazyn |
+| `distance_m`, `duration_s` | `integer` | 🔒 z Google Routes (serwer); `distance_m` not null > 0 |
+| `pickup_date` | `date` not null | data okna w Europe/Rome |
+| `pickup_window_start`, `pickup_window_end` | `timestamptz` not null | D73, `end > start` |
+| `pickup_floor`, `delivery_floor` | `smallint` not null default 0, 0–20 | D53 |
+| `pickup_has_elevator`, `delivery_has_elevator` | `boolean` not null default false | |
+| `is_urgent` | `boolean` not null | 🔒 z silnika (D49) |
+| `porter_package_code` | `porter_package_code` | null = bez tragarzy na tym odcinku (D74) |
+| `porters_count` | `smallint` not null default 0, 0–4 | |
+| `porters_included_hours` | `smallint` 1–8 | snapshot `Quote.porters[]` (D68) |
+| `porter_overtime_grace_minutes` | `smallint` 0–120 | snapshot (D68) |
+| `porters_worked_minutes` | `integer` ≥ 0 | Etap 4 (D69) — jedyne pole zmienne |
+
+Check: kolumny tragarzy wszystkie albo żadne (`porters_count ≥ 1` przy kategorii). Stawka nadgodzin to cena klienta → `order_charges`; udział przewoźnika → `order_leg_carrier_terms`.
+**RLS:** jak `orders` (przez istnienie widocznego zlecenia). Wszystkie pola 🔒 i niezmienne poza `porters_worked_minutes`.
+
+#### `order_charges` — cena klienta (1:1, klient + admin)
+| Kolumna | Typ | Uwagi |
+|---|---|---|
+| `order_id` | `uuid` PK FK → `orders` on delete cascade | |
+| `price_list_id` | `uuid` FK → `price_lists` not null, restrict | 🔒 wersja cennika |
+| `price_list_version` | `integer` not null | 🔒 |
+| `customer_type` | `customer_type` not null | 🔒 snapshot (D3) |
+| `vat_rate_bp` | `integer` not null | 🔒 |
+| `subtotal_cents`, `vat_cents`, `total_cents` | `integer` not null ≥ 0, `total = subtotal + vat` | 🔒 `total` = kwota w Stripe |
+| `porter_overtime_rate_cents` | `integer` ≥ 0 | 🔒 cena za osobę za rozpoczętą godzinę (D68); null = bez tragarzy lub reguła wyłączona |
+| `refunded_cents` | `integer` not null default 0, ≤ `total` | 🔒 jedyne pole zmienne (Etap 3) |
+| `billing_details` | `jsonb` not null | 🔒 snapshot danych do faktury (D36, D43, D44) |
+| `terms_accepted_at`, `terms_version` | `timestamptz`, `text` not null | |
+| `quoted_at` | `timestamptz` not null | czas wyceny użytej w zleceniu |
+| `created_at`, `updated_at` | | |
+
+**RLS:** cliente `select` swoich, admin wszystko; przewoźnik **brak** (D29).
+
+#### `order_lines` — rozbicie ceny klienta (snapshot; klient + admin)
 | Kolumna | Typ | Uwagi |
 |---|---|---|
 | `id` | `uuid` PK | |
 | `order_id` | `uuid` FK → `orders` on delete cascade | |
+| `sort_order` | `smallint` not null | unique `(order_id, sort_order)` |
+| `leg_index` | `smallint` | null = magazyn |
 | `line_type` | `order_line_type` not null | |
 | `label_it` | `text` not null | tekst na fakturze / w podsumowaniu |
-| `quantity` | `integer` not null default 1 | km, piętra, osobogodziny, dni… |
-| `unit_amount_cents` | `integer` | |
-| `amount_cents` | `integer` not null check ≥ 0 | netto, już zaokrąglone |
+| `quantity` | `integer` not null > 0 | km, piętra, osobogodziny, dni… |
+| `unit_amount_cents` | `integer` ≥ 0 | |
+| `net_cents`, `vat_cents`, `gross_cents` | `integer` not null ≥ 0, `gross = net + vat` | IVA per pozycja (D56) |
 | `carrier_share_group` | `carrier_share_group` not null | |
-| `carrier_amount_cents` | `integer` not null default 0 check ≥ 0 | część przewoźnika z tej pozycji |
-| `sort_order` | `smallint` | |
 
-Indeks: `(order_id)`. Wszystkie pola są 🔒 (wiersze zapisuje serwer razem z zamówieniem i nie zmienia ich później).
-**RLS:** cliente czyta pozycje swoich zleceń. Padroncino czyta pozycje przypisanych zleceń, ale z jego perspektywy liczy się `carrier_amount_cents`; patrz W13. Admin czyta wszystko.
+Wszystkie pola 🔒, niezmienne. `create_order` sprawdza, że sumy pozycji = `order_charges`.
+**RLS:** cliente czyta pozycje swoich zleceń, admin wszystko; przewoźnik **brak** (D29 zastępuje W13 — kwoty przewoźnika są w `order_leg_carrier_terms`).
+
+#### `order_leg_carrier_terms` — kwoty przewoźnika per odcinek (przewoźnik + admin)
+| Kolumna | Typ | Uwagi |
+|---|---|---|
+| `order_id`, `leg_index` | PK, FK → `order_legs` on delete cascade | |
+| `carrier_amount_cents` | `integer` not null ≥ 0 | = transport + tragarze + pakowanie odcinka |
+| `transport_carrier_cents`, `porters_carrier_cents`, `packing_carrier_cents` | `integer` not null default 0 ≥ 0 | grupy D57 |
+| `porter_share_kind` | `text` (`percent` / `ratio`) | udział dla nadgodzin (D68); null = bez tragarzy lub udział wyłączony |
+| `porter_share_bp` | `integer` | dla `percent` |
+| `porter_share_carrier_cents`, `porter_share_net_cents` | `integer` | dla `ratio` (reguła `fixed`) |
+
+Kwota przewoźnika za zlecenie = suma po odcinkach. Wszystkie pola 🔒, niezmienne.
+**RLS:** padroncino czyta wiersze przypisanych zleceń, admin wszystko; klient **brak**.
 
 #### `order_status_history`
 | Kolumna | Typ | Uwagi |
 |---|---|---|
 | `id` | `bigint` identity PK | |
-| `order_id` | `uuid` FK → `orders` | |
-| `from_status` | `order_status` | |
+| `order_id` | `uuid` FK → `orders` on delete cascade | |
+| `from_status` | `order_status` | null przy utworzeniu |
 | `to_status` | `order_status` not null | |
-| `changed_by` | `uuid` FK → `profiles`, null | null = system / webhook |
+| `changed_by` | `uuid` FK → `profiles`, null, on delete set null | null = system / webhook |
 | `source` | `status_source` not null | |
-| `reason` | `text` | wymagany przy zmianie przez admina |
+| `note` | `text` | widoczna dla stron zlecenia; wewnętrzne powody admina → `audit_log` (D77) |
 | `lat`, `lng` | `double precision` | GPS przy zmianie przez przewoźnika |
 | `created_at` | `timestamptz` | |
 
-Indeks: `(order_id, created_at)`. Tylko 🔒 insert, wpisy nigdy nie są edytowane ani usuwane.
-**RLS:** cliente czyta historię swoich zleceń (bez `reason` z panelu admina, przez widok), padroncino historię przypisanych, admin wszystko.
+Indeks: `(order_id, created_at)`. Append-only (trigger odrzuca `UPDATE`, rolom API odebrano `INSERT/UPDATE/DELETE`; wpisy dodają funkcje `SECURITY DEFINER`).
+**RLS:** jak `orders`.
 
 #### `order_internal_notes` — notatki wewnętrzne admina
 `id`, `order_id` FK, `author_id` FK → `profiles`, `body text`, `created_at`. **RLS:** tylko admin.
@@ -545,8 +573,9 @@ Dzięki tej tabeli potrącenie większe niż wypłata można rozbić na kilka wy
 
 ### 3.6 Magazyn (D9)
 
-#### `warehouses`
-`id`, `name text`, `street`, `city`, `postal_code`, `province char(2)`, `is_active boolean`, `created_at`, `updated_at`.
+#### `warehouses` (tworzona w Etapie 2b — D72)
+`id`, `name text not null`, `address text not null` (pełny adres z Google), `street`, `city text not null`, `postal_code`, `province char(2) not null`, `place_id text`, `lat`, `lng double precision not null`, `is_active boolean not null default false`, `created_at`, `updated_at`.
+Indeks częściowy `unique (is_active) where is_active` — w MVP najwyżej jeden aktywny magazyn (do usunięcia przy kolejnych magazynach).
 **RLS:** admin CRUD; reszta brak (adres magazynu w kreatorze podaje serwer).
 
 #### `storage_items` — pozycja składowana
@@ -590,6 +619,7 @@ Indeks: `(entity_type, entity_id, created_at)`.
 
 | Obiekt | Typ | Kto | Co robi |
 |---|---|---|---|
+| `create_order(payload jsonb)` | funkcja `SECURITY DEFINER` | tylko `service_role` (serwer) | W jednej transakcji tworzy `orders`, `order_legs`, `order_charges`, `order_lines`, `order_leg_carrier_terms` i wpis historii `→ pending_payment` (`customer_app`). Sprawdza: 1–2 odcinki z kolejnymi indeksami, magazyn ⇔ 2 odcinki, sumy pozycji = sumy `order_charges`, `total = subtotal + vat`, tragarze odcinka ⇔ pozycja `porters` tego odcinka, `carrier_amount = suma grup`. Zwraca `id` i `order_number` (D77). |
 | `available_jobs()` | funkcja `SECURITY DEFINER` → tabela | aktywny przewoźnik | Zwraca zlecenia `paid` bez przewoźnika, których typ pojazdu ma `size_rank` ≤ największego `size_rank` wśród jego aktywnych, zatwierdzonych pojazdów (D22). Kwota = `carrier_amount_cents` zlecenia (wg typu ze zlecenia, nie pojazdu przewoźnika). Pola: `id`, miasto i prowincja odbioru/dostawy, data i okno, `distance_m`, typ pojazdu, flagi usług extra (piętra, tragarze, pakowanie), `carrier_amount_cents`. **Bez** adresów, nazwisk, telefonów i cen klienta. |
 | `accept_job(order_id)` | funkcja `SECURITY DEFINER` | aktywny przewoźnik | Atomowo: `update orders set carrier_id = auth.uid(), status = 'assigned' … where id = $1 and status = 'paid' and carrier_id is null returning …`. 0 wierszy → „Corsa già assegnata”. Zapisuje historię statusu. |
 | `set_order_status(order_id, to_status, lat, lng)` | funkcja `SECURITY DEFINER` | przypisany przewoźnik | Tylko przejścia `assigned→picked_up` (wymaga zdjęcia `pickup`) i `picked_up→in_transit`. |
@@ -626,9 +656,11 @@ R = odczyt, W = zapis bezpośredni z aplikacji (z RLS), S = zapis tylko przez se
 | `price_lists`, `price_list_vehicle_rates`, `price_rules`, `price_list_porter_packages` | — | — | R/W (draft) — D59 |
 | `settings`, `message_templates` | — | — | R/W |
 | `out_of_area_requests` | — (S przez formularz) | — | R/W |
-| `orders` | R własne, S | R przypisane, S (RPC) | R, S |
-| `order_lines` | R własne | R przypisane | R |
+| `orders`, `order_legs` | R własne, S | R przypisane, S (RPC) | R, S |
+| `order_charges`, `order_lines` | R własne | — (D29) | R |
+| `order_leg_carrier_terms` | — | R przypisane | R |
 | `order_status_history` | R własne | R przypisane | R |
+| `quotes` | — | — | — (tylko service role) |
 | `order_internal_notes` | — | — | R/W |
 | `order_photos` | R własne, W `claim` | R/W przypisane (`pickup`/`delivery`) | R/W |
 | `delivery_proofs` | R własne | R, S (RPC) | R |
@@ -640,7 +672,7 @@ R = odczyt, W = zapis bezpośredni z aplikacji (z RLS), S = zapis tylko przez se
 | `customer_invoices` | R własne | — | R, S |
 | `carrier_invoices` | — | R + insert własne | R, S |
 | `payouts`, `payout_adjustments`, `payout_adjustment_settlements`, `deduction_documents` | — | R własne | R, S |
-| `warehouses` | — | — | R/W |
+| `warehouses` | — | — | R/W (od 2b, D72) |
 | `storage_items` | R własne | — | R/W (bez `paid_until`) |
 | `storage_extensions` | R własne | — | R, S |
 | `notification_log`, `audit_log` | — | — | R |
@@ -666,6 +698,10 @@ erDiagram
     price_lists ||--o{ orders : "snapshot"
     carriers ||--o{ orders : "realizuje"
     orders ||--|{ order_lines : ""
+    orders ||--|{ order_legs : "1–2 (D47)"
+    orders ||--|| order_charges : "cena klienta"
+    order_legs ||--|| order_leg_carrier_terms : "kwoty przewoźnika"
+    warehouses ||--o{ order_legs : ""
     orders ||--o{ order_status_history : ""
     orders ||--o{ order_photos : ""
     orders ||--o| delivery_proofs : "POD"
@@ -722,12 +758,12 @@ Weryfikacja po `db:push`: konto testowe `cliente` i `padroncino` przez rejestrac
 - **Zmiany:** `settings.max_route_distance_m`.
 - **Funkcje:** sekwencja i trigger `order_number`; trigger blokujący edycję cennika `active`/`archived`.
 - **RLS:** odczyt publiczny konfiguracji (typy, prowincje, święta); cennik tylko admin (D59); zlecenia — odczyt własnych, zapis tylko serwer.
-- **Podział:** 2a — migracje `pricing` (enumy cennika, `price_lists`, `price_list_vehicle_rates`, `price_rules`, funkcje `clone_price_list`/`publish_price_list`, wersja 1), `service_area_holidays` (`holidays`, `service_area_provinces`, kolumny `settings`) oraz `pricing_porter_overtime_code` + `pricing_porter_packages` (D67, D68). 2b — zlecenia (`orders` z odcinkami wg D47, `order_lines`, `order_status_history`, `out_of_area_requests`, `customer_addresses`) z testami RLS jako warunkiem ukończenia (D63).
+- **Podział:** 2a — migracje `pricing` (enumy cennika, `price_lists`, `price_list_vehicle_rates`, `price_rules`, funkcje `clone_price_list`/`publish_price_list`, wersja 1), `service_area_holidays` (`holidays`, `service_area_provinces`, kolumny `settings`) oraz `pricing_porter_overtime_code` + `pricing_porter_packages` (D67, D68). 2b — migracje `warehouses` (D72) i `orders` (enumy `order_status`, `status_source`, `order_line_type`, `carrier_share_group`; tabele `orders`, `order_legs`, `order_charges`, `order_lines`, `order_leg_carrier_terms`, `order_status_history`, `quotes`; sekwencja i trigger `order_number`; `create_order()`; triggery niezmienności) wg D74–D77, z testami RLS jako warunkiem ukończenia (D63). `out_of_area_requests` przechodzi do 2c (formularz kontaktowy), `customer_addresses` do panelu klienta.
 
 ### Etap 3 — płatność klienta
 - **Enumy:** `payment_purpose`, `payment_status`, `refund_status`, `notification_channel`.
 - **Tabele:** `payments` (bez `storage_extension_id`), `refunds`, `stripe_events`, `order_internal_notes`, `message_templates` (+ szablony startowe), `notification_log`.
-- Anulowanie (D33) i zwroty — logika w route handlerach, bez nowych tabel.
+- Anulowanie (D33) i zwroty — logika w route handlerach; kolumny anulowania w `orders` / `order_charges` / tabeli przewoźnika (D77).
 
 ### Etap 4 — PWA przewoźnika
 - **Enumy:** `photo_kind`, `carrier_invoice_status`, `order_issue_reason`, `order_issue_status`.
@@ -749,7 +785,7 @@ Weryfikacja po `db:push`: konto testowe `cliente` i `padroncino` przez rejestrac
 
 ### Etap 7 — magazyn i dashboard
 - **Enumy:** `storage_item_status`.
-- **Tabele:** `warehouses` (+ jeden magazyn), `storage_items`, `storage_extensions`; kolumna `payments.storage_extension_id`.
+- **Tabele:** `storage_items`, `storage_extensions`; kolumna `payments.storage_extension_id` (`warehouses` powstaje już w 2b, D72).
 - **Widoki** dashboardu admina (przychód, marża, zlecenia wg statusów, wygasające dokumenty).
 
 ### Etap 8 — testy E2E, prawo, wdrożenie
