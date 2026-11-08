@@ -115,7 +115,15 @@ Uwagi techniczne:
       - Stawki wersji 1 to placeholdery. Na stagingu aktywna jest v9 (kopia v1 z czasów, gdy testy RLS działały w chmurze — treść bez zmian).
       - `/api/maps/*` są publiczne — przed produkcją dodać rate limiting.
       - Tragarze wg kategorii ładunku (D67) i nadgodzin (D68): `porterOvertimeCost()` w `src/lib/pricing/overtime.ts`. Aktywny cennik sprzed D67 nie ma kategorii → tragarze niedostępni do publikacji nowej wersji.
-  - [ ] **2b. Kreator rezerwacji** — warunek ukończenia: zielone testy RLS zleceń (D63); odcinki zlecenia wg D47; ważność wyceny D62; tragarze: wybór kategorii + ewentualnie więcej osób, a kreator jasno pokazuje „Nel prezzo X h di lavoro; ogni ora successiva iniziata Y € a persona” (z `Quote.porters`, D67, D68); zlecenie zapisuje snapshot warunków tragarzy.
+  - [x] **2b. Kreator rezerwacji** (D70–D80): migracje `warehouses`, `orders` (`orders`, `order_legs`, `order_charges`, `order_lines`, `order_leg_carrier_terms`, `order_status_history`, `quotes`, `create_order()`); testy RLS `tests/rls/orders.test.ts`; logika `src/lib/booking/` (czysta + testy) i `server.ts`; `/api/booking/quote`; kreator `/prenota`; `/completa-profilo` (D80); lista zleceń w `/cliente`; `/admin/magazzino`.
+    - Pamiętać:
+      - Dane zlecenia podzielone wg widoczności (D77): klient nie czyta `order_leg_carrier_terms`, przewoźnik nie czyta `order_charges`/`order_lines`. Nowe kolumny dodawać do właściwej grupy.
+      - Zlecenie tworzy tylko `create_order(jsonb)` (service role); payload buduje `buildOrderPayload()`. Snapshot niezmienny (triggery, także service role); usuwać można tylko nieopłacone zlecenia; konta ze zleceniami nie da się usunąć.
+      - Przeglądarka dostaje wycenę tylko przez `toPublicQuote()`; kwoty przewoźnika zostają w `quotes` (tylko service role).
+      - Na stagingu do testów kreatora: opublikować nowy cennik (v9 nie ma kategorii tragarzy), włączyć prowincje w „Area di servizio”, dodać aktywny magazyn w `/admin/magazzino`.
+      - Mapa z trasą w kroku „Percorso” jeszcze nie zrobiona (jest tylko dystans); formularz kontaktowy spoza obszaru → 2c.
+      - Status `pending_payment` w 2b oznacza zapisane zlecenie bez płatności; w Etapie 3 — sesję Checkout (wygaszanie nieopłaconych do zrobienia).
+      - `/api/booking/quote` i `/api/maps/*` publiczne — przed produkcją rate limiting.
   - [ ] **2c. Strona publiczna**
   - **TODO przed Etapem 3** (maile z potwierdzeniem zamówienia): Resend + SMTP dla Supabase Auth, instrukcja w D79 (kupić domenę, DNS SPF/DKIM, klucz API, SMTP w Supabase, Rate Limits).
 - [ ] 3. Płatność klienta (Stripe Checkout + webhook)
