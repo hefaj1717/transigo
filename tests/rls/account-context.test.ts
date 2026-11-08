@@ -39,6 +39,12 @@ beforeAll(async () => {
     { profile_id: fakeAdmin.id, customer_type: "private" },
     { profile_id: blockedCliente.id, customer_type: "private" },
   ]));
+  // A complete customer profile (D80): name + both consents, as written by the sign-up form.
+  await check(service.from("profiles").update({
+    first_name: "Carla", last_name: "Test",
+    terms_accepted_at: new Date().toISOString(), terms_version: "2026-11-01",
+    privacy_accepted_at: new Date().toISOString(), privacy_version: "2026-11-01",
+  }).in("id", [cliente.id, fakeAdmin.id, blockedCliente.id]));
   await check(service.from("carriers").insert([
     ...carriers.map(({ status, user }) => ({ profile_id: user.id, company_name: `T ${status}`, vat_number: vat(), status })),
     { profile_id: blockedCarrier.id, company_name: "T blocked", vat_number: vat(), status: "active" },
@@ -116,5 +122,32 @@ describe("blocked and anonymous", () => {
     for (const area of areas) {
       expect(resolveAreaAccess(ctx, area)).toEqual({ kind: "redirect", to: `/accedi?next=${encodeURIComponent(AREA_HOME[area])}` });
     }
+  });
+});
+
+describe("account created in the Supabase dashboard (D80)", () => {
+  // Add user → Auto Confirm User: no metadata, so the trigger makes a cliente profile without name,
+  // consents or customers row.
+  it("is an incomplete customer, completes the profile and returns to the booking wizard", async () => {
+    const dashboardUser = await createUser({});
+    let ctx = await contextOf(dashboardUser);
+    expect(ctx).toMatchObject({ state: "signed_in", role: "cliente", customerProfile: "incomplete", customerType: null });
+    expect(resolvePostSignIn(ctx, "/prenota?passo=contatti")).toBe(`/completa-profilo?next=${encodeURIComponent("/prenota?passo=contatti")}`);
+    expect(resolveAreaAccess(ctx, "cliente", "/cliente")).toEqual({ kind: "redirect", to: "/completa-profilo?next=%2Fcliente" });
+
+    // What completeCustomerProfile writes (server, service role).
+    await check(service.from("customers").insert({ profile_id: dashboardUser.id, customer_type: "business", company_name: "Delta Srl", vat_number: vat(), sdi_code: "M5UXCR1" }));
+    ctx = await contextOf(dashboardUser);
+    expect(ctx).toMatchObject({ customerProfile: "incomplete", customerType: "business" }); // still no name / consents
+    await check(service.from("profiles").update({
+      first_name: "Dario", last_name: "Test",
+      terms_accepted_at: new Date().toISOString(), terms_version: "2026-11-01",
+      privacy_accepted_at: new Date().toISOString(), privacy_version: "2026-11-01",
+    }).eq("id", dashboardUser.id));
+
+    ctx = await contextOf(dashboardUser);
+    expect(ctx).toMatchObject({ customerProfile: "complete", customerType: "business", firstName: "Dario" });
+    expect(resolvePostSignIn(ctx, "/prenota?passo=contatti")).toBe("/prenota?passo=contatti");
+    expect(resolveAreaAccess(ctx, "cliente")).toEqual({ kind: "allow" });
   });
 });

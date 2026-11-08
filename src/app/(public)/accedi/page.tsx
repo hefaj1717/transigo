@@ -28,9 +28,9 @@ export default function Page({ searchParams }: PageProps<"/accedi">) {
 }
 
 async function Gate({ searchParams }: Pick<PageProps<"/accedi">, "searchParams">) {
-  enforce(resolveGuestPage(await getAccountContext()));
   const sp = await searchParams;
   const next = typeof sp.next === "string" ? sp.next : "";
+  enforce(resolveGuestPage(await getAccountContext(), next)); // signed in already → straight to next
   const errore = typeof sp.errore === "string" ? QUERY_ERRORS[sp.errore] : undefined;
   return <LoginForm next={next} initialError={errore} />;
 }

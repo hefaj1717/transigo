@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   AREA_HOME,
   carrierPanelView,
+  allowedNext,
   resolveAreaAccess,
+  resolveCompleteProfilePage,
   resolveGuestPage,
   resolvePostSignIn,
   resolveResetPasswordPage,
@@ -24,6 +26,8 @@ const user = (role: Role, extra: Partial<SignedIn> = {}): SignedIn => ({
   isBlocked: false,
   firstName: "Test",
   carrierStatus: role === "padroncino" ? "active" : null,
+  customerProfile: role === "cliente" ? "complete" : null,
+  customerType: role === "cliente" ? "private" : null,
   ...extra,
 });
 
@@ -133,5 +137,49 @@ describe("sanitizeNext (open redirect protection)", () => {
   });
   it("normalizes dot segments", () => {
     expect(sanitizeNext("/cliente/../admin")).toBe("/admin");
+  });
+});
+
+describe("customer profile completion (D80)", () => {
+  const incomplete = user("cliente", { customerProfile: "incomplete", customerType: null });
+
+  it("after sign-in an incomplete customer goes to /completa-profilo, keeping the target", () => {
+    expect(resolvePostSignIn(incomplete)).toBe("/completa-profilo?next=%2Fcliente");
+    expect(resolvePostSignIn(incomplete, "/prenota?passo=contatti")).toBe(`/completa-profilo?next=${encodeURIComponent("/prenota?passo=contatti")}`);
+    expect(resolvePostSignIn(incomplete, "/admin")).toBe("/completa-profilo?next=%2Fcliente");
+  });
+
+  it("the customer panel sends an incomplete customer to /completa-profilo with the current page", () => {
+    expect(resolveAreaAccess(incomplete, "cliente", "/cliente/ordini")).toEqual({ kind: "redirect", to: "/completa-profilo?next=%2Fcliente%2Fordini" });
+    expect(resolveAreaAccess(incomplete, "admin")).toEqual({ kind: "redirect", to: "/cliente" });
+  });
+
+  it("guest pages send an incomplete customer to /completa-profilo too", () => {
+    expect(resolveGuestPage(incomplete, "/prenota")).toEqual({ kind: "redirect", to: "/completa-profilo?next=%2Fprenota" });
+  });
+
+  it("/completa-profilo: only an incomplete customer stays; a complete one continues to next", () => {
+    expect(resolveCompleteProfilePage(incomplete, "/prenota")).toEqual({ kind: "allow" });
+    expect(resolveCompleteProfilePage(user("cliente"), "/prenota?passo=contatti")).toEqual({ kind: "redirect", to: "/prenota?passo=contatti" });
+    expect(resolveCompleteProfilePage(user("cliente"), "https://evil.example")).toEqual({ kind: "redirect", to: "/cliente" });
+    expect(resolveCompleteProfilePage(user("padroncino"))).toEqual({ kind: "redirect", to: "/padroncino" });
+    expect(resolveCompleteProfilePage(user("admin"))).toEqual({ kind: "redirect", to: "/admin" });
+    expect(resolveCompleteProfilePage(user("cliente", { isBlocked: true, customerProfile: "incomplete" }))).toEqual({ kind: "redirect", to: "/account-sospeso" });
+    expect(resolveCompleteProfilePage(anonymous)).toEqual({ kind: "redirect", to: "/accedi?next=%2Fcompleta-profilo" });
+    expect(resolveCompleteProfilePage(noProfile).kind).toBe("redirect");
+  });
+});
+
+describe("next to the booking wizard (D70)", () => {
+  it("customers may return to /prenota after sign-in; other roles may not", () => {
+    expect(resolvePostSignIn(user("cliente"), "/prenota?passo=account")).toBe("/prenota?passo=account");
+    expect(resolvePostSignIn(user("padroncino"), "/prenota")).toBe("/padroncino");
+    expect(resolvePostSignIn(user("admin"), "/prenota")).toBe("/admin");
+    expect(allowedNext(user("cliente"), "/prenotazioni")).toBeNull();
+    expect(allowedNext(user("cliente"), "//evil.example/prenota")).toBeNull();
+  });
+
+  it("a signed-in customer opening /accedi?next=/prenota goes straight back to the wizard", () => {
+    expect(resolveGuestPage(user("cliente"), "/prenota")).toEqual({ kind: "redirect", to: "/prenota" });
   });
 });

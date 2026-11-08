@@ -10,10 +10,12 @@ import { getAppUrl } from "@/lib/supabase/env";
 import { loadAccountContext } from "./account-context";
 import { AUTH_MSG, authErrorMessage, isVatTakenError } from "./errors";
 import { echoValues, type FormState } from "./form-state";
-import { PATHS, resolvePostSignIn, resolveResetPasswordPage } from "./routing";
+import { allowedNext, AREA_HOME, PATHS, resolveCompleteProfilePage, resolvePostSignIn, resolveResetPasswordPage } from "./routing";
 import {
   carrierRegistrationSchema,
+  customerProfileCompletionSchema,
   customerRegistrationSchema,
+  existingCustomerProfileSchema,
   forgotPasswordSchema,
   formDataToObject,
   resetPasswordSchema,
@@ -261,4 +263,71 @@ export async function updatePassword(_prev: FormState, formData: FormData): Prom
     return { errors: { _form: message } };
   }
   redirect(resolvePostSignIn(ctx));
+}
+
+// ---------------------------------------------------------------------------
+// Customer profile completion (D80)
+// ---------------------------------------------------------------------------
+
+/**
+ * Completes a customer account that was created without the sign-up form (e.g. Supabase dashboard →
+ * Add user → Auto Confirm User): customers row (only if missing — the type never changes), name, phone and
+ * consents (D42). Everything is written by the server; then the user continues to `next` (panel or wizard).
+ */
+export async function completeCustomerProfile(_prev: FormState, formData: FormData): Promise<FormState> {
+  const ctx = await getAccountContext();
+  const input = formDataToObject(formData);
+  const access = resolveCompleteProfilePage(ctx, input.next);
+  if (access.kind === "redirect") redirect(access.to);
+  if (ctx.state !== "signed_in") redirect(PATHS.signIn); // narrowed above; keeps TypeScript happy
+
+  const values = echoValues(input);
+  const service = createServiceClient();
+  const hasCustomerRow = ctx.customerType !== null;
+
+  const parsedProfile = existingCustomerProfileSchema.safeParse(input);
+  const parsedNew = hasCustomerRow ? null : customerProfileCompletionSchema.safeParse(input);
+  if (parsedNew && !parsedNew.success) return { errors: toFieldErrors(parsedNew.error), values };
+  if (!parsedProfile.success) return { errors: toFieldErrors(parsedProfile.error), values };
+  const d = parsedProfile.data;
+
+  const { data: settings, error: settingsError } = await service.from("settings").select("terms_version, privacy_version").single();
+  if (settingsError || !settings) {
+    logError("completeProfile: settings", settingsError);
+    return { errors: { _form: AUTH_MSG.generic }, values };
+  }
+
+  if (parsedNew?.success) {
+    const c = parsedNew.data;
+    const { error } = await service.from("customers").insert(
+      c.customerType === "business"
+        ? { profile_id: ctx.userId, customer_type: "business", company_name: c.companyName, vat_number: c.vatNumber, sdi_code: c.sdiCode ?? null, pec: c.pec ?? null }
+        : { profile_id: ctx.userId, customer_type: "private" }, // CF and billing address in "Riepilogo" (D43)
+    );
+    if (error) {
+      if (isVatTakenError(error)) return { errors: { vatNumber: AUTH_MSG.vatTaken }, values };
+      logError("completeProfile: insert customers", error);
+      return { errors: { _form: AUTH_MSG.generic }, values };
+    }
+  }
+
+  const now = new Date().toISOString();
+  const { error: profileError } = await service
+    .from("profiles")
+    .update({
+      first_name: d.firstName,
+      last_name: d.lastName,
+      phone: d.phone ?? null,
+      terms_accepted_at: now,
+      terms_version: settings.terms_version,
+      privacy_accepted_at: now,
+      privacy_version: settings.privacy_version,
+    })
+    .eq("id", ctx.userId);
+  if (profileError) {
+    logError("completeProfile: update profiles", profileError);
+    return { errors: { _form: AUTH_MSG.generic }, values };
+  }
+
+  redirect(allowedNext(ctx, input.next) ?? AREA_HOME.cliente);
 }

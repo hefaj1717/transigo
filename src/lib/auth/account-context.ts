@@ -19,7 +19,7 @@ export async function loadAccountContext(
 
   const { data: profile, error } = await serviceClient
     .from("profiles")
-    .select("role, is_blocked, first_name, email")
+    .select("role, is_blocked, first_name, last_name, email, terms_accepted_at, privacy_accepted_at")
     .eq("id", user.id)
     .maybeSingle();
   if (error) throw error;
@@ -36,6 +36,26 @@ export async function loadAccountContext(
     carrierStatus = (carrier?.status as CarrierStatus | undefined) ?? null;
   }
 
+  // D80: a customer needs a customers row, a name and both consents (D42) before booking or using the panel.
+  let customerProfile: "complete" | "incomplete" | null = null;
+  let customerType: "private" | "business" | null = null;
+  if (profile.role === "cliente") {
+    const { data: customer, error: customerError } = await serviceClient
+      .from("customers")
+      .select("customer_type")
+      .eq("profile_id", user.id)
+      .maybeSingle();
+    if (customerError) throw customerError;
+    customerType = (customer?.customer_type as "private" | "business" | undefined) ?? null;
+    const complete =
+      !!customer &&
+      !!profile.first_name?.trim() &&
+      !!profile.last_name?.trim() &&
+      !!profile.terms_accepted_at &&
+      !!profile.privacy_accepted_at;
+    customerProfile = complete ? "complete" : "incomplete";
+  }
+
   return {
     state: "signed_in",
     userId: user.id,
@@ -44,5 +64,7 @@ export async function loadAccountContext(
     isBlocked: profile.is_blocked as boolean,
     firstName: (profile.first_name as string | null) ?? null,
     carrierStatus,
+    customerProfile,
+    customerType,
   };
 }

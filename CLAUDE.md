@@ -117,7 +117,7 @@ Uwagi techniczne:
       - Tragarze wg kategorii ładunku (D67) i nadgodzin (D68): `porterOvertimeCost()` w `src/lib/pricing/overtime.ts`. Aktywny cennik sprzed D67 nie ma kategorii → tragarze niedostępni do publikacji nowej wersji.
   - [ ] **2b. Kreator rezerwacji** — warunek ukończenia: zielone testy RLS zleceń (D63); odcinki zlecenia wg D47; ważność wyceny D62; tragarze: wybór kategorii + ewentualnie więcej osób, a kreator jasno pokazuje „Nel prezzo X h di lavoro; ogni ora successiva iniziata Y € a persona” (z `Quote.porters`, D67, D68); zlecenie zapisuje snapshot warunków tragarzy.
   - [ ] **2c. Strona publiczna**
-  - **Przed Etapem 3:** Kupić domenę, skonfigurować Resend (DNS SPF/DKIM), podpiąć SMTP w Supabase i podnieść Rate Limits.
+  - **TODO przed Etapem 3** (maile z potwierdzeniem zamówienia): Resend + SMTP dla Supabase Auth, instrukcja w D79 (kupić domenę, DNS SPF/DKIM, klucz API, SMTP w Supabase, Rate Limits).
 - [ ] 3. Płatność klienta (Stripe Checkout + webhook)
 - [ ] 4. PWA przewoźnika (rejestracja, Stripe Connect, kursy, realizacja, GPS, faktura)
   - Czas pracy tragarzy statusami (przyjazd na odbiór → załadowano, przyjazd na dostawę → rozładowano; bez jazdy), potwierdzenie podpisem klienta (D69).

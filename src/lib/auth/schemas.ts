@@ -238,3 +238,37 @@ export function toFieldErrors(error: z.ZodError): FieldErrors {
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Customer profile completion (D80) — accounts created without the sign-up form (e.g. Supabase dashboard)
+// ---------------------------------------------------------------------------
+
+const profileFields = {
+  firstName: requiredText(80),
+  lastName: requiredText(80),
+  phone: optionalPhone,
+  acceptTerms: checkbox(MSG.terms),
+  acceptPrivacy: checkbox(MSG.privacy),
+};
+
+/** The customers row already exists (type cannot change): only name, phone and consents. */
+export const existingCustomerProfileSchema = z.object(profileFields);
+
+/** No customers row yet: choose Privato / Azienda like at sign-up (D43, D44). */
+export const customerProfileCompletionSchema = z.discriminatedUnion(
+  "customerType",
+  [
+    z.object({ customerType: z.literal("private"), ...profileFields }),
+    z
+      .object({
+        customerType: z.literal("business"),
+        ...profileFields,
+        companyName: requiredText(160),
+        vatNumber,
+        sdiCode: optionalSdi,
+        pec: optionalPec,
+      })
+      .superRefine(checkEinvoiceChannel),
+  ],
+  { error: MSG.customerType },
+);
