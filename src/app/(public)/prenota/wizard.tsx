@@ -160,6 +160,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
         const r = await runQuote(state);
         if (!state.vehicleTypeId) error = "Scegli un veicolo.";
         else if (!r.ok) error = r.message;
+        else if (r.fit.byVehicle[state.vehicleTypeId]?.blocked.length) error = r.fit.byVehicle[state.vehicleTypeId].blocked[0];
         else if (!r.selected) error = "Il veicolo scelto non è disponibile. Scegline un altro.";
         break;
       }
@@ -340,19 +341,63 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
                 <label htmlFor="goods-description" className={label}>Cosa trasportiamo? <span className="text-red-600">*</span></label>
                 <textarea id="goods-description" rows={3} maxLength={2000} value={state.goods.description} onChange={(e) => update({ goods: { ...state.goods, description: e.target.value } })} className={input} placeholder="Es. divano 3 posti, 10 scatoloni, lavatrice" />
               </div>
+              <div>
+                <label htmlFor="load-category" className={label}>Che tipo di trasporto?</label>
+                <select
+                  id="load-category"
+                  value={state.goods.loadCategory ?? ""}
+                  onChange={(e) => {
+                    const cat = (e.target.value || null) as WizardState["goods"]["loadCategory"];
+                    // D83: the category suggests the porter category on the legs that already have porters.
+                    const follow = (p: WizardState["portersPickup"]) => (p && cat && options.porterPackages.some((x) => x.code === cat) ? { packageCode: cat } : p);
+                    update({ goods: { ...state.goods, loadCategory: cat }, portersPickup: follow(state.portersPickup), portersDelivery: follow(state.portersDelivery) });
+                  }}
+                  className={`${input} sm:w-80`}
+                >
+                  <option value="">Non è un trasloco</option>
+                  <option value="parcels">Pochi colli / oggetti singoli</option>
+                  <option value="monolocale">Trasloco monolocale</option>
+                  <option value="bilocale">Trasloco bilocale</option>
+                  <option value="trilocale_plus">Trasloco trilocale e oltre</option>
+                </select>
+              </div>
               <div className="grid gap-4 sm:grid-cols-3">
+                <div>
+                  <label htmlFor="goods-weight" className={label}>Peso totale indicativo (kg)</label>
+                  <input id="goods-weight" inputMode="numeric" value={state.goods.weightKg ?? ""} onChange={(e) => update({ goods: { ...state.goods, weightKg: intOrNull(e.target.value) } })} className={input} />
+                </div>
+                <div>
+                  <label htmlFor="goods-pallets" className={label}>Pallet EUR (se presenti)</label>
+                  <input id="goods-pallets" inputMode="numeric" value={state.goods.palletsCount ?? ""} onChange={(e) => update({ goods: { ...state.goods, palletsCount: Math.min(100, intOrNull(e.target.value) ?? 0) || null } })} className={input} />
+                </div>
                 <div>
                   <label htmlFor="goods-items" className={label}>Numero di colli</label>
                   <input id="goods-items" inputMode="numeric" value={state.goods.itemsCount ?? ""} onChange={(e) => update({ goods: { ...state.goods, itemsCount: intOrNull(e.target.value) } })} className={input} />
                 </div>
-                <div>
-                  <label htmlFor="goods-weight" className={label}>Peso indicativo (kg)</label>
-                  <input id="goods-weight" inputMode="numeric" value={state.goods.weightKg ?? ""} onChange={(e) => update({ goods: { ...state.goods, weightKg: intOrNull(e.target.value) } })} className={input} />
+              </div>
+              <fieldset>
+                <legend className={label}>Oggetto più grande (cm)</legend>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  {(["lengthCm", "widthCm", "heightCm"] as const).map((k, i) => (
+                    <span key={k} className="flex items-center gap-2">
+                      {i > 0 ? <span className="text-zinc-400">×</span> : null}
+                      <input
+                        id={`item-${k}`}
+                        aria-label={{ lengthCm: "Lunghezza (cm)", widthCm: "Larghezza (cm)", heightCm: "Altezza (cm)" }[k]}
+                        placeholder={{ lengthCm: "Lungh.", widthCm: "Largh.", heightCm: "Alt." }[k]}
+                        inputMode="numeric"
+                        value={state.goods.largestItem[k] ?? ""}
+                        onChange={(e) => update({ goods: { ...state.goods, largestItem: { ...state.goods.largestItem, [k]: Math.min(2000, intOrNull(e.target.value) ?? 0) || null } } })}
+                        className={`${input} mt-0 w-24`}
+                      />
+                    </span>
+                  ))}
                 </div>
-                <div>
-                  <label htmlFor="goods-dims" className={label}>Dimensioni indicative</label>
-                  <input id="goods-dims" maxLength={500} value={state.goods.dimensionsNote} onChange={(e) => update({ goods: { ...state.goods, dimensionsNote: e.target.value } })} className={input} placeholder="Es. 2 × 1 × 0,9 m" />
-                </div>
+                <p className="mt-1 text-xs text-zinc-500">Es. divano 220 × 90 × 85. Ci serve per consigliarti il veicolo giusto; il volume totale non è necessario.</p>
+              </fieldset>
+              <div>
+                <label htmlFor="goods-dims" className={label}>Altre note sulla merce</label>
+                <input id="goods-dims" maxLength={500} value={state.goods.dimensionsNote} onChange={(e) => update({ goods: { ...state.goods, dimensionsNote: e.target.value } })} className={input} placeholder="Es. lavatrice, oggetti fragili" />
               </div>
               {options.porterPackages.length ? (
                 <div className="space-y-3">
@@ -384,30 +429,51 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
           ) : null}
 
           {step === "veicolo" ? (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {options.vehicles.map((v) => {
-                const price = quote?.ok ? quote.vehicles.find((p) => p.vehicleTypeId === v.id) : undefined;
-                const unavailable = price && "error" in price;
-                const chosen = state.vehicleTypeId === v.id;
-                return (
-                  <button
-                    key={v.id}
-                    type="button"
-                    disabled={!!unavailable}
-                    onClick={() => update({ vehicleTypeId: v.id })}
-                    aria-pressed={chosen}
-                    className={`rounded-lg border p-4 text-left ${chosen ? "border-blue-600 bg-blue-50 ring-2 ring-blue-600" : "border-zinc-300 hover:border-blue-400"} disabled:opacity-50`}
-                  >
-                    <span className="block font-semibold text-zinc-900">{v.nameIt}</span>
-                    <span className="block text-xs text-zinc-500">
-                      {[v.volumeDm3 ? `${(v.volumeDm3 / 1000).toLocaleString("it-IT")} m³` : null, v.payloadKg ? `${v.payloadKg} kg` : null].filter(Boolean).join(" · ")}
-                    </span>
-                    <span className="mt-2 block">
-                      {price && "headlineCents" in price ? <Headline cents={price.headlineCents} display={display} /> : unavailable ? <span className="text-sm text-zinc-500">Non disponibile</span> : <span className="text-sm text-zinc-400">{quoting ? "Calcolo…" : "—"}</span>}
-                    </span>
-                  </button>
-                );
-              })}
+            <div className="space-y-3">
+              {quote?.ok && quote.fit.noneFits ? <p role="alert" className="rounded-md bg-amber-50 p-3 text-sm text-amber-900">{quote.fit.noneFits}</p> : null}
+              <div className="grid gap-3 sm:grid-cols-2">
+                {options.vehicles.map((v) => {
+                  const price = quote?.ok ? quote.vehicles.find((p) => p.vehicleTypeId === v.id) : undefined;
+                  const check = quote?.ok ? quote.fit.byVehicle[v.id] : undefined;
+                  const recommended = quote?.ok && quote.fit.recommended?.vehicleTypeId === v.id ? quote.fit.recommended : null;
+                  const blocked = check?.blocked ?? [];
+                  const unavailable = (price && "error" in price) || blocked.length > 0;
+                  const chosen = state.vehicleTypeId === v.id;
+                  const dims = v.lengthCm && v.widthCm && v.heightCm ? `${v.lengthCm} × ${v.widthCm} × ${v.heightCm} cm` : null;
+                  return (
+                    <button
+                      key={v.id}
+                      type="button"
+                      disabled={!!unavailable}
+                      onClick={() => update({ vehicleTypeId: v.id })}
+                      aria-pressed={chosen}
+                      className={`relative rounded-lg border p-4 text-left ${chosen ? "border-blue-600 bg-blue-50 ring-2 ring-blue-600" : recommended ? "border-green-600" : "border-zinc-300 hover:border-blue-400"} disabled:cursor-not-allowed disabled:opacity-60`}
+                    >
+                      {recommended ? <span className="absolute right-3 top-3 rounded-full bg-green-600 px-2 py-0.5 text-xs font-medium text-white">Consigliato</span> : null}
+                      <span className="block pr-24 font-semibold text-zinc-900">{v.nameIt}</span>
+                      <span className="mt-1 block text-xs text-zinc-600">
+                        {[
+                          v.payloadKg ? `Portata ${v.payloadKg.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".")} kg` : null,
+                          dims ? `Vano ${dims}` : null,
+                          v.volumeDm3 ? `${(v.volumeDm3 / 1000).toLocaleString("it-IT")} m³` : null,
+                          v.euroPallets != null ? (v.euroPallets === 0 ? "senza pallet" : `${v.euroPallets} pallet`) : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                      {recommended ? <span className="mt-1 block text-xs text-green-800">{recommended.reason}</span> : null}
+                      {blocked.map((b) => (
+                        <span key={b} className="mt-1 block text-xs text-red-700">{b}</span>
+                      ))}
+                      {check?.warning && !blocked.length ? <span className="mt-1 block text-xs text-amber-800">{check.warning}</span> : null}
+                      <span className="mt-2 block">
+                        {price && "headlineCents" in price ? <Headline cents={price.headlineCents} display={display} /> : price && "error" in price ? <span className="text-sm text-zinc-500">Non disponibile</span> : <span className="text-sm text-zinc-400">{quoting ? "Calcolo…" : "—"}</span>}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-zinc-500">Il consiglio si basa su peso, oggetto più grande e pallet indicati; non considera la misura delle porte del vano.</p>
             </div>
           ) : null}
 
@@ -428,7 +494,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
                       type="checkbox"
                       checked={storageOn}
                       onChange={(e) =>
-                        update({ storage: e.target.checked ? { returnDate: state.pickupDate ?? minDate, returnWindow: "14-16", pallets: options.storage.billingUnit === "pallet_day" ? 1 : null } : null })
+                        update({ storage: e.target.checked ? { returnDate: state.pickupDate ?? minDate, returnWindow: "14-16", pallets: options.storage.billingUnit === "pallet_day" ? (state.goods.palletsCount ?? 1) : null } : null })
                       }
                     />
                     Porta la merce nel nostro deposito e consegnala più tardi
