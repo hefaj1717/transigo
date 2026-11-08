@@ -3,21 +3,28 @@ import { z } from "zod";
 import { getAccountContext } from "@/lib/auth/session";
 import { bookingErrorMessage, bookingErrorStep } from "@/lib/booking/messages";
 import { loadBookingOptions, quoteBooking } from "@/lib/booking/server";
-import { wizardStateSchema } from "@/lib/booking/state";
+import { wizardStateSchema, type WizardState } from "@/lib/booking/state";
 import { createServiceClient } from "@/lib/supabase/service";
 
 // Live quote for the booking wizard (works without login, D8). A route handler, not a Server Action:
 // Server Actions run one at a time per client and the wizard re-quotes often.
 // The price is computed only here (D76); the response carries customer amounts only (toPublicQuote).
 // TODO before production: rate limiting per IP (public endpoint that calls Google and writes quotes).
-const bodySchema = z.object({ state: wizardStateSchema });
+// probe: true = step "Percorso" — only the service area and route length are checked, with a placeholder
+// date two weeks ahead (no vehicle, services or stored quote).
+const bodySchema = z.object({ state: wizardStateSchema, probe: z.boolean().optional() });
+
+function probeState(state: WizardState): WizardState {
+  const inTwoWeeks = new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10);
+  return { ...state, pickupDate: inTwoWeeks, pickupWindow: "10-12", vehicleTypeId: null, portersPickup: null, portersDelivery: null, packingItems: 0, storage: null };
+}
 
 export async function POST(request: Request) {
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ ok: false, error: { code: "invalid_input" }, message: "Richiesta non valida.", step: "percorso" }, { status: 400 });
   }
-  const { state } = parsed.data;
+  const state = parsed.data.probe ? probeState(parsed.data.state) : parsed.data.state;
 
   // Signed-in customers always get the price for their account type (D3); others use the toggle.
   const ctx = await getAccountContext();
