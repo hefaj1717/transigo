@@ -15,7 +15,7 @@ import { priceRelevantKey, wizardStateSchema } from "./state";
 // customer and its dependencies, so it can be tested directly against the database (tests/rls/place-order.test.ts).
 
 export type SubmitResult =
-  | { status: "created"; orderNumber: string }
+  | { status: "created"; orderId: string; orderNumber: string; payment?: { url: string } | { error: string } }
   | { status: "price_changed"; message: string; quoteId: string; validUntil: string; quote: PublicQuote }
   | { status: "redirect"; to: string }
   | { status: "invalid"; fieldErrors: Record<string, string>; message?: string }
@@ -159,7 +159,8 @@ export async function placeOrder(deps: PlaceOrderDeps, customer: VerifiedCustome
       return { status: "error", message: GENERIC };
     }
     await db.from("quotes").delete().eq("id", quote.quoteId);
-    return { status: "created", orderNumber: (data as { order_number: string }).order_number };
+    const created = data as { id: string; order_number: string };
+    return { status: "created", orderId: created.id, orderNumber: created.order_number };
   } catch (e) {
     console.error("[booking] submit:", e instanceof Error ? e.message : e);
     return { status: "error", message: GENERIC };

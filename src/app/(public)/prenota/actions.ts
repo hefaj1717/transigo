@@ -3,6 +3,7 @@
 import { completeProfileUrl, PATHS } from "@/lib/auth/routing";
 import { getAccountContext } from "@/lib/auth/session";
 import { placeOrder, type SubmitResult } from "@/lib/booking/place-order";
+import { startCheckout } from "@/lib/payments/server";
 import { quoteBooking } from "@/lib/booking/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -20,7 +21,20 @@ export async function submitBooking(raw: unknown): Promise<SubmitResult> {
   if (ctx.role !== "cliente") return { status: "error", message: "Solo i clienti possono prenotare un trasporto.", step: "account" };
   if (ctx.customerProfile !== "complete" || !ctx.customerType) return { status: "redirect", to: completeProfileUrl(`${PATHS.booking}?passo=riepilogo`) };
 
-  return placeOrder({ db: createServiceClient(), now: new Date(), requote: quoteBooking }, { userId: ctx.userId, customerType: ctx.customerType }, raw);
+  const db = createServiceClient();
+  const result = await placeOrder({ db, now: new Date(), requote: quoteBooking }, { userId: ctx.userId, customerType: ctx.customerType }, raw);
+  if (result.status !== "created") return result;
+
+  // Stage 3: straight to Stripe Checkout. If that fails, the order stays "pending_payment" and the customer
+  // can pay from the order page ("Paga ora") until the payment deadline (D88).
+  try {
+    const checkout = await startCheckout(db, { id: ctx.userId, email: ctx.email }, result.orderId);
+    if (checkout.kind === "redirect") return { ...result, payment: { url: checkout.url } };
+    return { ...result, payment: { error: checkout.kind === "not_payable" ? checkout.message : "Pagamento in verifica." } };
+  } catch (e) {
+    console.error("[booking] checkout:", e instanceof Error ? e.message : e);
+    return { ...result, payment: { error: "Non è stato possibile avviare il pagamento. Puoi riprovare dalla pagina dell'ordine." } };
+  }
 }
 
 export type CheckoutDefaults = {

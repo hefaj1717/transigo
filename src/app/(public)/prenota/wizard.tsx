@@ -57,7 +57,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
   const [stepError, setStepError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string | null>(null);
-  const [created, setCreated] = useState<string | null>(null);
+  const [created, setCreated] = useState<{ id: string; number: string; paymentError: string | null } | null>(null);
   const [submitting, startSubmit] = useTransition();
   const quoteSeq = useRef(0);
 
@@ -211,7 +211,11 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
           } catch {
             /* ignore */
           }
-          setCreated(result.orderNumber);
+          if (result.payment && "url" in result.payment) {
+            window.location.assign(result.payment.url); // Stripe Checkout; "paid" only after the webhook
+            return;
+          }
+          setCreated({ id: result.orderId, number: result.orderNumber, paymentError: result.payment && "error" in result.payment ? result.payment.error : null });
           setContacts(EMPTY_CONTACTS);
           setBilling(EMPTY_BILLING);
           window.scrollTo({ top: 0 });
@@ -246,10 +250,11 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
       <div className="mt-6 rounded-lg border border-green-200 bg-green-50 p-6">
         <h2 className="text-xl font-semibold text-green-900">Prenotazione registrata</h2>
         <p className="mt-2 text-green-900">
-          Numero ordine: <strong>{created}</strong>
+          Numero ordine: <strong>{created.number}</strong>
         </p>
-        <p className="mt-2 text-sm text-green-900">Stato: In attesa di pagamento. Il pagamento online sarà disponibile a breve: ti contatteremo per completare l&apos;ordine.</p>
-        <Link href="/cliente" className="mt-4 inline-block rounded-md bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700">Vai ai miei ordini</Link>
+        <p className="mt-2 text-sm text-green-900">Stato: In attesa di pagamento.</p>
+        {created.paymentError ? <p className="mt-2 rounded-md bg-amber-50 p-3 text-sm text-amber-900">{created.paymentError}</p> : null}
+        <Link href={`/cliente/ordini/${created.id}`} className="mt-4 inline-block rounded-md bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700">Vai all&apos;ordine e paga</Link>
       </div>
     );
   }
@@ -690,6 +695,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
             </div>
           ) : null}
 
+          {step === "riepilogo" ? <p className="mt-4 text-xs text-zinc-500">Dopo la conferma verrai indirizzato al pagamento sicuro con carta (Stripe).</p> : null}
           {notice ? <p role="status" className="mt-4 rounded-md bg-amber-50 p-3 text-sm text-amber-900">{notice}</p> : null}
           {stepError ? <p role="alert" className="mt-4 rounded-md bg-red-50 p-3 text-sm text-red-700">{stepError}</p> : null}
 
@@ -699,7 +705,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
             </button>
             {step === "riepilogo" ? (
               <button type="button" onClick={confirm} disabled={submitting || !selected} className="rounded-md bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-60">
-                {submitting ? "Attendere…" : "Conferma prenotazione"}
+                {submitting ? "Attendere…" : "Conferma e paga"}
               </button>
             ) : (
               <button type="button" onClick={() => void next()} disabled={quoting && step !== "contatti" && step !== "account"} className="rounded-md bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-60">
