@@ -92,12 +92,17 @@ export type PriceLeg = {
   deliveryHasElevator: boolean;
 };
 
+export type PorterRequest = { legIndex: number; packageCode: PorterPackageCode; count?: number };
+
 export type PriceInput = {
   customerType: CustomerType;
   now: Date; // quote time (urgent / lead-time checks)
   legs: PriceLeg[];
-  /** D67: load-size package; count defaults to the package's persons and may only be higher (max 4). */
-  porters?: { packageCode: PorterPackageCode; count?: number; legIndex?: number };
+  /**
+   * Porters per leg (D74): at most one entry per leg, each with its own load-size package (D67).
+   * count defaults to the package's persons and may only be higher (max 4).
+   */
+  porters?: PorterRequest[];
   packing?: { itemsCount: number; legIndex?: number };
   storage?: { days: number; pallets?: number }; // days = 0 → transshipment
 };
@@ -122,12 +127,13 @@ export type QuoteWarning = { code: "negative_margin"; group: CarrierShareGroup; 
  * so overtime after the job is settled with the terms the customer bought (porterOvertimeCost).
  */
 export type QuotePorters = {
+  legIndex: number; // D74: terms per leg
   packageCode: PorterPackageCode;
   persons: number;
   includedHours: number;
   overtimeRatePerPersonCents: number | null; // null = overtime disabled in the price list
   overtimeGraceMinutes: number;
-  /** Carrier share of the porters group, to apply the same share to overtime. */
+  /** Carrier share of this leg's porters group, to apply the same share to overtime. */
   carrierShare: { kind: "percent"; percentBp: number } | { kind: "ratio"; carrierCents: number; netCents: number } | null;
 };
 
@@ -145,7 +151,7 @@ export type Quote = {
   carrierAmountCents: number;
   carrierAmountByLegCents: number[];
   storageType: StorageType | null;
-  porters: QuotePorters | null;
+  porters: QuotePorters[]; // one entry per leg with porters, ordered by legIndex (D74)
   isUrgentByLeg: boolean[];
   warnings: QuoteWarning[];
 };

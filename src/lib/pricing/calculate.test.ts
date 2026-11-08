@@ -160,43 +160,44 @@ describe("floors without elevator (D53)", () => {
   });
 });
 
-describe("porters and packing (D54, D67)", () => {
+describe("porters and packing (D54, D67, D74)", () => {
   it("porters, bilocale package: 2 persons × 3 h included × 30 €, carrier 80 % (D67)", () => {
-    const q = quote({ porters: { packageCode: "bilocale" } });
+    const q = quote({ porters: [{ legIndex: 0, packageCode: "bilocale" }] });
     expect(lineOf(q, "porters")[0]).toMatchObject({ quantity: 6, unitAmountCents: 3000, netCents: 18_000, carrierAmountCents: 14_400 });
     expect(lineOf(q, "porters")[0].labelIt).toBe("Facchinaggio – Bilocale: 2 persone × 3 h incluse");
   });
 
   it("porters: the customer adds a person, who gets the package's hours (3 × 3 h)", () => {
-    const q = quote({ porters: { packageCode: "bilocale", count: 3 } });
+    const q = quote({ porters: [{ legIndex: 0, packageCode: "bilocale", count: 3 }] });
     expect(lineOf(q, "porters")[0]).toMatchObject({ quantity: 9, netCents: 27_000, carrierAmountCents: 21_600 });
   });
 
   it("porters: one person, parcels → singular label", () => {
-    expect(lineOf(quote({ porters: { packageCode: "parcels" } }), "porters")[0].labelIt).toBe("Facchinaggio – Pochi colli / oggetti singoli: 1 persona × 1 h incluse");
+    expect(lineOf(quote({ porters: [{ legIndex: 0, packageCode: "parcels" }] }), "porters")[0].labelIt).toBe("Facchinaggio – Pochi colli / oggetti singoli: 1 persona × 1 h incluse");
   });
 
   it("porters: quote carries the terms for the wizard and the order (D68)", () => {
-    const q = quote({ porters: { packageCode: "trilocale_plus", count: 4 } });
-    expect(q.porters).toEqual({
+    const q = quote({ porters: [{ legIndex: 0, packageCode: "trilocale_plus", count: 4 }] });
+    expect(q.porters).toEqual([{
+      legIndex: 0,
       packageCode: "trilocale_plus",
       persons: 4,
       includedHours: 4,
       overtimeRatePerPersonCents: 3500,
       overtimeGraceMinutes: 15,
       carrierShare: { kind: "percent", percentBp: 8000 },
-    });
-    expect(quote({}).porters).toBeNull();
+    }]);
+    expect(quote({}).porters).toEqual([]);
   });
 
   it("porters: overtime rule disabled → no overtime rate in the terms", () => {
     const config = withRule(makeConfig(), "porter_overtime_hour", { isEnabled: false });
-    expect(quote({ porters: { packageCode: "monolocale" } }, config).porters?.overtimeRatePerPersonCents).toBeNull();
+    expect(quote({ porters: [{ legIndex: 0, packageCode: "monolocale" }] }, config).porters[0].overtimeRatePerPersonCents).toBeNull();
   });
 
   it("porters: fixed carrier share → overtime keeps the package's proportion", () => {
     const config = withRule(makeConfig(), "carrier_share_porters", { kind: "fixed", amountCents: 9000, percentBp: null });
-    expect(quote({ porters: { packageCode: "bilocale" } }, config).porters?.carrierShare).toEqual({ kind: "ratio", carrierCents: 9000, netCents: 18_000 });
+    expect(quote({ porters: [{ legIndex: 0, packageCode: "bilocale" }] }, config).porters[0].carrierShare).toEqual({ kind: "ratio", carrierCents: 9000, netCents: 18_000 });
   });
 
   it("packing: flat 15 € + 10 items × 5 €, carrier 60 %", () => {
@@ -215,18 +216,83 @@ describe("porters and packing (D54, D67)", () => {
 
   it("porters: porter_hour disabled, package disabled or missing → service_unavailable", () => {
     const unavailable = { code: "service_unavailable", service: "porters" };
-    expect(error({ porters: { packageCode: "parcels" } }, withRule(makeConfig(), "porter_hour", { isEnabled: false }))).toEqual(unavailable);
+    expect(error({ porters: [{ legIndex: 0, packageCode: "parcels" }] }, withRule(makeConfig(), "porter_hour", { isEnabled: false }))).toEqual(unavailable);
     const pkgOff = makeConfig();
     pkgOff.porterPackages = pkgOff.porterPackages.map((p) => (p.code === "bilocale" ? { ...p, isEnabled: false } : p));
-    expect(error({ porters: { packageCode: "bilocale" } }, pkgOff)).toEqual(unavailable);
-    expect(error({ porters: { packageCode: "bilocale" } }, makeConfig({ porterPackages: [] }))).toEqual(unavailable);
+    expect(error({ porters: [{ legIndex: 0, packageCode: "bilocale" }] }, pkgOff)).toEqual(unavailable);
+    expect(error({ porters: [{ legIndex: 0, packageCode: "bilocale" }] }, makeConfig({ porterPackages: [] }))).toEqual(unavailable);
   });
 
   it("porters: fewer persons than the package, more than 4, unknown package, bad leg → invalid_input", () => {
-    expect(error({ porters: { packageCode: "trilocale_plus", count: 2 } })).toMatchObject({ code: "invalid_input", message: expect.stringMatching(/at least 3/) });
-    expect(error({ porters: { packageCode: "bilocale", count: 5 } }).code).toBe("invalid_input");
-    expect(error({ porters: { packageCode: "villa" as never } }).code).toBe("invalid_input");
-    expect(error({ porters: { packageCode: "parcels", legIndex: 1 } }).code).toBe("invalid_input");
+    expect(error({ porters: [{ legIndex: 0, packageCode: "trilocale_plus", count: 2 }] })).toMatchObject({ code: "invalid_input", message: expect.stringMatching(/at least 3/) });
+    expect(error({ porters: [{ legIndex: 0, packageCode: "bilocale", count: 5 }] }).code).toBe("invalid_input");
+    expect(error({ porters: [{ legIndex: 0, packageCode: "villa" as never }] }).code).toBe("invalid_input");
+    expect(error({ porters: [{ legIndex: 1, packageCode: "parcels" }] }).code).toBe("invalid_input");
+  });
+});
+
+describe("porters per leg (D74)", () => {
+  const twoLegs = () => [leg(), leg({ pickupAt: new Date(WEEKDAY.getTime() + 5 * 86_400_000) })];
+
+  it("warehouse move: porters at A (leg 1) and at B (leg 2), each with its own package and persons", () => {
+    const q = quote({
+      legs: twoLegs(),
+      porters: [
+        { legIndex: 1, packageCode: "parcels", count: 2 }, // order of entries does not matter
+        { legIndex: 0, packageCode: "bilocale" },
+      ],
+      storage: { days: 5, pallets: 2 },
+    });
+    const porters = lineOf(q, "porters");
+    expect(porters.map((l) => [l.legIndex, l.quantity, l.netCents, l.carrierAmountCents, l.labelIt])).toEqual([
+      [0, 6, 18_000, 14_400, "Tratta 1: Facchinaggio – Bilocale: 2 persone × 3 h incluse"],
+      [1, 2, 6000, 4800, "Tratta 2: Facchinaggio – Pochi colli / oggetti singoli: 2 persone × 1 h incluse"],
+    ]);
+    expect(q.porters.map((p) => [p.legIndex, p.packageCode, p.persons, p.includedHours])).toEqual([
+      [0, "bilocale", 2, 3],
+      [1, "parcels", 2, 1],
+    ]);
+    // Each leg's carrier amount includes that leg's porters.
+    const transportShare = (i: number) => q.lines.filter((l) => l.legIndex === i && l.carrierShareGroup === "transport").reduce((s, l) => s + l.carrierAmountCents, 0);
+    expect(q.carrierAmountByLegCents).toEqual([transportShare(0) + 14_400, transportShare(1) + 4800]);
+  });
+
+  it("porters only on one leg of two", () => {
+    const q = quote({ legs: twoLegs(), porters: [{ legIndex: 1, packageCode: "monolocale" }] });
+    expect(lineOf(q, "porters").map((l) => l.legIndex)).toEqual([1]);
+    expect(q.porters.map((p) => p.legIndex)).toEqual([1]);
+  });
+
+  it("percent share is rounded per leg's porters group", () => {
+    // 1 person × 1 h × 30,05 € per leg: 80 % of 3005 = 2404 per leg (not 80 % of 6010 split).
+    const config = withRule(makeConfig(), "porter_hour", { amountCents: 3005 });
+    const q = quote({ legs: twoLegs(), porters: [{ legIndex: 0, packageCode: "parcels" }, { legIndex: 1, packageCode: "parcels" }] }, config);
+    expect(lineOf(q, "porters").map((l) => l.carrierAmountCents)).toEqual([2404, 2404]);
+  });
+
+  it("fixed share is an amount per leg's porters; overtime ratio per leg", () => {
+    const config = withRule(makeConfig(), "carrier_share_porters", { kind: "fixed", amountCents: 5000, percentBp: null });
+    const q = quote({ legs: twoLegs(), porters: [{ legIndex: 0, packageCode: "bilocale" }, { legIndex: 1, packageCode: "parcels" }] }, config);
+    expect(lineOf(q, "porters").map((l) => l.carrierAmountCents)).toEqual([5000, 5000]);
+    expect(q.porters.map((p) => p.carrierShare)).toEqual([
+      { kind: "ratio", carrierCents: 5000, netCents: 18_000 },
+      { kind: "ratio", carrierCents: 5000, netCents: 3000 },
+    ]);
+    expect(q.warnings).toEqual([{ code: "negative_margin", group: "porters", legIndex: 1 }]);
+  });
+
+  it("two entries for the same leg, leg out of range or not an array → invalid_input", () => {
+    expect(error({ legs: twoLegs(), porters: [{ legIndex: 0, packageCode: "parcels" }, { legIndex: 0, packageCode: "bilocale" }] })).toMatchObject({
+      code: "invalid_input",
+      message: expect.stringMatching(/more than one entry for leg 0/),
+    });
+    expect(error({ legs: twoLegs(), porters: [{ legIndex: 2, packageCode: "parcels" }] }).code).toBe("invalid_input");
+    expect(error({ porters: [{ legIndex: -1, packageCode: "parcels" }] }).code).toBe("invalid_input");
+    expect(error({ porters: { legIndex: 0, packageCode: "parcels" } as never }).code).toBe("invalid_input");
+  });
+
+  it("empty list = no porters", () => {
+    expect(quote({ porters: [] })).toEqual(quote({}));
   });
 });
 
@@ -274,7 +340,7 @@ describe("storage (D55)", () => {
 
 describe("customer type (D3)", () => {
   it("private and business get identical amounts; only the display mode differs", () => {
-    const input = { porters: { packageCode: "monolocale" as const }, packing: { itemsCount: 3 } };
+    const input = { porters: [{ legIndex: 0, packageCode: "monolocale" as const }], packing: { itemsCount: 3 } };
     const p = quote({ ...input, customerType: "private" });
     const b = quote({ ...input, customerType: "business" });
     expect(p.display).toBe("gross");
@@ -315,7 +381,7 @@ describe("carrier amount (D6, D14, D57)", () => {
     const q = quote({
       now: at("2026-11-13T10:00:00Z"),
       legs: [leg({ pickupAt: at("2026-11-14T08:00:00Z"), pickupFloor: 2 })], // urgent + weekend + 2 floors
-      porters: { packageCode: "parcels", count: 2 }, // 2 × 1 h
+      porters: [{ legIndex: 0, packageCode: "parcels", count: 2 }], // 2 × 1 h
       packing: { itemsCount: 2 },
     });
     // transport group: 4500 + 1350 + 900 + 2000 = 8750 → 70 % = 6125
@@ -334,9 +400,9 @@ describe("carrier amount (D6, D14, D57)", () => {
 
   it("carrier share above the group net amount → negative_margin warning (not capped)", () => {
     const config = withRule(makeConfig(), "carrier_share_porters", { kind: "fixed", amountCents: 10_000, percentBp: null });
-    const q = quote({ porters: { packageCode: "parcels" } }, config);
+    const q = quote({ porters: [{ legIndex: 0, packageCode: "parcels" }] }, config);
     expect(lineOf(q, "porters")[0].carrierAmountCents).toBe(10_000);
-    expect(q.warnings).toEqual([{ code: "negative_margin", group: "porters", legIndex: null }]);
+    expect(q.warnings).toEqual([{ code: "negative_margin", group: "porters", legIndex: 0 }]);
   });
 });
 
@@ -409,7 +475,7 @@ describe("reference case from the project plan", () => {
     const q = quote({
       customerType: "business",
       legs: [leg({ vehicleTypeId: V.vanMedium, distanceM: 143_122, pickupProvince: "MI" })],
-      porters: { packageCode: "monolocale" },
+      porters: [{ legIndex: 0, packageCode: "monolocale" }],
     });
     expect(q.lines.map((l) => [l.lineType, l.quantity, l.unitAmountCents, l.netCents, l.vatCents, l.grossCents, l.carrierAmountCents])).toEqual([
       ["transport", 144, 140, 20_160, 4435, 24_595, 14_112],

@@ -167,14 +167,14 @@ export function QuotePreview({ priceListId, vehicles, defaultPickup }: { priceLi
             Margine Transigo (netto): <strong>{formatCents(q.subtotalCents - q.carrierAmountCents)}</strong>
             {q.isUrgentByLeg[0] ? " · urgente" : ""}
           </p>
-          {q.porters ? (
-            <p className="mt-1 text-sm">
-              Facchinaggio: incluse {q.porters.includedHours} h di lavoro
-              {q.porters.overtimeRatePerPersonCents !== null
-                ? `, ogni ora successiva iniziata ${formatCents(q.porters.overtimeRatePerPersonCents)} a persona (tolleranza ${q.porters.overtimeGraceMinutes} min).`
+          {q.porters.map((p) => (
+            <p key={p.legIndex} className="mt-1 text-sm">
+              Facchinaggio: incluse {p.includedHours} h di lavoro
+              {p.overtimeRatePerPersonCents !== null
+                ? `, ogni ora successiva iniziata ${formatCents(p.overtimeRatePerPersonCents)} a persona (tolleranza ${p.overtimeGraceMinutes} min).`
                 : "; ore extra non addebitate (regola disattivata)."}
             </p>
-          ) : null}
+          ))}
           {q.warnings.length ? <p className="mt-1 text-sm text-red-700">Attenzione: la quota padroncino supera l&apos;importo del servizio ({q.warnings.map((w) => w.group).join(", ")}).</p> : null}
         </div>
       ) : null}

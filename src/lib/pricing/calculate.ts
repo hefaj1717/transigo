@@ -50,10 +50,16 @@ function validate(input: PriceInput): string | null {
     if (i > 0 && leg.pickupAt.getTime() < input.legs[i - 1].pickupAt.getTime()) return `legs[${i}] must not start before the previous leg`;
   }
   const legIndexOk = (idx: number | undefined) => idx === undefined || isInt(idx, 0, input.legs.length - 1);
-  if (input.porters) {
-    if (!(PORTER_PACKAGE_CODES as readonly string[]).includes(input.porters.packageCode)) return "porters.packageCode is unknown";
-    if (input.porters.count !== undefined && !isInt(input.porters.count, 1, MAX_PORTERS)) return `porters.count must be 1–${MAX_PORTERS}`;
-    if (!legIndexOk(input.porters.legIndex)) return "porters.legIndex out of range";
+  if (input.porters !== undefined) {
+    if (!Array.isArray(input.porters)) return "porters must be an array";
+    const seen = new Set<number>();
+    for (const [k, p] of input.porters.entries()) {
+      if (!(PORTER_PACKAGE_CODES as readonly string[]).includes(p.packageCode)) return `porters[${k}].packageCode is unknown`;
+      if (p.count !== undefined && !isInt(p.count, 1, MAX_PORTERS)) return `porters[${k}].count must be 1–${MAX_PORTERS}`;
+      if (!isInt(p.legIndex, 0, input.legs.length - 1)) return `porters[${k}].legIndex out of range`;
+      if (seen.has(p.legIndex)) return `porters: more than one entry for leg ${p.legIndex}`;
+      seen.add(p.legIndex);
+    }
   }
   if (input.packing) {
     if (!isInt(input.packing.itemsCount, 1, 500)) return "packing.itemsCount must be 1–500";
@@ -145,33 +151,34 @@ export function calculatePrice(input: PriceInput, config: PricingConfig): PriceR
     }
   }
 
-  // 3. Porters (D67): package = persons × included hours × porter_hour. The customer may add persons
-  //    (each gets the package's hours) but not hours; extra time is settled after the job (D68, D69).
-  let porterTerms: Omit<QuotePorters, "carrierShare"> | null = null;
-  if (input.porters) {
-    const pkg = config.porterPackages.find((p) => p.code === input.porters!.packageCode);
+  // 3. Porters per leg (D67, D74): package = persons × included hours × porter_hour. The customer may add
+  //    persons (each gets the package's hours) but not hours; extra time is settled after the job (D68, D69).
+  const porterTerms: Omit<QuotePorters, "carrierShare">[] = [];
+  for (const req of [...(input.porters ?? [])].sort((a, b) => a.legIndex - b.legIndex)) {
+    const pkg = config.porterPackages.find((p) => p.code === req.packageCode);
     const perHour = amountOf("porter_hour");
     if (!pkg || !pkg.isEnabled || perHour === null) return fail({ code: "service_unavailable", service: "porters" });
-    const count = input.porters.count ?? pkg.portersCount;
+    const count = req.count ?? pkg.portersCount;
     if (count < pkg.portersCount) return invalid(`porters.count must be at least ${pkg.portersCount} for ${pkg.code}`);
     const hours = pkg.includedHours;
     const personHours = count * hours;
     push({
       lineType: "porters",
-      labelIt: `Facchinaggio – ${PORTER_PACKAGE_LABEL[pkg.code]}: ${count} ${count === 1 ? "persona" : "persone"} × ${hours} h incluse`,
-      legIndex: input.porters.legIndex ?? 0,
+      labelIt: `${legPrefix(req.legIndex)}Facchinaggio – ${PORTER_PACKAGE_LABEL[pkg.code]}: ${count} ${count === 1 ? "persona" : "persone"} × ${hours} h incluse`,
+      legIndex: req.legIndex,
       quantity: personHours,
       unitAmountCents: perHour,
       netCents: personHours * perHour,
       carrierShareGroup: "porters",
     });
-    porterTerms = {
+    porterTerms.push({
+      legIndex: req.legIndex,
       packageCode: pkg.code,
       persons: count,
       includedHours: hours,
       overtimeRatePerPersonCents: amountOf("porter_overtime_hour"),
       overtimeGraceMinutes: config.porterOvertimeGraceMinutes,
-    };
+    });
   }
 
   // 4. Packing (D54): flat fee + per item, each can be disabled.
@@ -226,7 +233,7 @@ export function calculatePrice(input: PriceInput, config: PricingConfig): PriceR
   const vatCents = applyBp(subtotalCents, config.vatRateBp);
   const lineVat = allocateProportionally(vatCents, nets);
 
-  // 7. Carrier share per group (D57): transport per leg, porters and packing per order.
+  // 7. Carrier share per group (D57, D74): transport and porters per leg, packing per order.
   const carrierAmounts = lines.map(() => 0);
   const warnings: QuoteWarning[] = [];
   const shareRuleFor: Record<Exclude<CarrierShareGroup, "none">, PriceRuleCode> = {
@@ -237,7 +244,7 @@ export function calculatePrice(input: PriceInput, config: PricingConfig): PriceR
   const buckets = new Map<string, number[]>(); // key → line indexes
   lines.forEach((l, idx) => {
     if (l.carrierShareGroup === "none") return;
-    const key = l.carrierShareGroup === "transport" ? `transport:${l.legIndex}` : l.carrierShareGroup;
+    const key = l.carrierShareGroup === "packing" ? "packing" : `${l.carrierShareGroup}:${l.legIndex}`;
     buckets.set(key, [...(buckets.get(key) ?? []), idx]);
   });
   for (const idxs of buckets.values()) {
@@ -246,7 +253,7 @@ export function calculatePrice(input: PriceInput, config: PricingConfig): PriceR
     const rule = rules.get(shareRuleFor[group]);
     // A disabled carrier-share rule means the carrier gets nothing for that group.
     const share = !rule ? 0 : rule.kind === "percent" ? applyBp(base, rule.percentBp ?? 0) : (rule.amountCents ?? 0);
-    if (share > base) warnings.push({ code: "negative_margin", group, legIndex: group === "transport" ? lines[idxs[0]].legIndex : null });
+    if (share > base) warnings.push({ code: "negative_margin", group, legIndex: group === "packing" ? null : lines[idxs[0]].legIndex });
     allocateProportionally(share, idxs.map((i) => lines[i].netCents)).forEach((a, k) => (carrierAmounts[idxs[k]] = a));
   }
 
@@ -257,23 +264,22 @@ export function calculatePrice(input: PriceInput, config: PricingConfig): PriceR
     carrierAmountCents: carrierAmounts[idx],
   }));
 
-  // Porter terms with the carrier share, so overtime gets the same share (D68).
-  let porters: QuotePorters | null = null;
-  if (porterTerms) {
-    const rule = rules.get("carrier_share_porters");
-    const portersLines = quoteLines.filter((l) => l.carrierShareGroup === "porters");
-    const carrierShare: QuotePorters["carrierShare"] = !rule
+  // Porter terms with the carrier share of the leg, so overtime gets the same share (D68, D74).
+  const shareRule = rules.get("carrier_share_porters");
+  const porters: QuotePorters[] = porterTerms.map((terms) => {
+    const legLines = quoteLines.filter((l) => l.carrierShareGroup === "porters" && l.legIndex === terms.legIndex);
+    const carrierShare: QuotePorters["carrierShare"] = !shareRule
       ? null
-      : rule.kind === "percent"
-        ? { kind: "percent", percentBp: rule.percentBp ?? 0 }
+      : shareRule.kind === "percent"
+        ? { kind: "percent", percentBp: shareRule.percentBp ?? 0 }
         : {
-            // A fixed amount per order cannot be applied per hour: overtime keeps the package's proportion.
+            // A fixed amount per leg cannot be applied per hour: overtime keeps the package's proportion.
             kind: "ratio",
-            carrierCents: portersLines.reduce((s, l) => s + l.carrierAmountCents, 0),
-            netCents: portersLines.reduce((s, l) => s + l.netCents, 0),
+            carrierCents: legLines.reduce((s, l) => s + l.carrierAmountCents, 0),
+            netCents: legLines.reduce((s, l) => s + l.netCents, 0),
           };
-    porters = { ...porterTerms, carrierShare };
-  }
+    return { ...terms, carrierShare };
+  });
 
   // Carrier amount per leg (each leg can be a separate job for a different carrier).
   const carrierAmountByLegCents = input.legs.map((_, i) =>

@@ -68,7 +68,7 @@ export async function previewQuoteAction(_prev: PreviewState, fd: FormData): Pro
       },
     ],
     porters: hasPorters
-      ? { packageCode: packageCode as PorterPackageCode, count: portersCount === "" ? undefined : int(fd, "porters_count") }
+      ? [{ legIndex: 0, packageCode: packageCode as PorterPackageCode, count: portersCount === "" ? undefined : int(fd, "porters_count") }]
       : undefined,
     packing: packingItems > 0 ? { itemsCount: packingItems } : undefined,
     storage: storageDays !== "" ? { days: int(fd, "storage_days"), pallets: int(fd, "storage_pallets") || undefined } : undefined,
