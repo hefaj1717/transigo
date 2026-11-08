@@ -8,6 +8,7 @@ const LINKS = [
   { href: "/admin/veicoli", label: "Veicoli" },
   { href: "/admin/area-di-servizio", label: "Area di servizio" },
   { href: "/admin/festivita", label: "Festività" },
+  { href: "/admin/magazzino", label: "Magazzino" },
 ];
 
 export function AdminNav() {
