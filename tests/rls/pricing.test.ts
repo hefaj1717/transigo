@@ -1,0 +1,234 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { anon, createUser, deleteCreatedUsers, service, type TestUser } from "./helpers";
+
+// Stage 2a security tests: price lists (admin only, drafts editable, published immutable),
+// holidays, service area provinces, pricing settings. See docs/spec.md D59–D61.
+
+let cliente: TestUser;
+let carrier: TestUser;
+let admin: TestUser;
+let blockedAdmin: TestUser;
+
+let activeId: string;
+const createdDrafts: string[] = [];
+
+async function activeList() {
+  const { data, error } = await service.from("price_lists").select("id, version").eq("status", "active").single();
+  if (error) throw error;
+  return data;
+}
+
+async function cloneActiveAsAdmin() {
+  const { data, error } = await admin.client.rpc("clone_price_list", { p_source_id: activeId });
+  if (error) throw error;
+  createdDrafts.push(data as string);
+  return data as string;
+}
+
+beforeAll(async () => {
+  cliente = await createUser({});
+  carrier = await createUser({ role: "padroncino" });
+  admin = await createUser({});
+  blockedAdmin = await createUser({});
+  const setup = await Promise.all([
+    service.from("profiles").update({ role: "admin" }).eq("id", admin.id),
+    service.from("profiles").update({ role: "admin", is_blocked: true }).eq("id", blockedAdmin.id),
+  ]);
+  for (const r of setup) if (r.error) throw r.error;
+  activeId = (await activeList()).id;
+});
+
+afterAll(async () => {
+  // Restore the original active list if a test published a draft, then drop test drafts.
+  const current = await activeList();
+  if (current.id !== activeId) {
+    throw new Error("A test left a different active price list; inspect manually");
+  }
+  if (createdDrafts.length) {
+    await service.from("price_lists").delete().in("id", createdDrafts).eq("status", "draft");
+  }
+  await deleteCreatedUsers();
+});
+
+describe("price tables are admin-only (D59)", () => {
+  for (const table of ["price_lists", "price_list_vehicle_rates", "price_rules"]) {
+    it(`anon, cliente, padroncino and a blocked admin read nothing from ${table}`, async () => {
+      for (const client of [anon, cliente.client, carrier.client, blockedAdmin.client]) {
+        const { data } = await client.from(table).select("*");
+        expect(data ?? []).toEqual([]);
+      }
+    });
+  }
+
+  it("admin reads the active list with rates for every active vehicle type and all rules", async () => {
+    const { data: rates } = await admin.client.from("price_list_vehicle_rates").select("vehicle_type_id").eq("price_list_id", activeId);
+    const { data: types } = await service.from("vehicle_types").select("id").eq("is_active", true);
+    expect(rates?.length).toBe(types?.length);
+    const { data: rules } = await admin.client.from("price_rules").select("code").eq("price_list_id", activeId);
+    expect(rules?.length).toBe(14);
+  });
+
+  it("non-admins cannot clone or publish", async () => {
+    for (const client of [cliente.client, carrier.client, blockedAdmin.client]) {
+      const clone = await client.rpc("clone_price_list", { p_source_id: activeId });
+      expect(clone.error).not.toBeNull();
+    }
+    const anonClone = await anon.rpc("clone_price_list", { p_source_id: activeId });
+    expect(anonClone.error).not.toBeNull();
+  });
+
+  it("non-admins cannot change rules of a draft", async () => {
+    const draftId = await cloneActiveAsAdmin();
+    const { data } = await cliente.client
+      .from("price_rules")
+      .update({ percent_bp: 0 })
+      .eq("price_list_id", draftId)
+      .eq("code", "carrier_share_transport")
+      .select();
+    expect(data ?? []).toEqual([]);
+    const { data: rule } = await service.from("price_rules").select("percent_bp").eq("price_list_id", draftId).eq("code", "carrier_share_transport").single();
+    expect(rule?.percent_bp).toBe(7000);
+  });
+});
+
+describe("price list versioning (D60)", () => {
+  it("admin clones the active list into a new draft with copied rates and rules", async () => {
+    const draftId = await cloneActiveAsAdmin();
+    const { data: draft } = await admin.client.from("price_lists").select("status, version").eq("id", draftId).single();
+    expect(draft?.status).toBe("draft");
+    const { count: rates } = await admin.client.from("price_list_vehicle_rates").select("*", { count: "exact", head: true }).eq("price_list_id", draftId);
+    const { count: rules } = await admin.client.from("price_rules").select("*", { count: "exact", head: true }).eq("price_list_id", draftId);
+    expect(rates).toBeGreaterThan(0);
+    expect(rules).toBe(14);
+  });
+
+  it("admin edits a draft (list fields, rates, rules)", async () => {
+    const draftId = await cloneActiveAsAdmin();
+    const a = await admin.client.from("price_lists").update({ urgent_lead_hours: 12 }).eq("id", draftId).select();
+    expect(a.error).toBeNull();
+    expect(a.data?.length).toBe(1);
+    const b = await admin.client.from("price_list_vehicle_rates").update({ rate_per_km_cents: 999 }).eq("price_list_id", draftId).select();
+    expect(b.error).toBeNull();
+    expect(b.data?.length).toBeGreaterThan(0);
+    const c = await admin.client.from("price_rules").update({ amount_cents: 1234 }).eq("price_list_id", draftId).eq("code", "porter_hour").select();
+    expect(c.error).toBeNull();
+    expect(c.data?.length).toBe(1);
+  });
+
+  it("admin cannot change status or version directly", async () => {
+    const draftId = await cloneActiveAsAdmin();
+    for (const patch of [{ status: "active" }, { version: 999 }, { published_at: new Date().toISOString() }]) {
+      const { error } = await admin.client.from("price_lists").update(patch).eq("id", draftId);
+      expect(error, JSON.stringify(patch)).not.toBeNull();
+    }
+  });
+
+  it("the active list, its rates and rules are read-only for admin and service role", async () => {
+    const r1 = await admin.client.from("price_lists").update({ notes: "x" }).eq("id", activeId);
+    expect(r1.error).not.toBeNull();
+    const r2 = await admin.client.from("price_list_vehicle_rates").update({ rate_per_km_cents: 1 }).eq("price_list_id", activeId);
+    expect(r2.error).not.toBeNull();
+    const r3 = await admin.client.from("price_rules").update({ is_enabled: false }).eq("price_list_id", activeId).eq("code", "porter_hour");
+    expect(r3.error).not.toBeNull();
+    const r4 = await service.from("price_rules").update({ amount_cents: 1 }).eq("price_list_id", activeId).eq("code", "porter_hour");
+    expect(r4.error).not.toBeNull();
+    const r5 = await admin.client.from("price_lists").delete().eq("id", activeId);
+    expect(r5.error).not.toBeNull();
+    expect((await activeList()).id).toBe(activeId);
+  });
+
+  it("rule checks reject a kind that does not match the code or the value columns", async () => {
+    const draftId = await cloneActiveAsAdmin();
+    const bad = [
+      { kind: "percent", amount_cents: null, percent_bp: 1000, code: "porter_hour" }, // porters must be per_unit
+      { kind: "percent", amount_cents: 100, percent_bp: null, code: "surcharge_urgent" }, // percent without percent_bp
+      { kind: "percent", amount_cents: null, percent_bp: 12000, code: "carrier_share_transport" }, // > 100 %
+    ];
+    for (const { code, ...patch } of bad) {
+      const { error } = await admin.client.from("price_rules").update(patch).eq("price_list_id", draftId).eq("code", code);
+      expect(error, code).not.toBeNull();
+    }
+  });
+
+  it("publishing an incomplete draft fails and leaves the active list untouched", async () => {
+    const draftId = await cloneActiveAsAdmin();
+    await admin.client.from("price_rules").delete().eq("price_list_id", draftId).eq("code", "packing_flat");
+    const { error } = await admin.client.rpc("publish_price_list", { p_price_list_id: draftId });
+    expect(error?.message).toMatch(/missing/);
+    expect((await activeList()).id).toBe(activeId);
+  });
+
+  it("publishing archives the previous list and keeps exactly one active (then restores)", async () => {
+    const draftId = await cloneActiveAsAdmin();
+    const { error } = await admin.client.rpc("publish_price_list", { p_price_list_id: draftId });
+    expect(error).toBeNull();
+    const { data: lists } = await service.from("price_lists").select("id, status").in("id", [activeId, draftId]);
+    expect(Object.fromEntries((lists ?? []).map((l) => [l.id, l.status]))).toEqual({ [activeId]: "archived", [draftId]: "active" });
+    const { count } = await service.from("price_lists").select("*", { count: "exact", head: true }).eq("status", "active");
+    expect(count).toBe(1);
+
+    // archived → active is not allowed, even for the service role
+    const back = await service.from("price_lists").update({ status: "active" }).eq("id", activeId);
+    expect(back.error).not.toBeNull();
+
+    // Restore: clone the original (archived) list and publish the clone. Its content equals the original.
+    const { data: restoredId, error: cloneErr } = await admin.client.rpc("clone_price_list", { p_source_id: activeId });
+    expect(cloneErr).toBeNull();
+    const pub = await admin.client.rpc("publish_price_list", { p_price_list_id: restoredId });
+    expect(pub.error).toBeNull();
+    activeId = restoredId as string;
+  });
+});
+
+describe("holidays", () => {
+  it("anon reads holidays", async () => {
+    const { data } = await anon.from("holidays").select("date, name_it").eq("date", "2026-06-02").single();
+    expect(data?.name_it).toBe("Festa della Repubblica");
+  });
+  it("non-admins cannot add holidays", async () => {
+    for (const client of [anon, cliente.client, carrier.client]) {
+      const { error } = await client.from("holidays").insert({ date: "2030-01-02", name_it: "Test" });
+      expect(error).not.toBeNull();
+    }
+  });
+  it("admin adds and removes a holiday", async () => {
+    const ins = await admin.client.from("holidays").insert({ date: "2030-01-02", name_it: "Test" });
+    expect(ins.error).toBeNull();
+    const del = await admin.client.from("holidays").delete().eq("date", "2030-01-02").select();
+    expect(del.data?.length).toBe(1);
+  });
+});
+
+describe("service area provinces", () => {
+  it("anon sees only active provinces", async () => {
+    const { data: all } = await service.from("service_area_provinces").select("province_code, is_active");
+    expect(all?.length).toBe(107);
+    const { data } = await anon.from("service_area_provinces").select("province_code, is_active");
+    expect((data ?? []).every((p) => p.is_active)).toBe(true);
+    expect(data?.length).toBe((all ?? []).filter((p) => p.is_active).length);
+  });
+  it("non-admins cannot activate a province", async () => {
+    const { data } = await cliente.client.from("service_area_provinces").update({ is_active: true }).eq("province_code", "AO").select();
+    expect(data ?? []).toEqual([]);
+    const { data: row } = await service.from("service_area_provinces").select("is_active").eq("province_code", "AO").single();
+    expect(row?.is_active).toBe(false);
+  });
+  it("admin activates and deactivates a province", async () => {
+    const on = await admin.client.from("service_area_provinces").update({ is_active: true }).eq("province_code", "AO").select();
+    expect(on.data?.length).toBe(1);
+    const off = await admin.client.from("service_area_provinces").update({ is_active: false }).eq("province_code", "AO").select();
+    expect(off.data?.[0]?.is_active).toBe(false);
+  });
+});
+
+describe("pricing settings", () => {
+  it("only admin reads and changes max_route_distance_m", async () => {
+    const { data: none } = await cliente.client.from("settings").select("max_route_distance_m");
+    expect(none ?? []).toEqual([]);
+    const { data: before } = await admin.client.from("settings").select("max_route_distance_m, min_booking_lead_hours, quote_valid_minutes").single();
+    expect(before).toEqual({ max_route_distance_m: 300000, min_booking_lead_hours: 3, quote_valid_minutes: 30 });
+    const upd = await admin.client.from("settings").update({ max_route_distance_m: 250000 }).eq("id", true).select("max_route_distance_m");
+    expect(upd.data?.[0]?.max_route_distance_m).toBe(250000);
+    await admin.client.from("settings").update({ max_route_distance_m: 300000 }).eq("id", true);
+  });
+});
