@@ -45,6 +45,8 @@ Pełna lista decyzji: [docs/spec.md, sekcja 0](docs/spec.md#0-rejestr-decyzji-20
 Uwagi techniczne:
 - Next.js 16: middleware nazywa się **proxy** (`src/proxy.ts`); odświeża sesję Supabase. Przed pisaniem kodu Next sprawdzaj `node_modules/next/dist/docs/`.
 - Supabase CLI 3.x domyślnie celuje w lokalny stack. Staging (chmura): zawsze `--remote` (skrypty `npm run db:push`, `npm run db:list`). Lokalny stack (Docker) służy **wyłącznie do testów RLS** (D64): `npm run db:local:start` / `db:local:stop` / `db:local:reset`, porty 553xx (`supabase/config.toml`; 543xx zajmuje inny projekt na tym komputerze).
+- **Zmiany w bazie w chmurze:** `npm run db:push` (i potwierdzenie `--yes`, którego CLI wymaga w trybie agenta) uruchamiamy **tylko po wyraźnej zgodzie właściciela w danej rozmowie** — zgoda z wcześniejszej rozmowy lub z planu nie wystarcza. CLI oznacza obecny projekt (`bacabuzzevwwdxrswbnc`, staging) jako „production”; to jedyny projekt w chmurze.
+- **Gdy powstanie osobny projekt produkcyjny:** każde polecenie na nim (push, reset, SQL, zmiany w panelu, sekrety) wymaga osobnego potwierdzenia właściciela, w którym pada **nazwa projektu**. Przed takim poleceniem pokazać, na który projekt (nazwa + ref) celuje CLI.
 - Testy bezpieczeństwa RLS: `npm run test:rls` (`tests/rls/`) — **tylko na lokalnym Supabase** (D64): `global-setup.ts` bierze klucze z `supabase status`, odrzuca każdy inny adres niż `http://127.0.0.1:55321` i przed uruchomieniem resetuje lokalną bazę (wszystkie migracje z repo). Wymaga włączonego Dockera i `npm run db:local:start`. Nigdy nie kierować ich na staging/produkcję. Każda migracja z tabelą/polityką dostaje testy w tym folderze.
 
 ## Zasady pracy
