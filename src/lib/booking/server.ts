@@ -210,6 +210,8 @@ export type VehiclePrice = { vehicleTypeId: string; headlineCents: number } | { 
 /** What is stored in quotes.input (D76): enough to create the order without asking Google again. */
 export type StoredQuoteInput = {
   key: string; // priceRelevantKey(state)
+  /** Customer who requested the quote (null = not signed in). Only the owner can order with it (D76). */
+  ownerId: string | null;
   state: WizardState;
   vehicleTypeId: string;
   storageDays: number | null;
@@ -252,6 +254,7 @@ export async function quoteBooking(
   state: WizardState,
   customerType: "private" | "business",
   now: Date = new Date(),
+  ownerId: string | null = null,
 ): Promise<{ outcome: QuoteOutcome; server: ServerQuote | null }> {
   const fail = (error: BookingError) => ({ outcome: { ok: false as const, error }, server: null });
   if (!state.pickup || !state.delivery || !state.pickupDate || !state.pickupWindow) return fail({ code: "incomplete" });
@@ -330,6 +333,7 @@ export async function quoteBooking(
     const validUntil = new Date(now.getTime() + (await quoteValidMinutes(db)) * 60_000);
     const input: StoredQuoteInput = {
       key: priceRelevantKey(state),
+      ownerId,
       state,
       vehicleTypeId: state.vehicleTypeId,
       storageDays: plan.storageDays,

@@ -28,11 +28,13 @@ export async function POST(request: Request) {
 
   // Signed-in customers always get the price for their account type (D3); others use the toggle.
   const ctx = await getAccountContext();
-  const customerType = ctx.state === "signed_in" && ctx.role === "cliente" && ctx.customerType ? ctx.customerType : state.customerTypeView;
+  const signedInCustomer = ctx.state === "signed_in" && ctx.role === "cliente" && !ctx.isBlocked && ctx.customerType ? ctx : null;
+  const customerType = signedInCustomer?.customerType ?? state.customerTypeView;
+  const ownerId = signedInCustomer?.userId ?? null; // D76: only this customer can order with the stored quote
 
   const db = createServiceClient();
   try {
-    const { outcome } = await quoteBooking(db, state, customerType);
+    const { outcome } = await quoteBooking(db, state, customerType, new Date(), ownerId);
     if (!outcome.ok) {
       const options = await loadBookingOptions(db);
       return NextResponse.json({

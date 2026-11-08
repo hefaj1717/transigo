@@ -5,7 +5,8 @@ import { defineConfig } from "vitest/config";
 // resets the local database before the run.
 // Run with: npm run db:local:start (once, Docker required), then npm run test:rls
 export default defineConfig({
-  resolve: { tsconfigPaths: true },
+  // "server-only" throws outside React Server Components; tests import server modules directly.
+  resolve: { tsconfigPaths: true, alias: { "server-only": new URL("./tests/stubs/server-only.ts", import.meta.url).pathname } },
   test: {
     environment: "node",
     include: ["tests/rls/**/*.test.ts"],
