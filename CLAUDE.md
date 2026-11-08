@@ -58,7 +58,7 @@ Uwagi techniczne:
 - **Audit log:** każdą akcję admina zapisuje `audit(ctx, …)` (`src/lib/admin/server.ts`) — log jest append-only i trzyma `actor_id` + `actor_email` (D65). W `audit_log.data` nie zapisujemy danych osobowych klientów (adresy, telefony itp.), tylko ID i zmienione wartości biznesowe.
 - **Decyzje:** nowe ustalenia dopisuj do rejestru decyzji w `docs/spec.md` (sekcja 0).
 - **Stripe tylko w trybie testowym**, dopóki właściciel nie powie inaczej. Klucze wyłącznie w `.env*`, nigdy w kodzie ani w commitach.
-- **Małe kroki:** jedno zadanie naraz, po każdym działającym kroku commit.
+- **Małe kroki:** jedno zadanie naraz, po każdym działającym kroku commit, a po commicie `git push` na `origin` (prywatne repo `hefaj1717/transigo`).
 - **Gdy czegoś nie wiesz — pytaj, zamiast zgadywać.**
 
 ## Struktura folderów (docelowa)
