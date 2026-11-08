@@ -94,7 +94,16 @@ Uwagi techniczne:
 ## Etapy
 
 - [x] 0. Fundament (repo, CLAUDE.md, spec, .gitignore, .env.example)
-- [ ] 1. Szkielet Next.js + Supabase, logowanie z rolami cliente/padroncino/admin, schemat bazy, RLS
+- [x] 1. Szkielet Next.js + Supabase, logowanie z rolami cliente/padroncino/admin, schemat bazy, RLS — **reset hasła do ponownego testu ręcznego** (limit maili Supabase)
+  - Powstało: migracje `accounts`, `vehicles_documents`, `settings_audit`, `consents` (D42–D44); ekrany `/registrati`, `/accedi`, `/password-dimenticata`, `/reimposta-password`, `/auth/confirm`, `/account-sospeso`, panele `/cliente`, `/padroncino` (ekran „Account in attesa di verifica”), `/admin`; walidatory i schematy zod w `src/lib/auth/`; testy jednostkowe + `tests/rls/` (w tym routing ról na prawdziwej bazie).
+  - Pamiętać:
+    - Każda strona/akcja zależna od sesji sprawdza dostęp przez DAL (`requireArea()` / `getAccountContext()` z `src/lib/auth/session.ts`) wewnątrz `<Suspense>`; layout i proxy nie wystarczą (proxy tylko przekierowuje niezalogowanych).
+    - `getAccountContext()` woła `connection()` (inaczej błąd „Date.now() while prerendering” przy `partialPrefetching`); nie cache'ujemy kontekstu (`use cache: private`), żeby blokada konta działała od razu.
+    - Zablokowany użytkownik nie czyta własnego profilu przez RLS — DAL czyta profil klientem service role (`src/lib/supabase/service.ts`, tylko po id z sesji).
+    - Rejestracja: wiersz `customers`/`carriers` i zgody zapisuje serwer; przy błędzie konto auth jest usuwane (rollback).
+    - Klient prywatny nie ma CF po rejestracji — przed utworzeniem Checkout (Etap 3) serwer musi wymagać CF i adresu z „Riepilogo” (D43).
+    - Panel Supabase: szablony e-mail używają `{{ .RedirectTo }}?token_hash=…&type=email|recovery`; każdy adres aplikacji (localhost, Vercel) musi być w Redirect URLs jako `…/auth/confirm`.
+    - Wymuszony jasny motyw (`globals.css`); tryb ciemny przy pracy nad wyglądem.
 - [ ] 2. Silnik cenowy, kreator rezerwacji, strona publiczna
   - **Przed Etapem 3:** Kupić domenę, skonfigurować Resend (DNS SPF/DKIM), podpiąć SMTP w Supabase i podnieść Rate Limits.
 - [ ] 3. Płatność klienta (Stripe Checkout + webhook)
