@@ -1,0 +1,46 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { getAccountContext } from "@/lib/auth/session";
+import { bookingErrorMessage, bookingErrorStep } from "@/lib/booking/messages";
+import { loadBookingOptions, quoteBooking } from "@/lib/booking/server";
+import { wizardStateSchema } from "@/lib/booking/state";
+import { createServiceClient } from "@/lib/supabase/service";
+
+// Live quote for the booking wizard (works without login, D8). A route handler, not a Server Action:
+// Server Actions run one at a time per client and the wizard re-quotes often.
+// The price is computed only here (D76); the response carries customer amounts only (toPublicQuote).
+// TODO before production: rate limiting per IP (public endpoint that calls Google and writes quotes).
+const bodySchema = z.object({ state: wizardStateSchema });
+
+export async function POST(request: Request) {
+  const parsed = bodySchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json({ ok: false, error: { code: "invalid_input" }, message: "Richiesta non valida.", step: "percorso" }, { status: 400 });
+  }
+  const { state } = parsed.data;
+
+  // Signed-in customers always get the price for their account type (D3); others use the toggle.
+  const ctx = await getAccountContext();
+  const customerType = ctx.state === "signed_in" && ctx.role === "cliente" && ctx.customerType ? ctx.customerType : state.customerTypeView;
+
+  const db = createServiceClient();
+  try {
+    const { outcome } = await quoteBooking(db, state, customerType);
+    if (!outcome.ok) {
+      const options = await loadBookingOptions(db);
+      return NextResponse.json({
+        ...outcome,
+        customerType,
+        message: bookingErrorMessage(outcome.error, { maxDistanceKm: options.maxDistanceKm, minLeadHours: options.minLeadHours }),
+        step: bookingErrorStep(outcome.error),
+      });
+    }
+    return NextResponse.json({ ...outcome, customerType });
+  } catch (e) {
+    console.error("[booking] quote:", e instanceof Error ? e.message : e);
+    return NextResponse.json(
+      { ok: false, error: { code: "pricing_unavailable" }, message: "Il calcolo del prezzo non è disponibile in questo momento. Riprova tra poco.", step: "preventivo" },
+      { status: 503 },
+    );
+  }
+}
