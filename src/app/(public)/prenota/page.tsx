@@ -28,7 +28,7 @@ async function Content({ searchParams }: Pick<PageProps<"/prenota">, "searchPara
   let session: WizardSession = { kind: "anonymous" };
   if (ctx.state === "signed_in") {
     if (ctx.isBlocked) session = { kind: "blocked" };
-    else if (ctx.role !== "cliente") session = { kind: "other_role" };
+    else if (ctx.role !== "cliente") session = { kind: "other_role", role: ctx.role };
     else if (ctx.customerProfile !== "complete" || !ctx.customerType) session = { kind: "incomplete" };
     else session = { kind: "customer", customerType: ctx.customerType, firstName: ctx.firstName };
   }

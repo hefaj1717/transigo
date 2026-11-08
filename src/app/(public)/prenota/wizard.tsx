@@ -8,6 +8,7 @@ import type { BookingOptions } from "@/lib/booking/server";
 import { EMPTY_WIZARD_STATE, parseStoredState, WIZARD_STORAGE_KEY, type PlaceChoice, type WizardState } from "@/lib/booking/state";
 import { romeToday, TIME_WINDOW_LABEL, TIME_WINDOWS, type TimeWindow } from "@/lib/booking/windows";
 import { loadCheckoutDefaults, submitBooking } from "./actions";
+import { SignOutButton } from "@/components/sign-out-button";
 import { AddressField } from "./address-field";
 import { Headline, PorterPicker, QuoteBreakdown } from "./quote-view";
 import { STEPS, stepIndex, type QuoteResponse, type WizardSession } from "./types";
@@ -172,7 +173,10 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
         if (!selected) error = "Il preventivo non è ancora pronto.";
         break;
       case "account":
-        if (session.kind !== "customer") error = "Accedi o registrati per continuare.";
+        if (session.kind === "anonymous") error = "Accedi o registrati per continuare.";
+        else if (session.kind === "incomplete") error = "Completa il tuo profilo per continuare.";
+        else if (session.kind === "other_role") error = "Hai effettuato l'accesso con un account che non è un account cliente. Esci e accedi come cliente.";
+        else if (session.kind === "blocked") error = "Il tuo account è sospeso.";
         break;
       case "contatti":
         if (!contacts.pickupName.trim() || !contacts.pickupPhone.trim() || !contacts.deliveryName.trim() || !contacts.deliveryPhone.trim()) {
@@ -589,7 +593,12 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
                   <Link className="text-blue-700 underline" href={`/completa-profilo?next=${encodeURIComponent("/prenota?passo=account")}`}>completa il profilo</Link>.
                 </p>
               ) : session.kind === "other_role" ? (
-                <p className="rounded-md bg-amber-50 p-3 text-amber-900">Solo i clienti possono prenotare. Esci e accedi con un account cliente.</p>
+                <>
+                  <p className="rounded-md bg-amber-50 p-3 text-amber-900">
+                    Hai effettuato l&apos;accesso{session.role === "admin" ? " come amministratore" : session.role === "padroncino" ? " come trasportatore" : ""}. Solo i clienti possono prenotare: esci e accedi con un account cliente. Il preventivo resta salvato su questo dispositivo.
+                  </p>
+                  <SignOutButton next="/prenota?passo=account" label="Esci e accedi come cliente" className="rounded-md bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700" />
+                </>
               ) : session.kind === "blocked" ? (
                 <p className="rounded-md bg-red-50 p-3 text-red-800">Il tuo account è sospeso. Contattaci per assistenza.</p>
               ) : (

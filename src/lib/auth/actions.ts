@@ -10,7 +10,7 @@ import { getAppUrl } from "@/lib/supabase/env";
 import { loadAccountContext } from "./account-context";
 import { AUTH_MSG, authErrorMessage, isVatTakenError } from "./errors";
 import { echoValues, type FormState } from "./form-state";
-import { allowedNext, AREA_HOME, PATHS, resolveCompleteProfilePage, resolvePostSignIn, resolveResetPasswordPage } from "./routing";
+import { allowedNext, AREA_HOME, PATHS, resolveCompleteProfilePage, resolvePostSignIn, resolveResetPasswordPage, sanitizeNext } from "./routing";
 import {
   carrierRegistrationSchema,
   customerProfileCompletionSchema,
@@ -217,10 +217,13 @@ export async function signIn(_prev: FormState, formData: FormData): Promise<Form
   redirect(resolvePostSignIn(ctx, input.next));
 }
 
-export async function signOut(): Promise<void> {
+export async function signOut(formData?: FormData): Promise<void> {
   const supabase = await createClient();
   await supabase.auth.signOut();
-  redirect(PATHS.signIn);
+  // Optional "next" (e.g. back to the booking wizard): same-origin paths only (open-redirect protection).
+  const raw = formData?.get("next");
+  const next = sanitizeNext(typeof raw === "string" ? raw : null);
+  redirect(next ? `${PATHS.signIn}?next=${encodeURIComponent(next)}` : PATHS.signIn);
 }
 
 // ---------------------------------------------------------------------------

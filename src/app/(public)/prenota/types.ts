@@ -7,7 +7,7 @@ export type WizardSession =
   | { kind: "anonymous" }
   | { kind: "customer"; customerType: "private" | "business"; firstName: string | null }
   | { kind: "incomplete" } // D80
-  | { kind: "other_role" }
+  | { kind: "other_role"; role: "padroncino" | "admin" }
   | { kind: "blocked" };
 
 export type VehiclePriceView = { vehicleTypeId: string; headlineCents: number } | { vehicleTypeId: string; error: BookingError };
