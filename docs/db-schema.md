@@ -40,7 +40,7 @@
 | `carrier_status` | `pending_review`, `active`, `rejected`, `suspended` | spec 8.1. |
 | `carrier_document_type` | `transport_license`, `insurance_rca`, `goods_insurance`, `vehicle_registration`, `identity_document`, `driving_license` | |
 | `review_status` | `pending`, `approved`, `rejected` | dokumenty przewoźnika. |
-| `order_status` | `draft`, `pending_payment`, `expired`, `paid`, `assigned`, `picked_up`, `in_transit`, `delivered`, `completed`, `cancellation_review`, `cancelled`, `refunded` | spec 4, 4a (D33). |
+| `order_status` | `draft`, `pending_payment`, `expired`, `paid`, `payment_review` (Etap 3, D96), `assigned`, `picked_up`, `in_transit`, `delivered`, `completed`, `cancellation_review`, `cancelled`, `refunded` | spec 4, 4a (D33). |
 | `status_source` | `customer_app`, `carrier_app`, `admin_panel`, `stripe_webhook`, `system_job` | skąd przyszła zmiana statusu. |
 | `order_line_type` | `transport`, `surcharge_urgent`, `surcharge_weekend_holiday`, `surcharge_floors`, `porters`, `packing`, `storage` | pozycje rozbicia ceny. |
 | `carrier_share_group` | `transport`, `porters`, `packing`, `none` | do której reguły D6 należy pozycja (dopłaty → `transport`, D14; magazyn → `none`). |
@@ -53,6 +53,8 @@
 | `payment_purpose` | `order`, `storage_extension` | |
 | `payment_status` | `pending`, `succeeded`, `expired`, `failed` | |
 | `refund_status` | `pending`, `succeeded`, `failed` | |
+| `refund_kind` | `customer_cancellation`, `admin` | Etap 3 |
+| `email_status` | `queued`, `sent`, `failed`, `captured_dev` | Etap 3, D93 |
 | `invoice_kind` | `invoice`, `credit_note` | faktura / nota di credito. |
 | `sdi_status` | `queued`, `sent`, `delivered`, `rejected`, `error` | UI: in coda, inviata, consegnata, scartata, errore. |
 | `carrier_invoice_status` | `uploaded`, `matched`, `to_verify`, `accepted`, `rejected` | `matched` = automatycznie zgodna; `accepted` = zaakceptowana przez admina po `to_verify`. |
@@ -248,6 +250,7 @@ PK `(price_list_id, code)`. Check: dokładnie jedno z `amount_cents` / `percent_
 | `unassigned_alert_hours` | `integer` not null default 4 | dashboard: `paid` bez przewoźnika |
 | `free_cancellation_hours` | `integer` not null default 24 | D33: bezpłatne anulowanie do X h przed `pickup_window_start` |
 | `late_cancellation_fee_bp` | `integer` not null default 5000 check 0–10000 | D33: opłata Y % (50 %) przy późnym anulowaniu |
+| `payment_window_minutes` | `integer` not null default 60 check 30–1440 | D88: czas na płatność zlecenia **[DO USTALENIA]** |
 | `company_name`, `company_vat_number`, `company_fiscal_code`, `company_street`, `company_city`, `company_postal_code`, `company_province`, `company_pec`, `company_sdi_code`, `company_email`, `company_phone` | `text` | dane Transigo do faktur |
 | `terms_version`, `privacy_version` | `text` not null default `'2026-11-01'` | aktualne wersje „Termini” i „Privacy” zapisywane przy zgodzie (D42) |
 | `updated_at`, `updated_by` | | |
@@ -303,7 +306,7 @@ Indeks: `(created_at)` do czyszczenia (> 24 h usuwa serwer).
 | `tracking_token` | `text` unique | 🔒 (D24) |
 | `created_at`, `updated_at` | | |
 
-Kolumny anulowania (`cancel_reason`, `cancellation_requested_*`, `cancellation_decided_*`, `cancellation_fee_cents` → `order_charges`, `cancellation_carrier_amount_cents` → tabela przewoźnika) dochodzą z funkcją anulowania w Etapie 3 (D77).
+**Etap 3 (migracja `payments`):** `payment_due_at timestamptz not null` 🔒 (D88; trigger przy insert z `settings`, potem niezmienny dla wszystkich); anulowanie (D94): `cancellation_requested_at`, `cancellation_requested_by uuid` (bez FK), `cancellation_reason text`, `cancellation_decided_at`, `cancellation_decided_by uuid`. Checki: `cancellation_review` ⇒ `cancellation_requested_at`; `cancelled` ⇒ `cancelled_at`. Indeks `(payment_due_at) where status = 'pending_payment'`. Kwota przewoźnika przy anulowaniu (D40) — w `payouts` (Etap 6), bez osobnej kolumny. Zlecenia z płatnością `succeeded` nie da się usunąć (trigger, także service role).
 Indeksy: `(customer_id, created_at desc)`, `(carrier_id, status)`, `(status, pickup_window_start)`.
 Checki: magazyn — `storage_type`, `storage_billing_unit`, `storage_days`, `warehouse_id` wszystkie albo żadne, `storage_pallets` przy `pallet_day`; `paid_at is not null` gdy status ∈ {`paid` … `completed`}; `carrier_id is not null` gdy status ∈ {`assigned`, `picked_up`, `in_transit`, `delivered`, `completed`, `cancellation_review`}. Liczba odcinków (1 bez magazynu, 2 z magazynem) — sprawdza `create_order`.
 Triggery: `order_number`; `order_number`, `customer_id`, `created_at` niezmienne; `DELETE` tylko dla `draft`/`pending_payment`/`expired` (także service role) — kaskadowo usuwa tabele podrzędne.
@@ -347,7 +350,8 @@ Check: kolumny tragarzy wszystkie albo żadne (`porters_count ≥ 1` przy katego
 | `vat_rate_bp` | `integer` not null | 🔒 |
 | `subtotal_cents`, `vat_cents`, `total_cents` | `integer` not null ≥ 0, `total = subtotal + vat` | 🔒 `total` = kwota w Stripe |
 | `porter_overtime_rate_cents` | `integer` ≥ 0 | 🔒 cena za osobę za rozpoczętą godzinę (D68); null = bez tragarzy lub reguła wyłączona |
-| `refunded_cents` | `integer` not null default 0, ≤ `total` | 🔒 jedyne pole zmienne (Etap 3) |
+| `refunded_cents` | `integer` not null default 0, ≤ `total` | 🔒 zmienne (zwroty, Etap 6) |
+| `cancellation_fee_cents` | `integer` 0 – `total` | 🔒 zmienne; opłata za późne anulowanie (D33, D38, Etap 3) |
 | `billing_details` | `jsonb` not null | 🔒 snapshot danych do faktury (D36, D43, D44) |
 | `terms_accepted_at`, `terms_version` | `timestamptz`, `text` not null | |
 | `quoted_at` | `timestamptz` not null | czas wyceny użytej w zleceniu |
@@ -451,42 +455,52 @@ Indeksy: `(order_id)`, `(status, created_at)` dla kolejki admina. Po zapisie ser
 
 ### 3.4 Płatności i faktury klienta
 
-#### `payments` — płatności Stripe (zlecenie albo przedłużenie magazynu)
+#### `payments` — płatności Stripe (jeden wiersz = jedna sesja Checkout; Etap 3, D89)
 | Kolumna | Typ | Uwagi |
 |---|---|---|
 | `id` | `uuid` PK | |
-| `purpose` | `payment_purpose` not null | |
-| `order_id` | `uuid` FK → `orders` not null | |
-| `storage_extension_id` | `uuid` FK → `storage_extensions`, null | dla `storage_extension` |
-| `amount_cents` | `integer` not null check > 0 | 🔒 |
-| `status` | `payment_status` not null | 🔒 tylko webhook |
-| `stripe_checkout_session_id` | `text` unique | 🔒 |
-| `stripe_payment_intent_id` | `text` unique | 🔒 |
-| `paid_at` | `timestamptz` | 🔒 |
+| `purpose` | `payment_purpose` not null default `order` | |
+| `order_id` | `uuid` FK → `orders` not null, on delete cascade | (usunąć da się tylko zlecenie bez płatności `succeeded`) |
+| `amount_cents` | `integer` not null check > 0 | 🔒 = `order_charges.total_cents` przy tworzeniu sesji |
+| `currency` | `char(3)` not null default `eur` check = `eur` | |
+| `status` | `payment_status` not null default `pending` | 🔒 tylko funkcje (webhook) |
+| `stripe_checkout_session_id` | `text` unique not null | 🔒 |
+| `stripe_payment_intent_id`, `stripe_charge_id` | `text` unique | 🔒 z webhooka (D90) |
+| `transfer_group` | `text` not null | 🔒 = `order_number` (D90) |
+| `amount_received_cents`, `received_currency` | `integer`, `char(3)` | 🔒 z PaymentIntent |
+| `review_reason` | `text` (`amount_mismatch` / `currency_mismatch` / `duplicate_payment` / `late_payment`) | 🔒 D96 |
+| `expires_at`, `paid_at` | `timestamptz` | 🔒 |
+| `failure_message` | `text` | 🔒 |
 | `created_at`, `updated_at` | | |
 
-Indeks: `(order_id)`. Wszystkie pola 🔒.
+Indeksy: `(order_id, created_at desc)`, **unique `(order_id) where status = 'pending'`** — najwyżej jedna otwarta sesja na zlecenie. `storage_extension_id` dochodzi w Etapie 7.
+Zapis **wyłącznie** przez funkcje `SECURITY DEFINER` (sekcja 4) — bezpośredni `INSERT/UPDATE/DELETE` odebrany wszystkim rolom API, także `service_role`. Trigger: kolumny tożsamości i kwoty niezmienne.
 **RLS:** klient czyta płatności swoich zleceń; admin wszystko; przewoźnik brak.
 
-#### `refunds` — zwroty
+#### `refunds` — zwroty (Etap 3: tylko model; przycisk zwrotu w Etapie 6)
 | Kolumna | Typ | Uwagi |
 |---|---|---|
 | `id` | `uuid` PK | |
-| `order_id`, `payment_id` | `uuid` FK | |
-| `amount_cents` | `integer` not null check > 0 | 🔒 suma zwrotów ≤ kwota płatności (sprawdza serwer + trigger) |
+| `order_id`, `payment_id` | `uuid` FK, on delete restrict | płatność musi być `succeeded` i należeć do zlecenia (trigger) |
+| `kind` | `refund_kind` not null | |
+| `amount_cents` | `integer` not null check > 0 | 🔒 suma zwrotów (bez `failed`) ≤ kwota płatności (trigger) |
 | `reason` | `text` not null | |
-| `status` | `refund_status` | 🔒 |
+| `status` | `refund_status` not null default `pending` | 🔒 |
 | `stripe_refund_id` | `text` unique | 🔒 |
 | `after_payout` | `boolean` not null default false | 🔒 zwrot po wypłacie → koszt Transigo (D5) |
-| `credit_note_id` | `uuid` FK → `customer_invoices` | 🔒 |
-| `created_by` | `uuid` FK → `profiles` | admin |
+| `created_by` | `uuid` (bez FK) | admin |
 | `created_at`, `updated_at` | | |
 
-**RLS:** klient czyta zwroty swoich zleceń, bez `reason` z panelu admina (przez widok). Admin wszystko. Zapis wyłącznie przez serwer.
+`credit_note_id` (→ `customer_invoices`) dochodzi w Etapie 6.
+**RLS:** klient czyta zwroty swoich zleceń, admin wszystko. Zapis tylko serwer (service role).
 
 #### `stripe_events` — idempotencja webhooków
-`event_id text` PK, `type text`, `account text` (dla eventów Connect), `received_at`, `processed_at`, `error text`.
-**RLS:** brak dostępu dla `authenticated`; tylko service role. Admin czyta przez serwer.
+`event_id text` PK, `type text`, `livemode boolean`, `account text` (dla eventów Connect), `received_at`, `processed_at` (null = do ponowienia), `attempts smallint`, `error text` (błąd albo powód zignorowania).
+**RLS:** włączone, bez polityk; `anon`/`authenticated` bez uprawnień — tylko service role.
+
+#### `email_outbox` — wszystkie maile aplikacji (Etap 3, D93)
+`id uuid` PK, `template_code text`, `order_id uuid` FK → `orders` on delete set null, `recipient_id uuid`, `to_address`, `subject`, `html`, `text_body`, `status email_status` (`captured_dev` w trybie dev), `provider_message_id`, `error`, `attempts`, `created_at`, `sent_at`. **Unique `(template_code, order_id)`** — jeden mail danego typu na zlecenie. Zastępuje `notification_log` dla maili (SMS — osobno w Etapie 5).
+**RLS:** włączone, bez polityk; tylko service role (admin czyta przez serwer).
 
 #### `customer_invoices` — e-faktury i noty korygujące dla klienta (SDI)
 | Kolumna | Typ | Uwagi |
@@ -628,6 +642,11 @@ Indeks: `(entity_type, entity_id, created_at)`.
 | Obiekt | Typ | Kto | Co robi |
 |---|---|---|---|
 | `create_order(payload jsonb)` | funkcja `SECURITY DEFINER` | tylko `service_role` (serwer) | W jednej transakcji tworzy `orders`, `order_legs`, `order_charges`, `order_lines`, `order_leg_carrier_terms` i wpis historii `→ pending_payment` (`customer_app`). Sprawdza: 1–2 odcinki z kolejnymi indeksami, magazyn ⇔ 2 odcinki, sumy pozycji = sumy `order_charges`, `total = subtotal + vat`, tragarze odcinka ⇔ pozycja `porters` tego odcinka, `carrier_amount = suma grup`. Zwraca `id` i `order_number` (D77). |
+| `start_order_payment(order_id, session_id, amount_cents, expires_at)` | `SECURITY DEFINER` | tylko `service_role` | Zapisuje sesję Checkout (`payments.pending`) dla zlecenia `pending_payment` przed terminem; kwota = `order_charges.total_cents`. |
+| `confirm_order_payment(session_id, pi_id, charge_id, amount_cents, currency)` | `SECURITY DEFINER` | tylko `service_role` (webhook) | Jedyna droga do `paid` (D89). Zgodne kwota i waluta + zlecenie `pending_payment` → `paid`, `paid_at`, historia `stripe_webhook`. Płatność już `succeeded` → `already_processed`. Inaczej płatność `succeeded` z `review_reason`, zlecenie → `payment_review` (D96). |
+| `expire_order_payment(session_id)`, `fail_order_payment(session_id, message)` | `SECURITY DEFINER` | tylko `service_role` | Płatność `pending` → `expired` / `failed`; zwracają `order_id`. |
+| `expire_order(order_id, source, changed_by, note, force)` | `SECURITY DEFINER` | tylko `service_role` | `pending_payment` → `expired`, gdy brak otwartej sesji i (force albo minął termin − 2 min). |
+| `expire_unpaid_orders()` | `SECURITY DEFINER` | tylko `service_role` (job) | Wygasza zlecenia po terminie bez otwartej sesji. |
 | `available_jobs()` | funkcja `SECURITY DEFINER` → tabela | aktywny przewoźnik | Zwraca zlecenia `paid` bez przewoźnika, których typ pojazdu ma `size_rank` ≤ największego `size_rank` wśród jego aktywnych, zatwierdzonych pojazdów (D22). Kwota = `carrier_amount_cents` zlecenia (wg typu ze zlecenia, nie pojazdu przewoźnika). Pola: `id`, miasto i prowincja odbioru/dostawy, data i okno, `distance_m`, typ pojazdu, flagi usług extra (piętra, tragarze, pakowanie), `carrier_amount_cents`. **Bez** adresów, nazwisk, telefonów i cen klienta. |
 | `accept_job(order_id)` | funkcja `SECURITY DEFINER` | aktywny przewoźnik | Atomowo: `update orders set carrier_id = auth.uid(), status = 'assigned' … where id = $1 and status = 'paid' and carrier_id is null returning …`. 0 wierszy → „Corsa già assegnata”. Zapisuje historię statusu. |
 | `set_order_status(order_id, to_status, lat, lng)` | funkcja `SECURITY DEFINER` | przypisany przewoźnik | Tylko przejścia `assigned→picked_up` (wymaga zdjęcia `pickup`) i `picked_up→in_transit`. |
@@ -676,7 +695,7 @@ R = odczyt, W = zapis bezpośredni z aplikacji (z RLS), S = zapis tylko przez se
 | `claims` | R + insert własne | R przypisane (W14) | R, S |
 | `order_issues` | — | R + insert przypisane | R, S |
 | `payments`, `refunds` | R własne | — | R, S |
-| `stripe_events` | — | — | — (tylko service role) |
+| `stripe_events`, `email_outbox` | — | — | — (tylko service role) |
 | `customer_invoices` | R własne | — | R, S |
 | `carrier_invoices` | — | R + insert własne | R, S |
 | `payouts`, `payout_adjustments`, `payout_adjustment_settlements`, `deduction_documents` | — | R własne | R, S |
@@ -769,9 +788,8 @@ Weryfikacja po `db:push`: konto testowe `cliente` i `padroncino` przez rejestrac
 - **Podział:** 2a — migracje `pricing` (enumy cennika, `price_lists`, `price_list_vehicle_rates`, `price_rules`, funkcje `clone_price_list`/`publish_price_list`, wersja 1), `service_area_holidays` (`holidays`, `service_area_provinces`, kolumny `settings`) oraz `pricing_porter_overtime_code` + `pricing_porter_packages` (D67, D68). 2b — migracje `warehouses` (D72) i `orders` (enumy `order_status`, `status_source`, `order_line_type`, `carrier_share_group`; tabele `orders`, `order_legs`, `order_charges`, `order_lines`, `order_leg_carrier_terms`, `order_status_history`, `quotes`; sekwencja i trigger `order_number`; `create_order()`; triggery niezmienności) wg D74–D77, z testami RLS jako warunkiem ukończenia (D63). `out_of_area_requests` przechodzi do 2c (formularz kontaktowy), `customer_addresses` do panelu klienta.
 
 ### Etap 3 — płatność klienta
-- **Enumy:** `payment_purpose`, `payment_status`, `refund_status`, `notification_channel`.
-- **Tabele:** `payments` (bez `storage_extension_id`), `refunds`, `stripe_events`, `order_internal_notes`, `message_templates` (+ szablony startowe), `notification_log`.
-- Anulowanie (D33) i zwroty — logika w route handlerach; kolumny anulowania w `orders` / `order_charges` / tabeli przewoźnika (D77).
+- **Wykonane (migracje `20261109000000_payments_enum`, `20261109000001_payments`):** status `payment_review`; enumy `payment_purpose`, `payment_status`, `refund_status`, `refund_kind`, `email_status`; `settings.payment_window_minutes`; `orders.payment_due_at` + kolumny anulowania; `order_charges.cancellation_fee_cents`; tabele `payments`, `refunds`, `stripe_events`, `email_outbox`; funkcje płatności (sekcja 4). Testy: `tests/rls/payments.test.ts`.
+- **Przesunięte:** `order_internal_notes` → panel admina zleceń (Etap 6/7); `message_templates` → szablony w kodzie (D93), edycja przez admina później; `notification_log` → `email_outbox` dla maili, SMS w Etapie 5; `notification_channel` razem z SMS.
 
 ### Etap 4 — PWA przewoźnika
 - **Enumy:** `photo_kind`, `carrier_invoice_status`, `order_issue_reason`, `order_issue_status`.

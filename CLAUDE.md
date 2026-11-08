@@ -128,7 +128,15 @@ Uwagi techniczne:
       - `/api/booking/quote` i `/api/maps/*` publiczne — przed produkcją rate limiting.
   - [ ] **2c. Strona publiczna**
   - **TODO przed Etapem 3** (maile z potwierdzeniem zamówienia): Resend + SMTP dla Supabase Auth, instrukcja w D79 (kupić domenę, DNS SPF/DKIM, klucz API, SMTP w Supabase, Rate Limits).
-- [ ] 3. Płatność klienta (Stripe Checkout + webhook)
+- [ ] 3. Płatność klienta (Stripe Checkout + webhook) — **kod gotowy (D88–D96); czeka na `db:push` na staging i ręczny test E2E z kartami testowymi**
+  - Powstało: migracje `payments_enum`, `payments` (`payments`, `refunds` — model, `stripe_events`, `email_outbox`, `orders.payment_due_at`, kolumny anulowania, funkcje `start_order_payment` / `confirm_order_payment` / `expire_*`); `src/lib/stripe/` (klucze tylko testowe), `src/lib/payments/` (parametry sesji, webhook, serwer, cron), `src/lib/notifications/` (adapter maili + szablon `order_paid`); `/api/webhooks/stripe`, `/api/cron/expire-orders`; `/cliente/ordini/[id]` („Paga ora”, „Annulla ordine”, „Pagamento in verifica”); `/admin/ordini`; testy jednostkowe + `tests/rls/payments.test.ts`.
+  - Pamiętać:
+    - `paid` ustawia **tylko** `confirm_order_payment()` z webhooka; powrót z Checkout niczego nie zmienia. `payments` zapisują wyłącznie funkcje w bazie (nawet service role nie ma `INSERT/UPDATE`).
+    - Jedna otwarta sesja na zlecenie; wygasa z terminem płatności (D88). Nowe metody płatności włącza się w Stripe Dashboard (API nie ma `payment_method_types`); Adaptive Pricing wyłączone.
+    - Lokalnie webhooki przez `stripe listen --forward-to localhost:3000/api/webhooks/stripe`; bez tego zlecenia nie przejdą w `paid` (zadanie `/api/cron/expire-orders` dogania opłacone sesje).
+    - Maile: `EMAIL_TRANSPORT=outbox` — trafiają do `email_outbox` (`captured_dev`), nie są wysyłane. Transport `resend` do podłączenia po weryfikacji domeny (D79).
+    - Do decyzji przed wdrożeniem: harmonogram zadania okresowego (D91), wartości anulowania (D94), okno płatności (D88).
+    - Status `payment_review` (D96): obsługa przez admina (oznacz jako opłacone / zwrot) — Etap 6.
 - [ ] 4. PWA przewoźnika (rejestracja, Stripe Connect, kursy, realizacja, GPS, faktura)
   - Pojazd przewoźnika musi spełniać wymagania zlecenia (waga, największy przedmiot, palety) przy „Accetta la Corsa”; prawo jazdy kat. C dla camion — do ustalenia (D87).
   - Czas pracy tragarzy statusami (przyjazd na odbiór → załadowano, przyjazd na dostawę → rozładowano; bez jazdy), potwierdzenie podpisem klienta (D69).

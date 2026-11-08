@@ -95,6 +95,15 @@
 | D85 | Pusty parametr pojazdu | Kryterium z pustym parametrem pojazdu nie jest sprawdzane (brak blokady); w praktyce nie występuje, bo formularz w `/admin/veicoli` wymaga wszystkich pól (D81). |
 | D86 | Towar w zleceniu | Krok „Merce” pyta o wagę łączną (orientacyjną), wymiary **największego** przedmiotu (cm) i liczbę palet EUR — wszystko opcjonalne; łącznej objętości nie wymagamy. Snapshot w `orders`: `weight_kg`, `largest_item_length_cm`, `largest_item_width_cm`, `largest_item_height_cm`, `pallets_count`, `load_category` (kategoria D83, null = nie przeprowadzka). Liczba palet podpowiada liczbę palet przy magazynie. |
 | D87 | Pojazd przewoźnika a wymagania zlecenia | **[DO USTALENIA — Etap 4]** Konkretny pojazd przewoźnika (`carrier_vehicles`) musi mieć parametry nie gorsze niż wymagania zlecenia (waga, największy przedmiot, palety — jak D84). Przewoźnik może przyjąć kurs (`accept_job`) tylko pojazdem, który je spełnia (rozszerza D21, D22). Camion con sponda może wymagać prawa jazdy kat. C — dokument do weryfikacji przy rejestracji przewoźnika. |
+| D88 | Termin płatności zlecenia | Zlecenie `pending_payment` ma `orders.payment_due_at` (trigger przy zapisie, niezmienny) = min(utworzenie + `settings.payment_window_minutes`, początek okna odbioru − `min_booking_lead_hours`), ale nie wcześniej niż utworzenie + 30 min (minimum Stripe). Domyślnie 60 min **[DO USTALENIA]**. Do terminu cena ze snapshotu zlecenia (`order_charges.total_cents`) bez przeliczania; po terminie zlecenie przechodzi w `expired`, a klient rezerwuje od nowa z nową wyceną. |
+| D89 | Stripe Checkout — jedna sesja na zlecenie | Po „Conferma e paga” serwer tworzy sesję Checkout (kwota z `order_charges.total_cents`, EUR, jedna pozycja brutto, `metadata`/`client_reference_id` = `order_id` + `order_number`, `locale: it`, `expires_at` = termin D88). Najwyżej jedna otwarta sesja na zlecenie (indeks w `payments`); „Paga ora” wraca do tej samej sesji, nowa powstaje tylko, gdy otwartej nie ma. Status `paid` **wyłącznie** przez `confirm_order_payment()` z webhooka po weryfikacji podpisu; powrót z Checkout (`/cliente/ordini/[id]?pagamento=ok`) pokazuje „Pagamento in verifica” i odświeża stronę (bez Realtime do Etapu 5). Webhook idempotentny (`stripe_events`). Kwota i waluta z PaymentIntent (pieniądze faktycznie otrzymane) muszą się zgadzać z płatnością i `order_charges`; inaczej `payment_review`. Tylko tryb testowy: serwer odrzuca klucze inne niż `sk_test_`/`rk_test_`, zdarzenia `livemode` są ignorowane. |
+| D90 | Pod wypłaty (Etap 6) | Separate charges and transfers: płatność na konto Transigo, `payment_intent_data.transfer_group` = **numer zlecenia** (zmienia sekcję 10, gdzie było `order_id`). `stripe_payment_intent_id` i `stripe_charge_id` zapisywane w `payments` (1:N ze zleceniem), nie w `orders` — `orders` widzi przewoźnik (D29, D77). |
+| D91 | Wygasanie | Główny mechanizm: webhook `checkout.session.expired` → płatność `expired`, zlecenie `expired`, gdy nie ma otwartej sesji i minął termin D88 (2 min tolerancji). Siatka bezpieczeństwa: `GET /api/cron/expire-orders` (`Authorization: Bearer CRON_SECRET`) — dla zleceń po terminie pyta Stripe o sesję (opłacona → jak webhook, wygasła → `expired`) i wygasza zlecenia bez sesji. Harmonogram (Vercel Cron co 15 min wymaga planu Pro / Supabase `pg_cron` + `pg_net`) **[DO USTALENIA]** przed wdrożeniem. |
+| D92 | Anulowanie niezapłaconego zlecenia | Klient może anulować zlecenie `pending_payment` („Annulla ordine”): serwer najpierw wygasza sesję w Stripe (nie da się jej już opłacić), potem zlecenie → `expired` (historia: `customer_app`, „Annullato dal cliente prima del pagamento”). Bez opłat. |
+| D93 | Maile — adapter i outbox | Każdy mail przechodzi przez `sendEmail()` (`src/lib/notifications/email.ts`) i tabelę `email_outbox` (unikalne `template_code + order_id` — powtórzony webhook nie wyśle drugiego maila). `EMAIL_TRANSPORT=outbox` (dev): mail zostaje w tabeli jako `captured_dev`, nic nie jest wysyłane; `resend` — po weryfikacji domeny (D79). W logach tylko id i kod szablonu. Szablony w kodzie (`src/lib/notifications/templates/`), po włosku; pierwszy: `order_paid` (numer, trasa, termin, kwota, link). Błąd maila nie psuje webhooka. |
+| D94 | Anulowanie przez klienta — wartości (Etap 6) | **[DO USTALENIA]** Wartości w `settings`: bezpłatnie ≥ `free_cancellation_hours` = 24 h przed początkiem okna odbioru (zwrot 100 %); później opłata `late_cancellation_fee_bp` = 5000 (50 %) od transportu z dopłatami, tragarzy i pakowania brutto, składowanie zwracane w całości (D33, D38). Prowizji Stripe (niezwracanej przy refundzie) nie potrącamy klientowi — koszt Transigo. Model danych gotowy (Etap 3): `orders.cancellation_requested_at/_by`, `cancellation_reason`, `cancellation_decided_at/_by`, `order_charges.cancellation_fee_cents`, tabela `refunds`; kwota dla przewoźnika przy anulowaniu (D40) trafi do `payouts` w Etapie 6. Przycisk zwrotu i anulowanie opłaconego zlecenia — Etap 6. |
+| D95 | Metody płatności | Karty (z Apple Pay / Google Pay) — ustawiane w Stripe Dashboard → Settings → Payment methods (ta wersja API nie ma `payment_method_types`). Adaptive Pricing wyłączone: zawsze EUR. PayPal, Klarna, SEPA — później (SEPA asynchroniczna; webhook i tak obsługuje `async_payment_succeeded/failed`). |
+| D96 | Status `payment_review` | „Pagamento da verificare”: Stripe pobrał pieniądze, ale nie pasują do zlecenia — inna kwota lub waluta, płatność za zlecenie już wygasłe (`late_payment`). Zlecenie nie jest `paid`, nie trafia do przewoźników, nie wygasa i nie da się go usunąć. Drugi udany Checkout za zlecenie już opłacone (`duplicate_payment`) nie zmienia statusu, płatność jest oznaczona do sprawdzenia. Decyzja admina (oznacz jako opłacone / zwrot) — Etap 6; w Etapie 3 tylko widoczne w `/admin/ordini` (filtr „Pagamento da verificare”). |
 
 ## 1. Słownik
 
@@ -175,6 +184,7 @@ carrier_share(x) = round(x × percent)  |  fixed_cents   # osobna reguła dla ka
 ```
 draft → pending_payment → paid → assigned → picked_up → in_transit → delivered → completed
                     ↘ expired      ↘ cancelled / refunded (admin)
+                    ↘ payment_review (kwota/waluta ≠, spóźniona płatność — D96) → paid | refunded (admin, Etap 6)
                                    paid → cancelled (klient, D33)
                                    assigned → cancellation_review → cancelled (decyzja admina, D33)
 ```
@@ -182,9 +192,10 @@ draft → pending_payment → paid → assigned → picked_up → in_transit →
 | Status (kod) | UI (IT) | Kiedy |
 |---|---|---|
 | `draft` | Bozza | Kreator w toku |
-| `pending_payment` | In attesa di pagamento | Utworzono sesję Stripe Checkout |
-| `expired` | Scaduto | Sesja Checkout wygasła bez płatności |
-| `paid` | Pagato | Webhook `checkout.session.completed` — kurs widoczny dla przewoźników |
+| `pending_payment` | In attesa di pagamento | Zlecenie zapisane, czeka na płatność w Checkout do terminu D88 |
+| `expired` | Scaduto | Termin płatności minął bez płatności albo klient anulował niezapłacone zlecenie (D91, D92) |
+| `paid` | Pagato | Webhook `checkout.session.completed`, kwota zgodna (D89) — kurs widoczny dla przewoźników |
+| `payment_review` | Pagamento da verificare | Pieniądze pobrane, ale niezgodne ze zleceniem — decyzja admina (D96) |
 | `assigned` | Assegnato | Przewoźnik kliknął „Accetta la Corsa” |
 | `picked_up` | Ritirato | Przewoźnik potwierdził odbiór |
 | `in_transit` | In viaggio | W drodze, GPS aktywny |
@@ -212,7 +223,8 @@ Reklamacje (`claims`): klient lub admin otwiera reklamację do zlecenia; otwarta
 
 ## 4a. Anulowanie zlecenia (D33)
 
-- Ustawienia admina (`settings`): `free_cancellation_hours` (domyślnie 24) i `late_cancellation_fee_bp` (domyślnie 5000 = 50 %).
+- Ustawienia admina (`settings`): `free_cancellation_hours` (domyślnie 24) i `late_cancellation_fee_bp` (domyślnie 5000 = 50 %) — **[DO USTALENIA]** (D94).
+- Zlecenie niezapłacone (`pending_payment`) klient anuluje bez opłat → `expired` (D92).
 - Moment odniesienia: początek okna odbioru (`pickup_window_start`).
 - **Status `paid` (brak przewoźnika):**
   - ≥ X h przed odbiorem → anulowanie bezpłatne, pełny zwrot automatycznie, status `cancelled`;
@@ -243,7 +255,7 @@ Trasa `/prenota`. Kroki (pasek postępu, cena na żywo w panelu bocznym / dolnym
 7. **Account** — logowanie lub rejestracja (Privato/Azienda; pola wg D43/D44), powrót do kreatora z zachowanym stanem (D70). Po zalogowaniu cena przeliczana dla typu klienta z konta.
 8. **Contatti** — osoba kontaktowa przy odbiorze i dostawie (imię, telefon), notatki.
 9. **Riepilogo** — rozbicie ceny, dane do faktury (osoba prywatna: codice fiscale + adres — wymagane, D43; firma: adres, dane z rejestracji do sprawdzenia/zmiany, D36, D44; profil bez zmian), akceptacja regulaminu, „Conferma prenotazione”. Serwer sprawdza wycenę (D76) i zapisuje zlecenie `pending_payment` z numerem (D71, D77).
-10. **Conferma** — numer zlecenia i status „In attesa di pagamento”. Od Etapu 3 zamiast tego: **Pagamento** — przekierowanie do Stripe Checkout → strona „Grazie” (status czeka na webhook, odświeża się przez Realtime).
+10. **Pagamento** — przycisk „Conferma e paga” zapisuje zlecenie i przekierowuje do Stripe Checkout; powrót na stronę zlecenia `/cliente/ordini/[id]` („Pagamento in verifica”, strona odświeża się, aż webhook ustawi `paid`). Gdy sesji nie udało się utworzyć: numer zlecenia i „Vai all'ordine e paga” (D88, D89).
 
 Kroki 1–6 (wycena) dostępne bez logowania; konto jest obowiązkowe przed zapisem zlecenia (D8, D70). Brak zamówień jako gość. Stan kreatora w przeglądarce wg D78 (bez danych osobowych, czyszczony po zamówieniu); zlecenie w bazie powstaje dopiero po zalogowaniu. Wycenę liczy wyłącznie serwer (D76); przeglądarka nie dostaje kwot przewoźnika ani marży.
 
@@ -297,8 +309,8 @@ Mobile-first, instalowalna (manifest + service worker), działa przy słabym zas
 
 ## 10. Płatności i wypłaty — reguły
 
-- **Checkout:** sesja Stripe Checkout tworzona na serwerze z kwotą ze snapshotu wyceny; `metadata.order_id`. Zlecenie `paid` tylko po zweryfikowanym (podpis) webhooku; obsługa idempotentna (tabela przetworzonych `event.id`).
-- **Model Connect:** „separate charges and transfers” — płatność na konto Transigo, a po spełnieniu warunków `Transfer` na konto Express przewoźnika (`transfer_group = order_id`).
+- **Checkout:** sesja Stripe Checkout tworzona na serwerze z kwotą ze snapshotu zlecenia (`order_charges.total_cents`); `metadata.order_id` + `order_number`. Zlecenie `paid` tylko po zweryfikowanym (podpis) webhooku; obsługa idempotentna (tabela przetworzonych `event.id`). Szczegóły: D88–D96.
+- **Model Connect:** „separate charges and transfers” — płatność na konto Transigo, a po spełnieniu warunków `Transfer` na konto Express przewoźnika (`transfer_group` = numer zlecenia, D90).
 - **Warunki automatycznej wypłaty** (D4, wszystkie muszą być spełnione):
   1. status `delivered` z zapisanym podpisem i ≥1 zdjęciem,
   2. przewoźnik wgrał fakturę, a jej kwota = `carrier_amount` przed potrąceniami (automatyczna walidacja, D12; niezgodność → `to_verify`, admin akceptuje lub odrzuca),
