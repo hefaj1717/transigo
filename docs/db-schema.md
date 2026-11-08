@@ -44,7 +44,7 @@
 | `status_source` | `customer_app`, `carrier_app`, `admin_panel`, `stripe_webhook`, `system_job` | skąd przyszła zmiana statusu. |
 | `order_line_type` | `transport`, `surcharge_urgent`, `surcharge_weekend_holiday`, `surcharge_floors`, `porters`, `packing`, `storage` | pozycje rozbicia ceny. |
 | `carrier_share_group` | `transport`, `porters`, `packing`, `none` | do której reguły D6 należy pozycja (dopłaty → `transport`, D14; magazyn → `none`). |
-| `price_rule_code` | `surcharge_urgent`, `surcharge_weekend_holiday`, `surcharge_floor_no_elevator`, `porter_hour`, `packing_flat`, `packing_per_item`, `storage_day`, `storage_pallet_day`, `transshipment_flat`, `carrier_share_transport`, `carrier_share_porters`, `carrier_share_packing` | lista reguł cennika. |
+| `price_rule_code` | `surcharge_urgent`, `surcharge_weekend_holiday`, `surcharge_floor_no_elevator`, `porter_hour`, `packing_flat`, `packing_per_item`, `storage_day`, `storage_pallet_day`, `storage_day_long`, `storage_pallet_day_long`, `transshipment_flat`, `carrier_share_transport`, `carrier_share_porters`, `carrier_share_packing` | lista reguł cennika. |
 | `price_rule_kind` | `fixed`, `percent`, `per_unit` | `fixed` = `amount_cents`; `percent` = `percent_bp`; `per_unit` = `amount_cents` × jednostka (piętro, osobogodzina, sztuka, dzień, paleta-dzień). |
 | `price_list_status` | `draft`, `active`, `archived` | dokładnie jeden `active`. |
 | `storage_type` | `transshipment`, `short_term`, `long_term` | spec 2.4. |
@@ -191,14 +191,17 @@ Stawka/km i cena minimalna są w wersji cennika (`price_list_vehicle_rates`), a 
 | `version` | `integer` unique not null | rosnący numer |
 | `status` | `price_list_status` not null default `draft` | |
 | `vat_rate_bp` | `integer` not null default 2200 | |
+| `urgent_lead_hours` | `integer` not null default 24 | D49 |
+| `storage_short_term_max_days` | `integer` not null default 30 | D55: próg krótkie/długie (progresja) |
+| `storage_billing_unit` | `storage_billing_unit` not null default `pallet_day` | D55 |
 | `notes` | `text` | |
 | `published_at` | `timestamptz` | |
 | `published_by` | `uuid` FK → `profiles` | |
 | `created_at`, `updated_at` | | |
 
 Indeks: częściowy `unique (status) where status = 'active'` — gwarantuje jeden aktywny cennik.
-Wersji `active` i `archived` nie można edytować (trigger). Zmiana cennika = nowy `draft` → publikacja.
-**RLS:** odczyt aktywnego cennika: wszyscy, bo wycenę i tak liczy serwer, ale kreator pokazuje stawki. Pełny odczyt i zapis wersji `draft`: admin.
+Wersji `active` i `archived` nie można edytować (trigger, także dla service role). Zmiana cennika = `clone_price_list(id)` → edycja `draft` → `publish_price_list(id)` (funkcje `SECURITY DEFINER`, tylko admin; publikacja sprawdza kompletność) — D60.
+**RLS:** tylko admin (odczyt i zapis `draft`) — D59. Wycenę liczy serwer klientem service role.
 
 #### `price_list_vehicle_rates`
 `price_list_id` FK, `vehicle_type_id` FK, `rate_per_km_cents integer not null check >= 0`, `min_price_cents integer not null check >= 0`. PK `(price_list_id, vehicle_type_id)`.
@@ -214,21 +217,23 @@ Wersji `active` i `archived` nie można edytować (trigger). Zmiana cennika = no
 | `percent_bp` | `integer` | dla `percent` |
 | `is_enabled` | `boolean` not null default true | |
 
-PK `(price_list_id, code)`. Check: dokładnie jedno z `amount_cents` / `percent_bp` zgodnie z `kind`. Reguły `carrier_share_*` dopuszczają tylko `percent` lub `fixed` (D6).
+PK `(price_list_id, code)`. Check: dokładnie jedno z `amount_cents` / `percent_bp` zgodnie z `kind`; dozwolone `kind` per kod (dopłaty pilne/weekend i `carrier_share_*`: `fixed`/`percent`; `packing_flat`, `transshipment_flat`: `fixed`; reszta: `per_unit`). `carrier_share_*` w procentach ≤ 100 % (D6).
 **RLS:** jak `price_lists`.
 
 #### `holidays` — święta włoskie (do dopłaty weekendowej/świątecznej)
 `date date` PK, `name_it text`. **RLS:** odczyt publiczny, zapis admin. Patrz W11.
 
 #### `service_area_provinces` — obsługiwane prowincje odbioru (D10, D13)
-`province_code char(2)` PK (sigla), `name_it text`, `region_it text`, `is_active boolean`. **RLS:** odczyt publiczny, zapis admin.
+`province_code char(2)` PK (sigla), `name_it text`, `region_it text`, `is_active boolean` default false. **RLS:** odczyt publiczny aktywnych, admin wszystko (zapis). Na start wszystkie nieaktywne (D61).
 
 #### `settings` — ustawienia globalne (jeden wiersz)
 | Kolumna | Typ | Uwagi |
 |---|---|---|
 | `id` | `boolean` PK default true, check `id` | wymusza jeden wiersz |
 | `payout_window_hours` | `integer` not null default 24 | D4 |
-| `max_route_distance_m` | `integer` not null | D13 (admin wpisuje km, zapisujemy metry) |
+| `max_route_distance_m` | `integer` not null default 300000 | D13 (admin wpisuje km, zapisujemy metry) |
+| `min_booking_lead_hours` | `integer` not null default 3 | D50 |
+| `quote_valid_minutes` | `integer` not null default 30 | D62 |
 | `gps_interval_s` | `integer` not null default 15 | D17 |
 | `unassigned_alert_hours` | `integer` not null default 4 | dashboard: `paid` bez przewoźnika |
 | `free_cancellation_hours` | `integer` not null default 24 | D33: bezpłatne anulowanie do X h przed `pickup_window_start` |
@@ -611,7 +616,7 @@ R = odczyt, W = zapis bezpośredni z aplikacji (z RLS), S = zapis tylko przez se
 | `carrier_vehicles` | — | R/W własne (bez `approved_at`) | R, S |
 | `carrier_documents` | — | R + insert własne | R, S |
 | `vehicle_types`, `service_area_provinces`, `holidays` | R (także `anon`) | R | R/W |
-| `price_lists`, `price_list_vehicle_rates`, `price_rules` | R aktywny | R aktywny | R/W (draft) |
+| `price_lists`, `price_list_vehicle_rates`, `price_rules` | — | — | R/W (draft) — D59 |
 | `settings`, `message_templates` | — | — | R/W |
 | `out_of_area_requests` | — (S przez formularz) | — | R/W |
 | `orders` | R własne, S | R przypisane, S (RPC) | R, S |
@@ -709,7 +714,8 @@ Weryfikacja po `db:push`: konto testowe `cliente` i `padroncino` przez rejestrac
 - **Tabele:** `price_lists`, `price_list_vehicle_rates`, `price_rules`, `holidays` (+ święta krajowe na 2026–2028), `service_area_provinces` (+ lista prowincji, wszystkie nieaktywne), `out_of_area_requests`, `customer_addresses`, `orders` (wszystkie kolumny, w tym anulowanie i `tracking_token`), `order_lines`, `order_status_history`.
 - **Zmiany:** `settings.max_route_distance_m`.
 - **Funkcje:** sekwencja i trigger `order_number`; trigger blokujący edycję cennika `active`/`archived`.
-- **RLS:** odczyt publiczny konfiguracji (typy, aktywny cennik, prowincje, święta); zlecenia — odczyt własnych, zapis tylko serwer.
+- **RLS:** odczyt publiczny konfiguracji (typy, prowincje, święta); cennik tylko admin (D59); zlecenia — odczyt własnych, zapis tylko serwer.
+- **Podział:** 2a — migracje `pricing` (enumy cennika, `price_lists`, `price_list_vehicle_rates`, `price_rules`, funkcje `clone_price_list`/`publish_price_list`, wersja 1) i `service_area_holidays` (`holidays`, `service_area_provinces`, kolumny `settings`). 2b — zlecenia (`orders` z odcinkami wg D47, `order_lines`, `order_status_history`, `out_of_area_requests`, `customer_addresses`) z testami RLS jako warunkiem ukończenia (D63).
 
 ### Etap 3 — płatność klienta
 - **Enumy:** `payment_purpose`, `payment_status`, `refund_status`, `notification_channel`.

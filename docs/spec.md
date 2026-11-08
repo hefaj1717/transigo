@@ -54,6 +54,23 @@
 | D44 | Rejestracja firmy (cliente azienda) | Nome, cognome, e-mail, hasło, telefon opcjonalny + ragione sociale, P.IVA oraz **codice SDI lub PEC** (co najmniej jedno; check w bazie). Adres do faktury w „Riepilogo”. |
 | D45 | Rejestracja przewoźnika | Nome, cognome, e-mail, hasło, telefon (wymagany; weryfikacja SMS w Etapie 4) + ragione sociale, P.IVA, codice fiscale, adres siedziby (via, città, CAP, provincia), PEC lub codice SDI. Dokumenty, pojazdy i Stripe Connect w Etapie 4. Konto startuje jako `pending_review`. |
 | D46 | Trasy kont i ochrona | `/registrati`, `/accedi`, `/password-dimenticata`, `/reimposta-password`, `/auth/confirm`, `/account-sospeso`; panele `/cliente`, `/padroncino`, `/admin`. Kontrola dostępu po stronie serwera w każdej stronie (DAL), proxy tylko optymistycznie (brak sesji → `/accedi`). Zła rola → własny panel; zablokowany → „Account sospeso”; przewoźnik nieaktywny → ekran „Account in attesa di verifica”. |
+| D47 | Odcinki zlecenia (legs) | Silnik cenowy liczy zlecenie jako listę odcinków (1–2): każdy ma `distance_m`, typ pojazdu, `pickup_at` (początek okna odbioru), prowincję odbioru i piętra/windę na odbiorze i dostawie. Zlecenie z magazynem = odcinek A→magazyn + magazyn→B. Cena minimalna, dopłaty pilne/weekend/święto i piętra liczone **per odcinek** wg jego danych. Model zleceń (jak zapisać odcinki) — Etap 2b. |
+| D48 | Dystans | Bez dojazdu przewoźnika do odbioru. Trasa drogowa Google Routes (`DRIVE`, `TRAFFIC_UNAWARE`). `km = ceil(distance_m / 1000)` per odcinek; `transport = max(km × stawka_km, cena_min)` per odcinek. Ilość × cena jednostkowa = kwota pozycji (przy cenie minimalnej: 1 × cena_min). |
+| D49 | „Pilne” | Naliczane **automatycznie**, gdy od chwili wyceny do `pickup_at` odcinka zostaje < `urgent_lead_hours` (w wersji cennika, domyślnie 24 h). Checkbox „Urgente” w kreatorze ma charakter informacyjny. Domyślnie +30 % transportu odcinka. |
+| D50 | Minimalne wyprzedzenie | Rezerwacja odcinka nie wcześniej niż `settings.min_booking_lead_hours` (domyślnie 3 h) przed `pickup_at`; inaczej wycena zwraca błąd `too_soon`. |
+| D51 | „Weekend/święto” | Data odbioru odcinka w strefie **Europe/Rome** wypada w sobotę, niedzielę lub dzień z tabeli `holidays` → jedna dopłata (nie sumuje się: święto w niedzielę = raz). Data dostawy bez znaczenia. Domyślnie +20 %. |
+| D52 | Podstawa dopłat procentowych | Pozycja transportu odcinka **po** cenie minimalnej. Pilne i weekend liczone od tej samej podstawy i sumowane (30 % + 20 %, bez składania). Dopłata kwotowa (`fixed`) = kwota za odcinek. |
+| D53 | Piętra / winda | Dopłata za każde piętro bez windy, osobno na odbiorze i dostawie odcinka (parter lub winda = 0). Domyślnie 10 €/piętro, piętro 0–20. |
+| D54 | Tragarze, pakowanie | Tragarze: 1–4 osoby × 1–8 h, domyślnie 30 €/osobogodzinę (kierowca się nie liczy). Pakowanie: ryczałt (15 €) + stawka za sztukę (5 €), dwie pozycje, każdą admin może wyłączyć. Obie usługi przypisane do jednego odcinka (domyślnie pierwszego) — ważne dla kwoty przewoźnika. |
+| D55 | Magazyn: progi i progresja | 0 dni = *transbordo* (ryczałt, domyślnie 25 €). Dni 1–`storage_short_term_max_days` (domyślnie 30) po stawce krótkiej, dni powyżej progu po stawce długiej (**progresja**: 45 dni = 30 × krótka + 15 × długa; koszt rośnie monotonicznie z liczbą dni). Typ: ≤ próg → `short_term`, > próg → `long_term`. Jednostka (`day` / `pallet_day`) wybierana przez admina w wersji cennika (domyślnie `pallet_day`). Domyślne stawki: krótkie 3 €/paleta/dzień lub 8 €/dzień, długie 2 € / 5 €. Koszt liczy osobna czysta funkcja `storageCost()` (także do przedłużeń w Etapie 7). |
+| D56 | Zaokrąglenia i IVA | Kwoty w centach na liczbach całkowitych; procent = `round_half_up(x × bp / 10000)`, raz na składnik. IVA łącznie = `round_half_up(subtotal × vat_rate)` (jak w podsumowaniu FatturaPA), rozdzielona na pozycje proporcjonalnie do netto metodą największych reszt — suma IVA pozycji = IVA łącznie. Brutto pozycji = netto + IVA pozycji. |
+| D57 | Udział przewoźnika — liczenie | Od **netto**. Grupy: transport (transport + pilne + weekend + piętra, D14) **per odcinek**; tragarze i pakowanie per zlecenie (na odcinku, do którego są przypisane). Zaokrąglenie raz na grupę, rozdział na pozycje metodą największych reszt. Reguła `fixed` = kwota na grupę (transport: na odcinek). Domyślnie: transport 70 %, tragarze 80 %, pakowanie 60 %, magazyn 0. Udział > netto grupy → ostrzeżenie `negative_margin` w podglądzie admina (bez obcinania). |
+| D58 | `carrier_amount` = imponibile | Kwota przewoźnika to netto (imponibile); walidacja faktury przewoźnika (D12) porównuje imponibile, niezależnie od reżimu IVA przewoźnika. **[DO POTWIERDZENIA Z COMMERCIALISTA]** |
+| D59 | Dostęp do cennika | Tabele `price_lists`, `price_list_vehicle_rates`, `price_rules` — odczyt i zapis **tylko admin** (zawierają udziały przewoźnika, D29). Wycenę liczy serwer, czytając cennik klientem service role. Zmiana względem db-schema (tam: publiczny odczyt aktywnego cennika). |
+| D60 | Wersjonowanie cennika | Nowa wersja = kopia (`clone_price_list`) → edycja `draft` → `publish_price_list` (sprawdza kompletność: stawki dla wszystkich aktywnych typów pojazdów i wszystkie kody reguł; archiwizuje poprzednią). Wersje `active`/`archived` i ich stawki/reguły są niemodyfikowalne dla wszystkich (trigger). Usunąć można tylko `draft`. Startowe stawki wersji 1 to placeholdery do zmiany przez admina. |
+| D61 | Obszar obsługi — szczegóły | Na start wszystkie prowincje nieaktywne; admin włącza region w „Area di servizio”. Domyślny maks. dystans 300 km. Przy wielu odcinkach: prowincja odbioru **każdego** odcinka w obszarze i każdy odcinek ≤ maks. dystans. Autocomplete adresów tylko Włochy (`includedRegionCodes: ['it']`). |
+| D62 | Ważność wyceny | Wycena ważna `settings.quote_valid_minutes` (domyślnie 30); przy tworzeniu płatności serwer zawsze przelicza cenę i, jeśli się zmieniła, pokazuje ją klientowi ponownie. Implementacja w Etapie 2b/3. |
+| D63 | RLS zleceń — warunek ukończenia 2b | Polityki `orders` / `order_lines` / `order_status_history` (cliente tylko swoje, padroncino tylko przypisane, admin wszystko, zapis tylko serwer) powstają w 2b razem z migracją `orders`, z testami w `tests/rls/`. **Bez zielonych testów RLS zleceń Etap 2b nie jest ukończony.** |
 
 ## 1. Słownik
 
@@ -76,9 +93,9 @@
 3. **Imballaggio** — pakowanie; ryczałt lub wg wolumenu/liczby sztuk.
 4. **Deposito merci:**
    - *Transbordo* — przeładunek (krótki postój w magazynie, bez składowania),
-   - *Breve periodo* — krótkie składowanie (np. do 30 dni) **[DO USTALENIA próg]**,
-   - *Lungo periodo* — długie składowanie.
-   Rozliczanie za dzień lub za paletę (konfigurowalne).
+   - *Breve periodo* — krótkie składowanie (do `storage_short_term_max_days`, domyślnie 30 dni — D55),
+   - *Lungo periodo* — długie składowanie (dni powyżej progu po stawce długiej, progresja — D55).
+   Rozliczanie za dzień lub za paletę (wybór admina w wersji cennika — D55).
    Składowanie **płatne z góry** za okres wybrany w kreatorze; przedłużenie przez link płatności Stripe wysyłany klientowi (D9). Przychód z magazynu w 100% dla Transigo.
 
 ## 2a. Obszar obsługi (D10, D13)
@@ -93,22 +110,25 @@
 ### 3.1 Wzór
 
 ```
-transport  = round(distance_km × rate_per_km_cents[vehicle_type])
-             (z minimalną ceną za kurs: max(transport, min_price_cents[vehicle_type]))
-surcharges = urgent + weekend/holiday + elevator/floors + porters + packing
-storage    = days × rate_per_day_cents  |  pallets × days × rate_per_pallet_day_cents
-subtotal   = transport + surcharges + storage
-vat        = round(subtotal × vat_rate)          (IVA 22%)
+dla każdego odcinka (D47):
+  km         = ceil(distance_m / 1000)                                   (D48)
+  transport  = max(km × rate_per_km_cents[vehicle_type], min_price_cents[vehicle_type])
+  surcharges = urgent + weekend/holiday (od transportu odcinka, D49–D52) + floors (D53)
+services   = porters + packing                                           (D54)
+storage    = storageCost(days, pallets): transbordo | dni ≤ próg × krótka + dni > próg × długa (D55)
+subtotal   = Σ odcinki + services + storage
+vat        = round_half_up(subtotal × vat_rate)   (IVA 22%, rozdział na pozycje — D56)
 total      = subtotal + vat
 
-carrier_amount = carrier_share(transport_part)   # transport + jego dopłaty (pilne, weekend, winda) — D14
+carrier_amount = Σ odcinki carrier_share(transport_part)   # transport + dopłaty odcinka (pilne, weekend, piętra) — D14, D57
                + carrier_share(porters_part)
                + carrier_share(packing_part)
                # storage → 0 (100% Transigo)
 carrier_share(x) = round(x × percent)  |  fixed_cents   # osobna reguła dla każdej z 3 usług (D6)
 ```
 
-- Wszystkie kwoty w centach (`integer`). Zaokrąglenie: half-up do pełnego centa, jednokrotnie na każdym składniku.
+- Wszystkie kwoty w centach (`integer`). Zaokrąglenie: half-up do pełnego centa, jednokrotnie na każdym składniku (D56). Kwota przewoźnika liczona od netto (D57, D58).
+- Implementacja: czyste funkcje `calculatePrice(input, config)` i `storageCost(...)` w `src/lib/pricing/` (bez bazy i Google Maps — dystans przychodzi jako parametr).
 - Dystans z Google Maps (trasa drogowa), nie w linii prostej.
 - Dopłaty mogą być kwotowe (centy) lub procentowe — typ zapisany w regule.
 - Cena jest zapisywana w zleceniu jako **snapshot** (rozbicie pozycji + wersja cennika), żeby późniejsze zmiany cennika nie zmieniały historycznych zleceń.
@@ -120,9 +140,10 @@ carrier_share(x) = round(x × percent)  |  fixed_cents   # osobna reguła dla ka
 - Privato: ceny z IVA (brutto). Azienda: netto + IVA osobno + brutto.
 - Silnik zawsze liczy netto, IVA i brutto — różni się tylko prezentacja.
 
-### 3.3 Otwarte pytania cenowe
-- Czy dystans liczy dojazd przewoźnika do miejsca odbioru? **[DO USTALENIA]** (domyślnie: nie)
-- Definicja „pilne” (np. realizacja < 24 h) i „weekend” (sobota/niedziela + święta włoskie?). **[DO USTALENIA]**
+### 3.3 Rozstrzygnięte pytania cenowe
+- Dojazd przewoźnika do odbioru nie jest liczony (D48).
+- „Pilne” = odbiór za < 24 h, naliczane automatycznie (D49); „weekend” = sobota, niedziela i święta krajowe z tabeli `holidays`, wg daty odbioru w strefie Europe/Rome (D51).
+- Wycena ważna 30 min i przeliczana przy płatności (D62).
 
 ## 4. Statusy zlecenia
 
@@ -239,7 +260,7 @@ Mobile-first, instalowalna (manifest + service worker), działa przy słabym zas
 - **Padroncini:** lista, weryfikacja dokumentów, aktywacja/odrzucenie/zawieszenie, pojazdy, status Stripe Connect, historia kursów i wypłat.
 - **Clienti:** lista, szczegóły, zlecenia, faktury, blokada konta.
 - **Reclami:** lista reklamacji, otwarcie/zamknięcie z notatką; otwarta reklamacja wstrzymuje wypłatę.
-- **Veicoli:** CRUD typów pojazdów (nazwa, ładowność, wymiary, stawka/km, cena minimalna, aktywny) — D7.
+- **Veicoli:** CRUD typów pojazdów (nazwa, ładowność, wymiary, kolejność wielkości, aktywny) — D7. Stawka/km i cena minimalna edytowane w Listino (wersja cennika, D18); tu widoczne tylko do odczytu.
 - **Listino prezzi (cennik):** dopłaty (kwotowe/procentowe), stawki usług (tragarze, pakowanie), stawki magazynowe (dzień/paleta), stawka IVA, **reguły kwoty przewoźnika: osobno dla transportu, tragarzy i pakowania** (procent lub kwota; magazyn zawsze 0) — D6. Wersjonowanie cennika + podgląd przykładowej wyceny przed zapisem.
 - **Area di servizio:** lista obsługiwanych prowincji odbioru i maksymalny dystans trasy w km (D10, D13); zapytania z formularza kontaktowego spoza obszaru.
 - **Magazzino:** jeden magazyn w MVP (tabela `warehouses`, gotowa na kolejne) — D9. Lista pozycji (zlecenie, klient, liczba palet, data wejścia, opłacone do, naliczone dni), przyjęcie/wydanie, lokalizacja w magazynie. Pozycje z kończącym się okresem → przycisk „Invia link di pagamento” (Stripe Payment Link / Checkout na przedłużenie; po webhooku przesuwa datę „opłacone do” i wystawia fakturę).
