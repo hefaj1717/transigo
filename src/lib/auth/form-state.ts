@@ -8,6 +8,8 @@ export type FormState = {
   message?: string;
   /** Submitted values to refill the form after an error. Passwords are never returned. */
   values?: Record<string, string>;
+  /** Sign-in only: the password was right but the e-mail is not confirmed yet → the form offers to resend the link. */
+  emailNotConfirmed?: boolean;
 };
 
 export const initialFormState: FormState = {};

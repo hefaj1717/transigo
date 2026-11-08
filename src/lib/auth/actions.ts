@@ -210,7 +210,7 @@ export async function signIn(_prev: FormState, formData: FormData): Promise<Form
   if (error) {
     const message = authErrorMessage(error);
     if (message === AUTH_MSG.generic) logError("signIn", error);
-    return { errors: { _form: message }, values };
+    return { errors: { _form: message }, values, emailNotConfirmed: error.code === "email_not_confirmed" };
   }
 
   const ctx = await loadAccountContext(supabase, createServiceClient());
@@ -224,6 +224,23 @@ export async function signOut(formData?: FormData): Promise<void> {
   const raw = formData?.get("next");
   const next = sanitizeNext(typeof raw === "string" ? raw : null);
   redirect(next ? `${PATHS.signIn}?next=${encodeURIComponent(next)}` : PATHS.signIn);
+}
+
+/** Sends the sign-up confirmation link again (button under the sign-in form after "email_not_confirmed"). */
+export async function resendConfirmation(_prev: FormState, formData: FormData): Promise<FormState> {
+  const input = formDataToObject(formData);
+  const parsed = forgotPasswordSchema.safeParse(input); // same shape: { email }
+  if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
+
+  const supabase = await createClient();
+  const { error } = await supabase.auth.resend({ type: "signup", email: parsed.data.email, options: { emailRedirectTo: confirmUrl() } });
+  if (error) {
+    const message = authErrorMessage(error);
+    // Only rate limits are shown; anything else gets the neutral answer (no account enumeration).
+    if (message === AUTH_MSG.rateLimited) return { errors: { _form: message } };
+    logError("resendConfirmation", error);
+  }
+  return { message: "Se l'indirizzo è registrato e non ancora confermato, riceverai a breve una nuova e-mail di conferma. Controlla anche lo spam." };
 }
 
 // ---------------------------------------------------------------------------
