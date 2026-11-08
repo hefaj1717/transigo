@@ -20,13 +20,13 @@
 
 1. **Tabele finansowe i statusowe** (`orders`, `order_lines`, `payments`, `refunds`, `customer_invoices`, `payouts`, `payout_adjustments`, …) nie mają polityk `INSERT/UPDATE/DELETE` dla roli `authenticated`. Zapis robi wyłącznie serwer (klient Supabase z service role, tylko w kodzie serwerowym) po własnej walidacji.
 2. **Akcje przewoźnika na zleceniu** (przyjęcie kursu, zmiana statusu, POD) idą przez funkcje RPC `SECURITY DEFINER`, które same sprawdzają uprawnienia i dozwolone przejścia statusów. Przykłady: `accept_job(order_id)` i `set_order_status(order_id, status, lat, lng)`.
-3. **Kolumny chronione w tabelach edytowanych przez użytkownika** (np. `profiles.role`, `carriers.status`) są zabezpieczone uprawnieniami kolumnowymi (`grant update (col, …)`) i triggerem, który odrzuca zmianę, jeśli nie wykonuje jej service role.
+3. **Kolumny chronione w tabelach edytowanych przez użytkownika** (np. `profiles.role`, `carriers.status`) są zabezpieczone uprawnieniami kolumnowymi (`revoke all` + `grant update (col, …)` dla `authenticated`) oraz triggerem `protect_server_columns(<kolumny>)`, który odrzuca zmianę wykonaną przez `anon`/`authenticated` (service role i SQL Editor mogą). Zablokowane konto: `auth_role()` zwraca `null`, więc nie przechodzi żadna polityka.
 
 ### 1.2 Funkcje pomocnicze RLS
 
 - `auth.uid()` — id zalogowanego użytkownika.
-- `public.current_role() returns user_role`: `SECURITY DEFINER`, `stable`, czyta `profiles.role` dla `auth.uid()`. Dzięki temu polityki nie wpadają w rekurencję RLS.
-- `public.is_admin() returns boolean`: `current_role() = 'admin'`.
+- `public.auth_role() returns user_role`: `SECURITY DEFINER`, `stable`, czyta `profiles.role` dla `auth.uid()`. Dzięki temu polityki nie wpadają w rekurencję RLS.
+- `public.is_admin() returns boolean`: `auth_role() = 'admin'`.
 - `public.is_active_carrier() returns boolean`: rola `padroncino`, `carriers.status = 'active'` i brak przeterminowanych zatwierdzonych dokumentów obowiązkowych.
 
 ---
@@ -61,6 +61,8 @@
 | `photo_kind` | `pickup`, `delivery`, `claim` | |
 | `notification_channel` | `email`, `sms`, `push` | |
 | `out_of_area_reason` | `pickup_province`, `max_distance` | D13. |
+| `order_issue_reason` | `vehicle_breakdown`, `cannot_reach_pickup`, `goods_not_as_described`, `address_problem`, `customer_unreachable`, `other` | D39. |
+| `order_issue_status` | `open`, `resolved` | D39. |
 
 ---
 
@@ -381,6 +383,22 @@ Indeks: `(order_id, recorded_at desc)`. Tabela dodana do Supabase Realtime (mapa
 Indeks: `(order_id, status)`. Otwarcie reklamacji przestawia wypłatę na `on_hold` (logika serwera / trigger).
 **RLS:** klient tworzy i czyta reklamacje swoich zleceń, admin wszystko i jako jedyny zamyka. Przewoźnik widzi, że do jego zlecenia jest otwarta reklamacja (status + opis), ale nie dane klienta; patrz W14.
 
+#### `order_issues` — zgłoszenia problemów przez przewoźnika (D39, Etap 4)
+| Kolumna | Typ | Uwagi |
+|---|---|---|
+| `id` | `uuid` PK | |
+| `order_id` | `uuid` FK → `orders` | |
+| `carrier_id` | `uuid` FK → `carriers` | |
+| `reason` | `order_issue_reason` not null | |
+| `description` | `text` not null | |
+| `status` | `order_issue_status` not null default `open` | 🔒 |
+| `resolution_note` | `text` | 🔒 |
+| `resolved_by`, `resolved_at` | | 🔒 |
+| `created_at`, `updated_at` | | |
+
+Indeksy: `(order_id)`, `(status, created_at)` dla kolejki admina. Po zapisie serwer wysyła e-mail do admina.
+**RLS:** przewoźnik `insert` i `select` zgłoszeń dla zleceń przypisanych do niego (statusy `assigned`…`delivered`); admin wszystko (rozwiązanie przez serwer); klient brak.
+
 ### 3.4 Płatności i faktury klienta
 
 #### `payments` — płatności Stripe (zlecenie albo przedłużenie magazynu)
@@ -588,7 +606,7 @@ R = odczyt, W = zapis bezpośredni z aplikacji (z RLS), S = zapis tylko przez se
 | `customers` | R/W własny (bez typu) | — | R, S |
 | `customer_addresses` | R/W własne | — | R |
 | `carriers` | — (tylko widok publiczny po przypisaniu) | R/W własny (bez 🔒) | R, S |
-| `carrier_vehicles` | — | R/W własne | R/W |
+| `carrier_vehicles` | — | R/W własne (bez `approved_at`) | R, S |
 | `carrier_documents` | — | R + insert własne | R, S |
 | `vehicle_types`, `service_area_provinces`, `holidays` | R (także `anon`) | R | R/W |
 | `price_lists`, `price_list_vehicle_rates`, `price_rules` | R aktywny | R aktywny | R/W (draft) |
@@ -602,6 +620,7 @@ R = odczyt, W = zapis bezpośredni z aplikacji (z RLS), S = zapis tylko przez se
 | `delivery_proofs` | R własne | R, S (RPC) | R |
 | `order_locations` | R własne (picked_up…delivered) | W przypisane (w trakcie kursu) | R |
 | `claims` | R + insert własne | R przypisane (W14) | R, S |
+| `order_issues` | — | R + insert przypisane | R, S |
 | `payments`, `refunds` | R własne | — | R, S |
 | `stripe_events` | — | — | — (tylko service role) |
 | `customer_invoices` | R własne | — | R, S |
@@ -658,14 +677,7 @@ erDiagram
 
 Propozycje W1–W21 zatwierdzone 2026-11-08 jako decyzje **D18–D37** (rejestr w [spec.md](spec.md#0-rejestr-decyzji-2026-11-08)). Zmiany względem propozycji: W6 → D22 (także typy mniejsze, `size_rank`), W17 → D33 (polityka anulowania w MVP), W18 → D34 (SMS tylko dla przewoźników).
 
-Otwarte pytania wynikłe z D33 (dotyczą Etapu 3/6, nie blokują Etapu 1):
-
-| # | Pytanie | Propozycja |
-|---|---|---|
-| A1 | Od jakiej kwoty liczona opłata Y %? | Od `total_cents` (brutto, łącznie z magazynem). Zwrot = total − opłata; nota korygująca na zwróconą część. |
-| A2 | Czy przewoźnik może sam zrezygnować z przyjętego kursu? | Nie w aplikacji w MVP — kontakt z adminem, admin odpina przewoźnika (status wraca do `paid`). |
-| A3 | Kwota dla przewoźnika przy anulowaniu (decyzja admina) | Tworzy wypłatę na `cancellation_carrier_amount_cents`: wymaga faktury przewoźnika na tę kwotę, bez wymogu POD, okno liczone od decyzji admina. |
-| A4 | Status `refunded` vs `cancelled` | Anulowanie (D33) zawsze kończy się `cancelled` (kwota zwrotu w `refunded_cents`). `refunded` = pełny zwrot zlecenia z innego powodu (np. nieudana dostawa) decyzją admina. |
+Pytania A1–A4 rozstrzygnięte 2026-11-08 jako **D38–D41** (A2 rozszerzone o zgłoszenia „Segnala un problema” → tabela `order_issues`, Etap 4).
 
 ## 9. Plan migracji (etapami)
 
@@ -679,10 +691,12 @@ Zasady:
 
 | Migracja | Zawartość |
 |---|---|
-| `accounts` | **Enumy:** `user_role`, `customer_type`, `carrier_status`. **Funkcje:** `set_updated_at()` (trigger). **Tabele:** `profiles`, `customers`, `carriers` (z `phone_verified_at` i polami Stripe — zapis i tak tylko serwer). **Funkcje RLS:** `current_role()`, `is_admin()` (`SECURITY DEFINER`, `search_path = ''`). **Triggery:** `handle_new_user` na `auth.users` insert (tworzy `profiles`, rola z metadanych: tylko `cliente`/`padroncino`, wszystko inne → `cliente`); `sync_profile_email` na `auth.users` update; `protect_columns` (blokuje zmianę 🔒 kolumn `profiles`, `customers.customer_type`, `carriers.status/…/stripe_*` przez kogoś innego niż service role). **Uprawnienia kolumnowe:** `revoke update` na tabelach + `grant update (kolumny edytowalne)` dla `authenticated`. **RLS:** jak w sekcji 3.1 / macierz 6 (w tym `not is_blocked`). |
+| `accounts` | **Enumy:** `user_role`, `customer_type`, `carrier_status`. **Funkcje:** `set_updated_at()` (trigger). **Tabele:** `profiles`, `customers`, `carriers` (z `phone_verified_at` i polami Stripe — zapis i tak tylko serwer). **Funkcje RLS:** `auth_role()`, `is_admin()` (`SECURITY DEFINER`, `search_path = ''`). **Triggery:** `handle_new_user` na `auth.users` insert (tworzy `profiles`, rola z metadanych: tylko `cliente`/`padroncino`, wszystko inne → `cliente`); `sync_profile_email` na `auth.users` update; `protect_columns` (blokuje zmianę 🔒 kolumn `profiles`, `customers.customer_type`, `carriers.status/…/stripe_*` przez kogoś innego niż service role). **Uprawnienia kolumnowe:** `revoke update` na tabelach + `grant update (kolumny edytowalne)` dla `authenticated`. **RLS:** jak w sekcji 3.1 / macierz 6 (w tym `not is_blocked`). |
 | `vehicles_documents` | **Enumy:** `carrier_document_type`, `review_status`. **Tabele:** `vehicle_types` (z `size_rank`, bez stawek — te w Etapie 2), `carrier_vehicles`, `carrier_documents`. **Dane startowe:** 5 typów pojazdów (D7) z `size_rank` 1–5. **Storage:** prywatny bucket `carrier-documents` + polityki `storage.objects` (przewoźnik: zapis i odczyt w folderze `{auth.uid()}/`, admin: odczyt wszystkiego). **RLS:** sekcje 3.1–3.2. |
 | `settings_audit` | **Tabele:** `settings` (jeden wiersz: `payout_window_hours`, `gps_interval_s`, `unassigned_alert_hours`, `free_cancellation_hours`, `late_cancellation_fee_bp`, dane firmy Transigo), `audit_log`. **Dane startowe:** wiersz `settings` z wartościami domyślnymi. **RLS:** tylko admin (odczyt; `settings` także zapis). |
-| *(poza migracją)* | Nadanie roli admin: ręcznie w SQL Editor (`update profiles set role = 'admin' where email = '…'`) — instrukcja w README, nigdy w migracji ani formularzu. |
+| *(poza migracją)* | Nadanie roli admin: ręcznie w SQL Editor — `update public.profiles set role = 'admin' where email = lower('…') returning id, email, role;` — nigdy w migracji ani formularzu. Konto musi istnieć (rejestracja lub Dashboard → Authentication → Add user). |
+
+**Status: wykonane 2026-11-08** — migracje `20261108150851_accounts`, `20261108150853_vehicles_documents`, `20261108150855_settings_audit`; testy bezpieczeństwa `npm run test:rls` (`tests/rls/stage1.test.ts`, 54 testy) zielone.
 
 Weryfikacja po `db:push`: konto testowe `cliente` i `padroncino` przez rejestrację; sprawdzenie, że rola z metadanych `admin` daje `cliente`, że użytkownik nie zmieni `role`/`status`, że nie widzi cudzych wierszy, że przewoźnik nie czyta cudzego folderu w Storage. Ekrany logowania/rejestracji z rolami — kolejny krok Etapu 1 po migracjach.
 
@@ -699,8 +713,8 @@ Weryfikacja po `db:push`: konto testowe `cliente` i `padroncino` przez rejestrac
 - Anulowanie (D33) i zwroty — logika w route handlerach, bez nowych tabel.
 
 ### Etap 4 — PWA przewoźnika
-- **Enumy:** `photo_kind`, `carrier_invoice_status`.
-- **Tabele:** `order_photos`, `delivery_proofs`, `carrier_invoices`.
+- **Enumy:** `photo_kind`, `carrier_invoice_status`, `order_issue_reason`, `order_issue_status`.
+- **Tabele:** `order_photos`, `delivery_proofs`, `carrier_invoices`, `order_issues` (D39).
 - **Funkcje (`SECURITY DEFINER`):** `is_active_carrier()` (D21), `available_jobs()` (D22, D29), `accept_job()`, `set_order_status()`, `complete_delivery()` (bez tworzenia wypłaty — dochodzi w Etapie 6).
 - **Storage:** `order-photos`, `signatures`, `carrier-invoices` + polityki.
 

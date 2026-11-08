@@ -45,6 +45,10 @@
 | D35 | GDPR — usunięcie danych | Anonimizacja profilu (imię, telefon, adresy) zamiast usunięcia; zlecenia i faktury zostają z danymi fiskalnymi ze snapshotu (obowiązek przechowywania 10 lat). *(W19)* |
 | D36 | Dane do faktury | Domyślnie z profilu; klient może je zmienić dla danego zlecenia w „Riepilogo” (snapshot w zleceniu, profil bez zmian). *(W20)* |
 | D37 | Tworzenie kont | `profiles` tworzy trigger przy rejestracji; `customers` / `carriers` tworzy serwer z danych formularza. Rola `admin` nadawana wyłącznie ręcznie. *(W21)* |
+| D38 | Podstawa opłaty za późne anulowanie | Y % liczone tylko od pozycji **transport (z dopłatami, D14), tragarze i pakowanie** (brutto). Składowanie, które się nie rozpoczęło, zwracane w całości. *(A1)* |
+| D39 | Rezygnacja przewoźnika z kursu | Przewoźnik nie rezygnuje sam. W PWA przycisk **„Segnala un problema”** przy kursie: powód z listy + opis → zgłoszenie (`order_issues`) widoczne przy zleceniu, powiadomienie dla admina. Admin może odpiąć przewoźnika (zlecenie wraca do `paid`). Etap 4. *(A2)* |
+| D40 | Kwota dla przewoźnika przy anulowaniu | Kwota ustalona przez admina w `cancellation_review` tworzy zwykłą wypłatę: wymaga faktury przewoźnika na tę kwotę, bez wymogu POD, okno liczone od decyzji admina. *(A3)* |
+| D41 | `cancelled` vs `refunded` | Anulowanie (D33) zawsze kończy się `cancelled` (zwrócona kwota w `refunded_cents`). `refunded` = pełny zwrot zlecenia z innego powodu, decyzją admina. *(A4)* |
 
 ## 1. Słownik
 
@@ -161,9 +165,10 @@ Reklamacje (`claims`): klient lub admin otwiera reklamację do zlecenia; otwarta
 - Moment odniesienia: początek okna odbioru (`pickup_window_start`).
 - **Status `paid` (brak przewoźnika):**
   - ≥ X h przed odbiorem → anulowanie bezpłatne, pełny zwrot automatycznie, status `cancelled`;
-  - < X h przed odbiorem → opłata Y % kwoty, zwrot reszty automatycznie, status `cancelled`.
+  - < X h przed odbiorem → opłata Y % od pozycji transport (z dopłatami), tragarze i pakowanie (brutto); składowanie, które się nie rozpoczęło, zwracane w całości (D38); zwrot reszty automatycznie, status `cancelled`.
 - **Status `assigned` (przewoźnik przyjął kurs):** klient zgłasza anulowanie → `cancellation_review`; przewoźnik dostaje informację, że kursu nie wykonuje. Admin decyduje: kwota zwrotu dla klienta i ewentualna kwota dla przewoźnika (bez automatycznych rekompensat) → `cancelled`.
 - Od `picked_up` klient nie anuluje w aplikacji — tylko przez reklamację / kontakt z adminem.
+- Kwota dla przewoźnika z decyzji admina → wypłata wg D40. Status końcowy zawsze `cancelled` (D41).
 - Każdy zwrot (pełny lub częściowy) → nota di credito (D26).
 
 ## 5. Strona publiczna
@@ -217,6 +222,7 @@ Mobile-first, instalowalna (manifest + service worker), działa przy słabym zas
 - **Le mie corse:** przypisane / w realizacji / zakończone.
 - **Esecuzione corsa:** pełne adresy i kontakty, nawigacja (link do Google Maps), przyciski statusów: „Ritirato” (zdjęcie ładunku), „In viaggio”, „Consegnato” (zdjęcia + podpis odbiorcy na ekranie + imię odbiorcy). GPS wysyłany co 15 s (D17) **tylko przy otwartej aplikacji** (D11). Przez cały kurs widoczny baner: „Tieni l'app aperta durante la corsa per condividere la posizione”; Wake Lock API, gdy dostępne. Brak sygnału GPS > X min → ostrzeżenie dla przewoźnika.
 - **Fattura:** po dostawie upload faktury przewoźnika dla Transigo (PDF/XML) z podaną kwotą. Faktura zawsze na pełną kwotę przewoźnika za zlecenie (D12). Walidacja automatyczna (D4, D12): kwota = `carrier_amount` (przed potrąceniami) → wypłata przechodzi dalej; niezgodność → `to_verify` i komunikat dla przewoźnika, decyzja admina.
+- **Segnala un problema** (przy kursie, D39): powód z listy (awaria pojazdu, nie mogę dojechać na odbiór, towar niezgodny z opisem, problem z adresem, brak kontaktu z klientem, inne) + opis; zgłoszenie widoczne przy zleceniu w panelu admina, admin dostaje powiadomienie.
 - **Guadagni:** lista wypłat i ich statusy (z przewidywaną datą wypłaty po oknie), rozbicie każdej wypłaty: kwota z faktury − potrącenia (`payout_adjustments`, z powodem) = przelew, suma w okresie, link do panelu Stripe Express.
 - **Profilo e documenti:** dane, pojazdy, dokumenty z datami ważności (ostrzeżenie przed wygaśnięciem; po wygaśnięciu brak dostępu do nowych kursów).
 - **Powiadomienia:** nowe kursy w okolicy (push web / SMS **[DO USTALENIA]**).
@@ -287,4 +293,5 @@ Mobile-first, instalowalna (manifest + service worker), działa przy słabym zas
 | Magazyn: kończy się opłacony okres / link do przedłużenia | e-mail (+ SMS) | — | dashboard |
 | Zapytanie spoza obszaru obsługi | — | — | e-mail |
 | Nowy przewoźnik do weryfikacji | — | — | e-mail |
+| Zgłoszenie problemu przez przewoźnika (D39) | — | — | e-mail + dashboard |
 | Dokument wygasa za 30/7 dni | — | e-mail | dashboard |

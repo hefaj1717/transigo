@@ -45,6 +45,7 @@ Pełna lista decyzji: [docs/spec.md, sekcja 0](docs/spec.md#0-rejestr-decyzji-20
 Uwagi techniczne:
 - Next.js 16: middleware nazywa się **proxy** (`src/proxy.ts`); odświeża sesję Supabase. Przed pisaniem kodu Next sprawdzaj `node_modules/next/dist/docs/`.
 - Supabase CLI 3.x domyślnie celuje w lokalny stack — nie używamy Dockera, więc zawsze `--remote` (skrypty `npm run db:push`, `npm run db:list`).
+- Testy bezpieczeństwa RLS: `npm run test:rls` (`tests/rls/`, działają na projekcie w chmurze, tworzą i usuwają użytkowników testowych). Każda migracja z tabelą/polityką dostaje testy w tym folderze.
 
 ## Zasady pracy
 
