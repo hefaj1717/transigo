@@ -1,7 +1,11 @@
 // Integer money helpers. All amounts are EUR cents (integers); percentages are basis points
 // (1 bp = 0.01 %, 22 % = 2200). Intermediate products use BigInt so nothing ever goes through floats.
 
-const BP_DENOMINATOR = 10_000n;
+// BigInt constants via BigInt(): tsconfig targets ES2017, which has no BigInt literal syntax.
+const ZERO = BigInt(0);
+const ONE = BigInt(1);
+const TWO = BigInt(2);
+const BP_DENOMINATOR = 10_000;
 
 function assertNonNegativeInt(value: number, name: string) {
   if (!Number.isSafeInteger(value) || value < 0) {
@@ -19,12 +23,12 @@ export function mulDivRoundHalfUp(a: number, numerator: number, denominator: num
   if (!Number.isSafeInteger(denominator) || denominator <= 0) throw new RangeError("denominator must be > 0");
   const n = BigInt(a) * BigInt(numerator);
   const d = BigInt(denominator);
-  return Number((n * 2n + d) / (d * 2n));
+  return Number((n * TWO + d) / (d * TWO));
 }
 
 /** round_half_up(amount × bp / 10000) — percentage of an amount in cents (D56). */
 export function applyBp(amountCents: number, bp: number): number {
-  return mulDivRoundHalfUp(amountCents, bp, Number(BP_DENOMINATOR));
+  return mulDivRoundHalfUp(amountCents, bp, BP_DENOMINATOR);
 }
 
 /**
@@ -39,15 +43,15 @@ export function allocateProportionally(total: number, weights: number[]): number
     return [];
   }
   weights.forEach((w, i) => assertNonNegativeInt(w, `weights[${i}]`));
-  const sum = weights.reduce((s, w) => s + BigInt(w), 0n);
-  if (sum === 0n) return weights.map((_, i) => (i === 0 ? total : 0));
+  const sum = weights.reduce((s, w) => s + BigInt(w), ZERO);
+  if (sum === ZERO) return weights.map((_, i) => (i === 0 ? total : 0));
 
   const T = BigInt(total);
   const parts = weights.map((w) => (T * BigInt(w)) / sum);
   const remainders = weights.map((w, i) => ({ i, r: (T * BigInt(w)) % sum }));
-  let left = Number(T - parts.reduce((s, p) => s + p, 0n));
+  let left = Number(T - parts.reduce((s, p) => s + p, ZERO));
   remainders.sort((a, b) => (a.r === b.r ? a.i - b.i : a.r > b.r ? -1 : 1));
-  for (let k = 0; left > 0; k++, left--) parts[remainders[k].i] += 1n;
+  for (let k = 0; left > 0; k++, left--) parts[remainders[k].i] += ONE;
   return parts.map(Number);
 }
 
