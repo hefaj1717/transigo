@@ -176,6 +176,7 @@ Indeksy: `(carrier_id, doc_type)`, `(expires_at)` dla alertów o wygasaniu (30 i
 | `payload_kg` | `integer` | |
 | `cargo_length_cm`, `cargo_width_cm`, `cargo_height_cm` | `integer` | |
 | `cargo_volume_dm3` | `integer` | 3 m³ = 3000 |
+| `euro_pallets` | `smallint` ≥ 0 | liczba palet EUR (D81) |
 | `size_rank` | `smallint` not null unique | kolejność wielkości (1 = najmniejszy). Przewoźnik widzi kursy dla typów o `size_rank` ≤ największego z jego aktywnych pojazdów (D22). |
 | `is_active` | `boolean` not null default true | |
 | `sort_order` | `integer` not null default 0 | |
@@ -183,6 +184,10 @@ Indeksy: `(carrier_id, doc_type)`, `(expires_at)` dla alertów o wygasaniu (30 i
 
 Stawka/km i cena minimalna są w wersji cennika (`price_list_vehicle_rates`), a nie tutaj, żeby historia cen była wersjonowana. Patrz wątpliwość W1.
 **RLS:** odczyt publiczny (`anon` + `authenticated`) aktywnych typów, bo kreator działa bez logowania. Zapis tylko admin.
+
+#### `porter_package_min_vehicle` — minimalny pojazd dla kategorii ładunku (D83)
+`package_code porter_package_code` PK, `vehicle_type_id uuid` FK → `vehicle_types` (restrict), `updated_at`. Niewersjonowana; brak wiersza = brak minimum.
+**RLS:** tylko admin (odczyt i zapis); kreator czyta serwerem (service role).
 
 #### `price_lists` — wersje cennika
 | Kolumna | Typ | Uwagi |
@@ -278,6 +283,9 @@ Indeks: `(created_at)` do czyszczenia (> 24 h usuwa serwer).
 | `goods_description` | `text` not null | |
 | `items_count`, `weight_kg` | `integer` check > 0 | orientacyjnie |
 | `goods_dimensions_note` | `text` | |
+| `largest_item_length_cm`, `largest_item_width_cm`, `largest_item_height_cm` | `integer` > 0 | największy przedmiot (D86) |
+| `pallets_count` | `integer` > 0 | palety EUR (D86) |
+| `load_category` | `porter_package_code` | rodzaj transportu (D83); null = nie przeprowadzka |
 | **Usługi** | | tragarze per odcinek — w `order_legs` (D74) |
 | `packing_items_count` | `integer` not null default 0 | 0 = bez pakowania |
 | `storage_type` | `storage_type` | null = bez magazynu |

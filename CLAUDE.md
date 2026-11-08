@@ -130,6 +130,7 @@ Uwagi techniczne:
   - **TODO przed Etapem 3** (maile z potwierdzeniem zamówienia): Resend + SMTP dla Supabase Auth, instrukcja w D79 (kupić domenę, DNS SPF/DKIM, klucz API, SMTP w Supabase, Rate Limits).
 - [ ] 3. Płatność klienta (Stripe Checkout + webhook)
 - [ ] 4. PWA przewoźnika (rejestracja, Stripe Connect, kursy, realizacja, GPS, faktura)
+  - Pojazd przewoźnika musi spełniać wymagania zlecenia (waga, największy przedmiot, palety) przy „Accetta la Corsa”; prawo jazdy kat. C dla camion — do ustalenia (D87).
   - Czas pracy tragarzy statusami (przyjazd na odbiór → załadowano, przyjazd na dostawę → rozładowano; bez jazdy), potwierdzenie podpisem klienta (D69).
 - [ ] 5. Tracking na żywo i potwierdzenie dostawy dla klienta
 - [ ] 6. E-faktury SDI i automatyczne wypłaty
