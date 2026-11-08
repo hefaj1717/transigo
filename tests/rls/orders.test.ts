@@ -1,5 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { calculatePrice } from "@/lib/pricing/calculate";
+import { makeConfig } from "@/lib/pricing/__fixtures__/config";
+import { planLegs, priceInputFor, type Endpoint } from "@/lib/booking/build";
+import { buildOrderPayload } from "@/lib/booking/order-payload";
+import { EMPTY_WIZARD_STATE, type WizardState } from "@/lib/booking/state";
 import { anon, createUser, deleteCreatedUsers, service, type TestUser } from "./helpers";
 
 // Stage 2b security tests (D63 — the stage is not done without them): orders and their snapshot tables.
@@ -530,5 +535,50 @@ describe("warehouses (D72) — admin only", () => {
 
   it("a warehouse used by an order cannot be deleted", async () => {
     expect((await admin.client.from("warehouses").delete().eq("id", warehouseId)).error).not.toBeNull();
+  });
+});
+
+describe("payload from the booking code is accepted by create_order (TS ↔ SQL)", () => {
+  it("storage order with porters on both legs, built by the engine and buildOrderPayload", async () => {
+    const A: Endpoint = { address: "Via Roma 1, Milano", placeId: "place-a", lat: 45.46, lng: 9.19, city: "Milano", postalCode: "20121", province: "MI", warehouseId: null };
+    const B: Endpoint = { address: "Via Po 2, Torino", placeId: "place-b", lat: 45.07, lng: 7.69, city: "Torino", postalCode: "10124", province: "TO", warehouseId: null };
+    const state: WizardState = {
+      ...EMPTY_WIZARD_STATE,
+      pickup: { placeId: "place-aaaaaaaaaa", label: "A", floor: 2, hasElevator: false },
+      delivery: { placeId: "place-bbbbbbbbbb", label: "B", floor: 0, hasElevator: true },
+      pickupDate: "2026-12-01",
+      pickupWindow: "10-12",
+      goods: { description: "Trasloco bilocale", itemsCount: 30, weightKg: null, dimensionsNote: "" },
+      portersPickup: { packageCode: "bilocale" },
+      portersDelivery: { packageCode: "monolocale", count: 3 },
+      packingItems: 4,
+      storage: { returnDate: "2026-12-20", returnWindow: "14-16", pallets: 2 },
+      vehicleTypeId,
+    };
+    const plan = planLegs(state, A, B, { id: warehouseId, address: "Via Magazzino 1, Milano", placeId: null, lat: 45.5, lng: 9.2, city: "Milano", postalCode: null, province: "MI" });
+    if (!plan.ok) throw new Error(plan.error);
+    const legs = plan.legs.map((l, i) => ({ ...l, distanceM: [12_000, 150_000][i], durationS: 1800 }));
+    const config = makeConfig({ priceListId: priceList.id, priceListVersion: priceList.version, vehicleRates: [{ vehicleTypeId, nameIt: "Furgone", ratePerKmCents: 140, minPriceCents: 6000 }] });
+    const now = new Date("2026-11-20T08:00:00Z");
+    const result = calculatePrice(priceInputFor({ state, legs, storageDays: plan.storageDays, storageBillingUnit: "pallet_day", vehicleTypeId, customerType: "private", now }), config);
+    if (!result.ok) throw new Error(JSON.stringify(result.error));
+
+    const payload = buildOrderPayload({
+      customerId: customerA.id, state, vehicleTypeId, legs, storageDays: plan.storageDays, storageBillingUnit: "pallet_day",
+      quote: result.quote, quotedAt: now, termsVersion: "2026-11-01", termsAcceptedAt: now,
+      contacts: { pickupName: "Mario", pickupPhone: "+393331234567", deliveryName: "Lucia", deliveryPhone: "+393337654321", notes: "" },
+      billingDetails: { customer_type: "private", fiscal_code: "RSSMRA80A01F205X" },
+    });
+    const order = await createOrder(payload);
+
+    const { data: charges } = await service.from("order_charges").select("total_cents").eq("order_id", order.id).single();
+    expect(charges?.total_cents).toBe(result.quote.totalCents);
+    const { data: terms } = await service.from("order_leg_carrier_terms").select("leg_index, carrier_amount_cents").eq("order_id", order.id).order("leg_index");
+    expect(terms?.map((t) => t.carrier_amount_cents)).toEqual(result.quote.carrierAmountByLegCents);
+    const { data: legRows } = await service.from("order_legs").select("leg_index, porters_count, porters_included_hours").eq("order_id", order.id).order("leg_index");
+    expect(legRows).toEqual([
+      { leg_index: 0, porters_count: 2, porters_included_hours: 3 },
+      { leg_index: 1, porters_count: 3, porters_included_hours: 2 },
+    ]);
   });
 });
