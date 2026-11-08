@@ -96,6 +96,7 @@ Uwagi techniczne:
 - [x] 0. Fundament (repo, CLAUDE.md, spec, .gitignore, .env.example)
 - [ ] 1. Szkielet Next.js + Supabase, logowanie z rolami cliente/padroncino/admin, schemat bazy, RLS
 - [ ] 2. Silnik cenowy, kreator rezerwacji, strona publiczna
+  - **Przed Etapem 3:** Kupić domenę, skonfigurować Resend (DNS SPF/DKIM), podpiąć SMTP w Supabase i podnieść Rate Limits.
 - [ ] 3. Płatność klienta (Stripe Checkout + webhook)
 - [ ] 4. PWA przewoźnika (rejestracja, Stripe Connect, kursy, realizacja, GPS, faktura)
 - [ ] 5. Tracking na żywo i potwierdzenie dostawy dla klienta
