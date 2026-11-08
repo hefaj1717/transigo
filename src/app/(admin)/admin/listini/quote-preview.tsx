@@ -2,6 +2,8 @@
 
 import { startTransition, useActionState, useState, type FormEvent } from "react";
 import { formatCents } from "@/lib/pricing/money";
+import { PORTER_PACKAGE_LABEL } from "@/lib/pricing/rule-meta";
+import { PORTER_PACKAGE_CODES } from "@/lib/pricing/types";
 import { previewQuoteAction, type PreviewState } from "./preview-action";
 
 const input = "rounded-md border border-zinc-300 px-2 py-1 text-sm text-zinc-900";
@@ -40,8 +42,13 @@ export function QuotePreview({ priceListId, vehicles, defaultPickup }: { priceLi
         <label className="flex items-center gap-2"><input type="checkbox" name="pickup_elevator" /> Ascensore al ritiro</label>
         <label className="flex flex-col gap-1">Piano consegna<input name="delivery_floor" defaultValue="0" className={input} /></label>
         <label className="flex items-center gap-2"><input type="checkbox" name="delivery_elevator" /> Ascensore alla consegna</label>
-        <label className="flex flex-col gap-1">Facchini (persone)<input name="porters_count" defaultValue="0" className={input} /></label>
-        <label className="flex flex-col gap-1">Facchini (ore)<input name="porters_hours" defaultValue="0" className={input} /></label>
+        <label className="flex flex-col gap-1">Facchinaggio
+          <select name="porter_package" defaultValue="" className={input}>
+            <option value="">Nessuno</option>
+            {PORTER_PACKAGE_CODES.map((c) => <option key={c} value={c}>{PORTER_PACKAGE_LABEL[c]}</option>)}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">Facchini (persone, vuoto = da categoria)<input name="porters_count" defaultValue="" className={input} /></label>
         <label className="flex flex-col gap-1">Imballaggio (colli)<input name="packing_items" defaultValue="0" className={input} /></label>
         <label className="flex flex-col gap-1">Deposito (giorni, vuoto = no)<input name="storage_days" defaultValue="" className={input} /></label>
         <label className="flex flex-col gap-1">Deposito (pallet)<input name="storage_pallets" defaultValue="" className={input} /></label>
@@ -81,6 +88,14 @@ export function QuotePreview({ priceListId, vehicles, defaultPickup }: { priceLi
             Margine Transigo (netto): <strong>{formatCents(q.subtotalCents - q.carrierAmountCents)}</strong>
             {q.isUrgentByLeg[0] ? " · urgente" : ""}
           </p>
+          {q.porters ? (
+            <p className="mt-1 text-sm">
+              Facchinaggio: incluse {q.porters.includedHours} h di lavoro
+              {q.porters.overtimeRatePerPersonCents !== null
+                ? `, ogni ora successiva iniziata ${formatCents(q.porters.overtimeRatePerPersonCents)} a persona (tolleranza ${q.porters.overtimeGraceMinutes} min).`
+                : "; ore extra non addebitate (regola disattivata)."}
+            </p>
+          ) : null}
           {q.warnings.length ? <p className="mt-1 text-sm text-red-700">Attenzione: la quota padroncino supera l&apos;importo del servizio ({q.warnings.map((w) => w.group).join(", ")}).</p> : null}
         </div>
       ) : null}

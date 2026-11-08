@@ -47,7 +47,7 @@ afterAll(async () => {
 });
 
 describe("price tables are admin-only (D59)", () => {
-  for (const table of ["price_lists", "price_list_vehicle_rates", "price_rules"]) {
+  for (const table of ["price_lists", "price_list_vehicle_rates", "price_rules", "price_list_porter_packages"]) {
     it(`anon, cliente, padroncino and a blocked admin read nothing from ${table}`, async () => {
       for (const client of [anon, cliente.client, carrier.client, blockedAdmin.client]) {
         const { data } = await client.from(table).select("*");
@@ -61,7 +61,7 @@ describe("price tables are admin-only (D59)", () => {
     const { data: types } = await service.from("vehicle_types").select("id").eq("is_active", true);
     expect(rates?.length).toBe(types?.length);
     const { data: rules } = await admin.client.from("price_rules").select("code").eq("price_list_id", activeId);
-    expect(rules?.length).toBe(14);
+    expect(rules?.length).toBe(14); // seeded v1, published before D68 (no porter_overtime_hour)
   });
 
   it("non-admins cannot clone or publish", async () => {
@@ -95,7 +95,7 @@ describe("price list versioning (D60)", () => {
     const { count: rates } = await admin.client.from("price_list_vehicle_rates").select("*", { count: "exact", head: true }).eq("price_list_id", draftId);
     const { count: rules } = await admin.client.from("price_rules").select("*", { count: "exact", head: true }).eq("price_list_id", draftId);
     expect(rates).toBeGreaterThan(0);
-    expect(rules).toBe(14);
+    expect(rules).toBe(15); // the 14 seeded rules + porter_overtime_hour filled in by the clone (D68)
   });
 
   it("admin edits a draft (list fields, rates, rules)", async () => {
@@ -201,6 +201,105 @@ describe("deleting the publisher's account", () => {
   it("clearing published_by does not open other edits of a published list", async () => {
     const r = await service.from("price_lists").update({ published_by: null, notes: "changed" }).eq("id", activeId);
     expect(r.error).not.toBeNull();
+  });
+});
+
+describe("porter packages and overtime (D67, D68)", () => {
+  const packagesOf = async (listId: string) =>
+    (await admin.client.from("price_list_porter_packages").select("code, porters_count, included_hours, is_enabled").eq("price_list_id", listId).order("code")).data;
+
+  it("the seeded v1 has no packages; its clone gets the placeholder packages, overtime rule and grace", async () => {
+    const { data: v1 } = await service.from("price_lists").select("id").eq("version", 1).single();
+    expect(await packagesOf(v1!.id)).toEqual([]);
+    const draftId = (await admin.client.rpc("clone_price_list", { p_source_id: v1!.id })).data as string;
+    createdDrafts.push(draftId);
+    expect(await packagesOf(draftId)).toEqual([
+      { code: "parcels", porters_count: 1, included_hours: 1, is_enabled: true },
+      { code: "monolocale", porters_count: 2, included_hours: 2, is_enabled: true },
+      { code: "bilocale", porters_count: 2, included_hours: 3, is_enabled: true },
+      { code: "trilocale_plus", porters_count: 3, included_hours: 4, is_enabled: true },
+    ]);
+    const { data: rule } = await admin.client.from("price_rules").select("kind, amount_cents, is_enabled").eq("price_list_id", draftId).eq("code", "porter_overtime_hour").single();
+    expect(rule).toEqual({ kind: "per_unit", amount_cents: 3500, is_enabled: true });
+    const { data: list } = await admin.client.from("price_lists").select("porter_overtime_grace_minutes").eq("id", draftId).single();
+    expect(list?.porter_overtime_grace_minutes).toBe(15);
+  });
+
+  it("admin edits packages, overtime rule and grace of a draft; a clone copies the edited values", async () => {
+    const draftId = await cloneActiveAsAdmin();
+    const a = await admin.client.from("price_list_porter_packages").update({ porters_count: 3, included_hours: 5, is_enabled: false }).eq("price_list_id", draftId).eq("code", "bilocale").select();
+    expect(a.error).toBeNull();
+    expect(a.data?.length).toBe(1);
+    const b = await admin.client.from("price_rules").update({ amount_cents: 4000, is_enabled: false }).eq("price_list_id", draftId).eq("code", "porter_overtime_hour").select();
+    expect(b.data?.length).toBe(1);
+    const c = await admin.client.from("price_lists").update({ porter_overtime_grace_minutes: 10 }).eq("id", draftId).select();
+    expect(c.data?.length).toBe(1);
+
+    const copyId = (await admin.client.rpc("clone_price_list", { p_source_id: draftId })).data as string;
+    createdDrafts.push(copyId);
+    expect((await packagesOf(copyId))?.find((p) => p.code === "bilocale")).toEqual({ code: "bilocale", porters_count: 3, included_hours: 5, is_enabled: false });
+    const { data: rule } = await admin.client.from("price_rules").select("amount_cents, is_enabled").eq("price_list_id", copyId).eq("code", "porter_overtime_hour").single();
+    expect(rule).toEqual({ amount_cents: 4000, is_enabled: false });
+    const { data: list } = await admin.client.from("price_lists").select("porter_overtime_grace_minutes").eq("id", copyId).single();
+    expect(list?.porter_overtime_grace_minutes).toBe(10);
+  });
+
+  it("non-admins cannot change or add packages of a draft", async () => {
+    const draftId = await cloneActiveAsAdmin();
+    for (const client of [cliente.client, carrier.client, blockedAdmin.client, anon]) {
+      const { data } = await client.from("price_list_porter_packages").update({ included_hours: 8 }).eq("price_list_id", draftId).select();
+      expect(data ?? []).toEqual([]);
+      const ins = await client.from("price_list_porter_packages").insert({ price_list_id: draftId, code: "parcels", porters_count: 1, included_hours: 1 });
+      expect(ins.error).not.toBeNull();
+    }
+    expect((await packagesOf(draftId))?.every((p) => p.included_hours !== 8)).toBe(true);
+  });
+
+  it("packages and grace of the published list are read-only for admin and service role", async () => {
+    expect((await packagesOf(activeId))?.length).toBe(4); // the active list is a clone published above
+    const r1 = await admin.client.from("price_list_porter_packages").update({ included_hours: 8 }).eq("price_list_id", activeId).eq("code", "parcels");
+    expect(r1.error).not.toBeNull();
+    const r2 = await service.from("price_list_porter_packages").update({ included_hours: 8 }).eq("price_list_id", activeId).eq("code", "parcels");
+    expect(r2.error).not.toBeNull();
+    const r3 = await service.from("price_list_porter_packages").delete().eq("price_list_id", activeId).eq("code", "parcels");
+    expect(r3.error).not.toBeNull();
+    const r4 = await admin.client.from("price_lists").update({ porter_overtime_grace_minutes: 30 }).eq("id", activeId);
+    expect(r4.error).not.toBeNull();
+  });
+
+  it("checks reject persons outside 1–4, hours outside 1–8, grace outside 0–120 and a non per_unit overtime rule", async () => {
+    const draftId = await cloneActiveAsAdmin();
+    for (const patch of [{ porters_count: 0 }, { porters_count: 5 }, { included_hours: 0 }, { included_hours: 9 }]) {
+      const { error } = await admin.client.from("price_list_porter_packages").update(patch).eq("price_list_id", draftId).eq("code", "parcels");
+      expect(error, JSON.stringify(patch)).not.toBeNull();
+    }
+    for (const grace of [-1, 121]) {
+      const { error } = await admin.client.from("price_lists").update({ porter_overtime_grace_minutes: grace }).eq("id", draftId);
+      expect(error, String(grace)).not.toBeNull();
+    }
+    const { error } = await admin.client.from("price_rules").update({ kind: "percent", amount_cents: null, percent_bp: 1000 }).eq("price_list_id", draftId).eq("code", "porter_overtime_hour");
+    expect(error).not.toBeNull();
+  });
+
+  it("publishing a draft without all four packages or without the overtime rule fails", async () => {
+    const noPackage = await cloneActiveAsAdmin();
+    await admin.client.from("price_list_porter_packages").delete().eq("price_list_id", noPackage).eq("code", "trilocale_plus");
+    const a = await admin.client.rpc("publish_price_list", { p_price_list_id: noPackage });
+    expect(a.error?.message).toMatch(/missing 1 porter package/);
+
+    const noRule = await cloneActiveAsAdmin();
+    await admin.client.from("price_rules").delete().eq("price_list_id", noRule).eq("code", "porter_overtime_hour");
+    const b = await admin.client.rpc("publish_price_list", { p_price_list_id: noRule });
+    expect(b.error?.message).toMatch(/missing 1 pricing rule/);
+    expect((await activeList()).id).toBe(activeId);
+  });
+
+  it("fill_porter_defaults is not callable through the API", async () => {
+    const draftId = await cloneActiveAsAdmin();
+    for (const client of [admin.client, cliente.client, anon]) {
+      const { error } = await client.rpc("fill_porter_defaults", { p_price_list_id: draftId });
+      expect(error).not.toBeNull();
+    }
   });
 });
 

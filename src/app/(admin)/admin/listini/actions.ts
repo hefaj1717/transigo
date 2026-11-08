@@ -8,8 +8,8 @@ import { z } from "zod";
 import { adminAction, audit, dbError, ok } from "@/lib/admin/server";
 import type { ActionResult } from "@/lib/admin/action-result";
 import { parseEuroToCents, parsePercentToBp } from "@/lib/pricing/money";
-import { PRICE_RULE_CODES } from "@/lib/pricing/types";
-import { RULE_META } from "@/lib/pricing/rule-meta";
+import { PORTER_PACKAGE_CODES, PRICE_RULE_CODES } from "@/lib/pricing/types";
+import { PORTER_PACKAGE_LABEL, RULE_META } from "@/lib/pricing/rule-meta";
 
 const uuid = z.uuid();
 const str = (fd: FormData, key: string) => String(fd.get(key) ?? "").trim();
@@ -34,6 +34,7 @@ const settingsSchema = z.object({
   urgent_lead_hours: z.coerce.number().int().min(1).max(720),
   storage_short_term_max_days: z.coerce.number().int().min(1).max(3650),
   storage_billing_unit: z.enum(["day", "pallet_day"]),
+  porter_overtime_grace_minutes: z.coerce.number().int().min(0).max(120),
   notes: z.string().max(1000),
 });
 
@@ -45,6 +46,7 @@ export async function updateListSettingsAction(_prev: ActionResult, fd: FormData
     urgent_lead_hours: str(fd, "urgent_lead_hours"),
     storage_short_term_max_days: str(fd, "storage_short_term_max_days"),
     storage_billing_unit: str(fd, "storage_billing_unit"),
+    porter_overtime_grace_minutes: str(fd, "porter_overtime_grace_minutes"),
     notes: str(fd, "notes"),
   });
   const vatBp = parsed.success ? parsePercentToBp(parsed.data.vat) : null;
@@ -54,6 +56,7 @@ export async function updateListSettingsAction(_prev: ActionResult, fd: FormData
     urgent_lead_hours: parsed.data.urgent_lead_hours,
     storage_short_term_max_days: parsed.data.storage_short_term_max_days,
     storage_billing_unit: parsed.data.storage_billing_unit,
+    porter_overtime_grace_minutes: parsed.data.porter_overtime_grace_minutes,
     notes: parsed.data.notes || null,
   };
   const { data, error } = await db.from("price_lists").update(patch).eq("id", id).select("id");
@@ -129,6 +132,38 @@ export async function updateRulesAction(_prev: ActionResult, fd: FormData): Prom
   await audit(ctx, "price_list.rules", "price_list", id, { rules: rows });
   refresh();
   return ok("Regole salvate.");
+}
+
+const packageSchema = z.object({
+  porters_count: z.coerce.number().int().min(1).max(4), // D54
+  included_hours: z.coerce.number().int().min(1).max(8),
+});
+
+/** Porter packages of a draft (D67): persons and included hours per load size. */
+export async function updatePackagesAction(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
+  const { ctx, db } = await adminAction();
+  const id = idFrom(fd);
+  if (!id) return { error: "Listino non valido." };
+
+  const rows = [];
+  for (const code of PORTER_PACKAGE_CODES) {
+    const parsed = packageSchema.safeParse({ porters_count: str(fd, `persons_${code}`), included_hours: str(fd, `hours_${code}`) });
+    if (!parsed.success) return { error: `"${PORTER_PACKAGE_LABEL[code]}": persone 1–4, ore incluse 1–8.` };
+    rows.push({ code, ...parsed.data, is_enabled: fd.get(`enabled_${code}`) === "on" });
+  }
+
+  const { data: existing, error: readError } = await db.from("price_list_porter_packages").select("code").eq("price_list_id", id);
+  if (readError) return dbError(readError);
+  const have = new Set((existing ?? []).map((r) => r.code as string));
+  for (const { code, ...patch } of rows) {
+    const { error } = have.has(code)
+      ? await db.from("price_list_porter_packages").update(patch).eq("price_list_id", id).eq("code", code)
+      : await db.from("price_list_porter_packages").insert({ price_list_id: id, code, ...patch });
+    if (error) return dbError(error);
+  }
+  await audit(ctx, "price_list.porter_packages", "price_list", id, { packages: rows });
+  refresh();
+  return ok("Categorie facchinaggio salvate.");
 }
 
 export async function publishListAction(_prev: ActionResult, fd: FormData): Promise<ActionResult> {

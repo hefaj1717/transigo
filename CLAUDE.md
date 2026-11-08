@@ -114,13 +114,16 @@ Uwagi techniczne:
       - Wszystkie prowincje są nieaktywne — bez włączenia regionu w „Area di servizio” każda wycena zwraca `pickup_province`.
       - Stawki wersji 1 to placeholdery. Na stagingu aktywna jest v9 (kopia v1 z czasów, gdy testy RLS działały w chmurze — treść bez zmian).
       - `/api/maps/*` są publiczne — przed produkcją dodać rate limiting.
-  - [ ] **2b. Kreator rezerwacji** — warunek ukończenia: zielone testy RLS zleceń (D63); odcinki zlecenia wg D47; ważność wyceny D62.
+      - Tragarze wg kategorii ładunku (D67) i nadgodzin (D68): `porterOvertimeCost()` w `src/lib/pricing/overtime.ts`. Aktywny cennik sprzed D67 nie ma kategorii → tragarze niedostępni do publikacji nowej wersji.
+  - [ ] **2b. Kreator rezerwacji** — warunek ukończenia: zielone testy RLS zleceń (D63); odcinki zlecenia wg D47; ważność wyceny D62; tragarze: wybór kategorii + ewentualnie więcej osób, a kreator jasno pokazuje „Nel prezzo X h di lavoro; ogni ora successiva iniziata Y € a persona” (z `Quote.porters`, D67, D68); zlecenie zapisuje snapshot warunków tragarzy.
   - [ ] **2c. Strona publiczna**
   - **Przed Etapem 3:** Kupić domenę, skonfigurować Resend (DNS SPF/DKIM), podpiąć SMTP w Supabase i podnieść Rate Limits.
 - [ ] 3. Płatność klienta (Stripe Checkout + webhook)
 - [ ] 4. PWA przewoźnika (rejestracja, Stripe Connect, kursy, realizacja, GPS, faktura)
+  - Czas pracy tragarzy statusami (przyjazd na odbiór → załadowano, przyjazd na dostawę → rozładowano; bez jazdy), potwierdzenie podpisem klienta (D69).
 - [ ] 5. Tracking na żywo i potwierdzenie dostawy dla klienta
 - [ ] 6. E-faktury SDI i automatyczne wypłaty
+  - Dopłata za nadgodziny tragarzy: link od admina, osobna e-faktura, kwota przewoźnika do wypłaty (D69). Przed etapem rozstrzygnąć otwartą kwestię D69 (wypłata, gdy klient nie zapłaci dopłaty).
 - [ ] 7. Magazyn i dashboard admina
 - [ ] 8. Testy end-to-end, dokumenty prawne, wdrożenie
   - Założyć osobny projekt Supabase na produkcję; obecny projekt zostaje jako staging (testy ręczne). Testy RLS działają lokalnie (D64).

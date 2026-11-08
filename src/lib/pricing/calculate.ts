@@ -1,6 +1,8 @@
 import { isWeekendOrHoliday } from "./calendar";
 import { allocateProportionally, applyBp } from "./money";
+import { PORTER_PACKAGE_LABEL } from "./rule-meta";
 import { storageCost } from "./storage";
+import { PORTER_PACKAGE_CODES } from "./types";
 import type {
   CarrierShareGroup,
   OrderLineType,
@@ -11,6 +13,7 @@ import type {
   PricingConfig,
   PricingError,
   QuoteLine,
+  QuotePorters,
   QuoteWarning,
   StorageType,
 } from "./types";
@@ -27,6 +30,7 @@ const HOUR_MS = 3_600_000;
 const MAX_LEGS = 2; // D20: no intermediate stops; a warehouse order has two legs (D47)
 const MAX_DISTANCE_M = 2_000_000;
 const MAX_FLOOR = 20; // D53
+const MAX_PORTERS = 4; // D54
 
 type DraftLine = Omit<QuoteLine, "vatCents" | "grossCents" | "carrierAmountCents">;
 
@@ -47,8 +51,8 @@ function validate(input: PriceInput): string | null {
   }
   const legIndexOk = (idx: number | undefined) => idx === undefined || isInt(idx, 0, input.legs.length - 1);
   if (input.porters) {
-    if (!isInt(input.porters.count, 1, 4)) return "porters.count must be 1–4";
-    if (!isInt(input.porters.hours, 1, 8)) return "porters.hours must be 1–8";
+    if (!(PORTER_PACKAGE_CODES as readonly string[]).includes(input.porters.packageCode)) return "porters.packageCode is unknown";
+    if (input.porters.count !== undefined && !isInt(input.porters.count, 1, MAX_PORTERS)) return `porters.count must be 1–${MAX_PORTERS}`;
     if (!legIndexOk(input.porters.legIndex)) return "porters.legIndex out of range";
   }
   if (input.packing) {
@@ -141,21 +145,33 @@ export function calculatePrice(input: PriceInput, config: PricingConfig): PriceR
     }
   }
 
-  // 3. Porters (D54): persons × hours.
+  // 3. Porters (D67): package = persons × included hours × porter_hour. The customer may add persons
+  //    (each gets the package's hours) but not hours; extra time is settled after the job (D68, D69).
+  let porterTerms: Omit<QuotePorters, "carrierShare"> | null = null;
   if (input.porters) {
+    const pkg = config.porterPackages.find((p) => p.code === input.porters!.packageCode);
     const perHour = amountOf("porter_hour");
-    if (perHour === null) return fail({ code: "service_unavailable", service: "porters" });
-    const { count, hours } = input.porters;
+    if (!pkg || !pkg.isEnabled || perHour === null) return fail({ code: "service_unavailable", service: "porters" });
+    const count = input.porters.count ?? pkg.portersCount;
+    if (count < pkg.portersCount) return invalid(`porters.count must be at least ${pkg.portersCount} for ${pkg.code}`);
+    const hours = pkg.includedHours;
     const personHours = count * hours;
     push({
       lineType: "porters",
-      labelIt: `Facchinaggio: ${count} ${count === 1 ? "persona" : "persone"} × ${hours} h`,
+      labelIt: `Facchinaggio – ${PORTER_PACKAGE_LABEL[pkg.code]}: ${count} ${count === 1 ? "persona" : "persone"} × ${hours} h incluse`,
       legIndex: input.porters.legIndex ?? 0,
       quantity: personHours,
       unitAmountCents: perHour,
       netCents: personHours * perHour,
       carrierShareGroup: "porters",
     });
+    porterTerms = {
+      packageCode: pkg.code,
+      persons: count,
+      includedHours: hours,
+      overtimeRatePerPersonCents: amountOf("porter_overtime_hour"),
+      overtimeGraceMinutes: config.porterOvertimeGraceMinutes,
+    };
   }
 
   // 4. Packing (D54): flat fee + per item, each can be disabled.
@@ -241,6 +257,24 @@ export function calculatePrice(input: PriceInput, config: PricingConfig): PriceR
     carrierAmountCents: carrierAmounts[idx],
   }));
 
+  // Porter terms with the carrier share, so overtime gets the same share (D68).
+  let porters: QuotePorters | null = null;
+  if (porterTerms) {
+    const rule = rules.get("carrier_share_porters");
+    const portersLines = quoteLines.filter((l) => l.carrierShareGroup === "porters");
+    const carrierShare: QuotePorters["carrierShare"] = !rule
+      ? null
+      : rule.kind === "percent"
+        ? { kind: "percent", percentBp: rule.percentBp ?? 0 }
+        : {
+            // A fixed amount per order cannot be applied per hour: overtime keeps the package's proportion.
+            kind: "ratio",
+            carrierCents: portersLines.reduce((s, l) => s + l.carrierAmountCents, 0),
+            netCents: portersLines.reduce((s, l) => s + l.netCents, 0),
+          };
+    porters = { ...porterTerms, carrierShare };
+  }
+
   // Carrier amount per leg (each leg can be a separate job for a different carrier).
   const carrierAmountByLegCents = input.legs.map((_, i) =>
     quoteLines.filter((l) => l.legIndex === i).reduce((s, l) => s + l.carrierAmountCents, 0),
@@ -261,6 +295,7 @@ export function calculatePrice(input: PriceInput, config: PricingConfig): PriceR
       carrierAmountCents: carrierAmountByLegCents.reduce((s, a) => s + a, 0),
       carrierAmountByLegCents,
       storageType,
+      porters,
       isUrgentByLeg,
       warnings,
     },

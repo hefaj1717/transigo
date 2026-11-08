@@ -7,10 +7,10 @@ import { AdminShell, inputClass } from "@/components/admin/admin-nav";
 import { requireArea } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { formatBp, formatCents } from "@/lib/pricing/money";
-import { KIND_LABEL, RULE_META } from "@/lib/pricing/rule-meta";
-import { PRICE_RULE_CODES, type PriceRuleKind } from "@/lib/pricing/types";
+import { KIND_LABEL, PORTER_PACKAGE_LABEL, RULE_META } from "@/lib/pricing/rule-meta";
+import { PORTER_PACKAGE_CODES, PRICE_RULE_CODES, type PriceRuleKind } from "@/lib/pricing/types";
 import { romeDate } from "@/lib/pricing/calendar";
-import { deleteDraftAction, publishListAction, updateListSettingsAction, updateRatesAction, updateRulesAction } from "../actions";
+import { deleteDraftAction, publishListAction, updateListSettingsAction, updatePackagesAction, updateRatesAction, updateRulesAction } from "../actions";
 import { QuotePreview } from "../quote-preview";
 
 export const metadata = { title: "Listino – Transigo" };
@@ -38,11 +38,12 @@ async function Content({ params }: { params: Promise<{ id: string }> }) {
   if (!z.uuid().safeParse(id).success) notFound();
 
   const db = await createClient();
-  const [{ data: list }, { data: vehicles }, { data: rates }, { data: rules }] = await Promise.all([
+  const [{ data: list }, { data: vehicles }, { data: rates }, { data: rules }, { data: packages }] = await Promise.all([
     db.from("price_lists").select("*").eq("id", id).maybeSingle(),
     db.from("vehicle_types").select("id, name_it, is_active, size_rank").order("size_rank"),
     db.from("price_list_vehicle_rates").select("vehicle_type_id, rate_per_km_cents, min_price_cents").eq("price_list_id", id),
     db.from("price_rules").select("code, kind, amount_cents, percent_bp, is_enabled").eq("price_list_id", id),
+    db.from("price_list_porter_packages").select("code, porters_count, included_hours, is_enabled").eq("price_list_id", id),
   ]);
   if (!list) notFound();
 
@@ -51,16 +52,25 @@ async function Content({ params }: { params: Promise<{ id: string }> }) {
   const ruleBy = new Map((rules ?? []).map((r) => [r.code as string, r]));
   const missingRates = (vehicles ?? []).filter((v) => v.is_active && !rateBy.has(v.id));
   const missingRules = PRICE_RULE_CODES.filter((c) => !ruleBy.has(c));
+  const packageBy = new Map((packages ?? []).map((p) => [p.code as string, p]));
+  const missingPackages = PORTER_PACKAGE_CODES.filter((c) => !packageBy.has(c));
 
 
   return (
     <AdminShell title={`Listino v${list.version} · ${STATUS[list.status as keyof typeof STATUS]}`}>
       {!editable ? <p className="mb-4 rounded-md bg-zinc-100 p-3 text-sm">Listino in sola lettura. Per modificarlo crea una bozza dalla pagina Listini.</p> : null}
-      {editable && (missingRates.length || missingRules.length) ? (
+      {editable && (missingRates.length || missingRules.length || missingPackages.length) ? (
         <p className="mb-4 rounded-md bg-amber-50 p-3 text-sm text-amber-900">
-          Prima della pubblicazione completa: {missingRates.length ? `tariffe per ${missingRates.map((v) => v.name_it).join(", ")}` : ""}
-          {missingRates.length && missingRules.length ? "; " : ""}{missingRules.length ? `${missingRules.length} regole` : ""}.
+          Prima della pubblicazione completa:{" "}
+          {[
+            missingRates.length ? `tariffe per ${missingRates.map((v) => v.name_it).join(", ")}` : "",
+            missingRules.length ? `${missingRules.length} regole` : "",
+            missingPackages.length ? `${missingPackages.length} categorie facchinaggio` : "",
+          ].filter(Boolean).join("; ")}.
         </p>
+      ) : null}
+      {!editable && missingPackages.length ? (
+        <p className="mb-4 rounded-md bg-amber-50 p-3 text-sm text-amber-900">Questo listino non ha categorie facchinaggio: il facchinaggio non è prenotabile. Crea una bozza e pubblicala.</p>
       ) : null}
 
       <section className="mb-8">
@@ -76,13 +86,15 @@ async function Content({ params }: { params: Promise<{ id: string }> }) {
                 <option value="pallet_day">per pallet al giorno</option><option value="day">al giorno</option>
               </select>
             </label>
+            <label className="flex flex-col gap-1">Facchinaggio: tolleranza ore extra (min)<input name="porter_overtime_grace_minutes" defaultValue={list.porter_overtime_grace_minutes} className={inputClass} /></label>
             <label className="col-span-2 flex flex-col gap-1 sm:col-span-4">Note<input name="notes" defaultValue={list.notes ?? ""} className={inputClass} /></label>
           </div>
         </ActionForm>
         {!editable ? (
           <p className="text-sm">
             IVA {formatBp(list.vat_rate_bp)}% · urgente entro {list.urgent_lead_hours} h · deposito breve fino a {list.storage_short_term_max_days} giorni ·
-            tariffa deposito {list.storage_billing_unit === "day" ? "al giorno" : "per pallet al giorno"}
+            tariffa deposito {list.storage_billing_unit === "day" ? "al giorno" : "per pallet al giorno"} ·
+            tolleranza ore extra facchinaggio {list.porter_overtime_grace_minutes} min
           </p>
         ) : null}
       </section>
@@ -106,6 +118,30 @@ async function Content({ params }: { params: Promise<{ id: string }> }) {
               })}
             </tbody>
           </table>
+        </ActionForm>
+      </section>
+
+      <section className="mb-8">
+        <h2 className="mb-2 text-lg font-semibold">Facchinaggio – categorie</h2>
+        <ActionForm action={updatePackagesAction} submitLabel="Salva categorie" hideSubmit={!editable}>
+          <input type="hidden" name="id" value={list.id} />
+          <table className="w-full text-sm">
+            <thead className="text-left text-zinc-500"><tr><th className="py-1">Categoria</th><th>Persone (minimo)</th><th>Ore incluse</th><th /></tr></thead>
+            <tbody>
+              {PORTER_PACKAGE_CODES.map((code) => {
+                const p = packageBy.get(code);
+                return (
+                  <tr key={code} className="border-t border-zinc-100">
+                    <td className="py-1">{PORTER_PACKAGE_LABEL[code]}</td>
+                    <td><input name={`persons_${code}`} defaultValue={p?.porters_count ?? ""} disabled={!editable} className={`${inputClass} w-16`} /></td>
+                    <td><input name={`hours_${code}`} defaultValue={p?.included_hours ?? ""} disabled={!editable} className={`${inputClass} w-16`} /></td>
+                    <td><label className="flex items-center gap-1"><input type="checkbox" name={`enabled_${code}`} defaultChecked={p?.is_enabled ?? true} disabled={!editable} /> attiva</label></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <p className="mt-1 text-xs text-zinc-500">Prezzo = persone × ore incluse × tariffa «Facchinaggio (ore incluse)». Il cliente può aggiungere persone (max 4), non ore. Ore extra: regola «ora extra iniziata», oltre la tolleranza.</p>
         </ActionForm>
       </section>
 

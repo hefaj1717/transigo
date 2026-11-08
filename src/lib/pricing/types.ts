@@ -6,6 +6,7 @@ export const PRICE_RULE_CODES = [
   "surcharge_weekend_holiday",
   "surcharge_floor_no_elevator",
   "porter_hour",
+  "porter_overtime_hour",
   "packing_flat",
   "packing_per_item",
   "storage_day",
@@ -18,6 +19,17 @@ export const PRICE_RULE_CODES = [
   "carrier_share_packing",
 ] as const;
 export type PriceRuleCode = (typeof PRICE_RULE_CODES)[number];
+
+/** Fixed load-size categories for porters (D67). Values per price list version. */
+export const PORTER_PACKAGE_CODES = ["parcels", "monolocale", "bilocale", "trilocale_plus"] as const;
+export type PorterPackageCode = (typeof PORTER_PACKAGE_CODES)[number];
+
+export type PorterPackage = {
+  code: PorterPackageCode;
+  portersCount: number; // minimum persons; the customer may add more (max 4, D54)
+  includedHours: number;
+  isEnabled: boolean;
+};
 
 export type PriceRuleKind = "fixed" | "percent" | "per_unit";
 export type StorageBillingUnit = "day" | "pallet_day";
@@ -58,6 +70,8 @@ export type PricingConfig = {
   urgentLeadHours: number; // D49
   storageShortTermMaxDays: number; // D55
   storageBillingUnit: StorageBillingUnit; // D55
+  porterOvertimeGraceMinutes: number; // D68
+  porterPackages: PorterPackage[]; // D67
   vehicleRates: VehicleRate[]; // active vehicle types with a rate in this price list
   rules: PriceRule[];
   holidays: string[]; // "YYYY-MM-DD" (Europe/Rome calendar dates), D27
@@ -82,7 +96,8 @@ export type PriceInput = {
   customerType: CustomerType;
   now: Date; // quote time (urgent / lead-time checks)
   legs: PriceLeg[];
-  porters?: { count: number; hours: number; legIndex?: number };
+  /** D67: load-size package; count defaults to the package's persons and may only be higher (max 4). */
+  porters?: { packageCode: PorterPackageCode; count?: number; legIndex?: number };
   packing?: { itemsCount: number; legIndex?: number };
   storage?: { days: number; pallets?: number }; // days = 0 → transshipment
 };
@@ -102,6 +117,20 @@ export type QuoteLine = {
 
 export type QuoteWarning = { code: "negative_margin"; group: CarrierShareGroup; legIndex: number | null };
 
+/**
+ * Porter terms of the quote (D67, D68). Shown in the wizard ("In cena X h…") and stored with the order,
+ * so overtime after the job is settled with the terms the customer bought (porterOvertimeCost).
+ */
+export type QuotePorters = {
+  packageCode: PorterPackageCode;
+  persons: number;
+  includedHours: number;
+  overtimeRatePerPersonCents: number | null; // null = overtime disabled in the price list
+  overtimeGraceMinutes: number;
+  /** Carrier share of the porters group, to apply the same share to overtime. */
+  carrierShare: { kind: "percent"; percentBp: number } | { kind: "ratio"; carrierCents: number; netCents: number } | null;
+};
+
 export type Quote = {
   priceListId: string;
   priceListVersion: number;
@@ -116,6 +145,7 @@ export type Quote = {
   carrierAmountCents: number;
   carrierAmountByLegCents: number[];
   storageType: StorageType | null;
+  porters: QuotePorters | null;
   isUrgentByLeg: boolean[];
   warnings: QuoteWarning[];
 };

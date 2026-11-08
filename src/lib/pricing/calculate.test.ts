@@ -160,11 +160,43 @@ describe("floors without elevator (D53)", () => {
   });
 });
 
-describe("porters and packing (D54)", () => {
-  it("porters: 2 persons × 3 h = 6 person-hours × 30 €, carrier 80 %", () => {
-    const q = quote({ porters: { count: 2, hours: 3 } });
+describe("porters and packing (D54, D67)", () => {
+  it("porters, bilocale package: 2 persons × 3 h included × 30 €, carrier 80 % (D67)", () => {
+    const q = quote({ porters: { packageCode: "bilocale" } });
     expect(lineOf(q, "porters")[0]).toMatchObject({ quantity: 6, unitAmountCents: 3000, netCents: 18_000, carrierAmountCents: 14_400 });
-    expect(lineOf(q, "porters")[0].labelIt).toBe("Facchinaggio: 2 persone × 3 h");
+    expect(lineOf(q, "porters")[0].labelIt).toBe("Facchinaggio – Bilocale: 2 persone × 3 h incluse");
+  });
+
+  it("porters: the customer adds a person, who gets the package's hours (3 × 3 h)", () => {
+    const q = quote({ porters: { packageCode: "bilocale", count: 3 } });
+    expect(lineOf(q, "porters")[0]).toMatchObject({ quantity: 9, netCents: 27_000, carrierAmountCents: 21_600 });
+  });
+
+  it("porters: one person, parcels → singular label", () => {
+    expect(lineOf(quote({ porters: { packageCode: "parcels" } }), "porters")[0].labelIt).toBe("Facchinaggio – Pochi colli / oggetti singoli: 1 persona × 1 h incluse");
+  });
+
+  it("porters: quote carries the terms for the wizard and the order (D68)", () => {
+    const q = quote({ porters: { packageCode: "trilocale_plus", count: 4 } });
+    expect(q.porters).toEqual({
+      packageCode: "trilocale_plus",
+      persons: 4,
+      includedHours: 4,
+      overtimeRatePerPersonCents: 3500,
+      overtimeGraceMinutes: 15,
+      carrierShare: { kind: "percent", percentBp: 8000 },
+    });
+    expect(quote({}).porters).toBeNull();
+  });
+
+  it("porters: overtime rule disabled → no overtime rate in the terms", () => {
+    const config = withRule(makeConfig(), "porter_overtime_hour", { isEnabled: false });
+    expect(quote({ porters: { packageCode: "monolocale" } }, config).porters?.overtimeRatePerPersonCents).toBeNull();
+  });
+
+  it("porters: fixed carrier share → overtime keeps the package's proportion", () => {
+    const config = withRule(makeConfig(), "carrier_share_porters", { kind: "fixed", amountCents: 9000, percentBp: null });
+    expect(quote({ porters: { packageCode: "bilocale" } }, config).porters?.carrierShare).toEqual({ kind: "ratio", carrierCents: 9000, netCents: 18_000 });
   });
 
   it("packing: flat 15 € + 10 items × 5 €, carrier 60 %", () => {
@@ -181,11 +213,20 @@ describe("porters and packing (D54)", () => {
     expect(error({ packing: { itemsCount: 4 } }, none)).toEqual({ code: "service_unavailable", service: "packing" });
   });
 
-  it("porters with the rule disabled → service_unavailable; out-of-range input → invalid_input", () => {
-    const config = withRule(makeConfig(), "porter_hour", { isEnabled: false });
-    expect(error({ porters: { count: 1, hours: 1 } }, config)).toEqual({ code: "service_unavailable", service: "porters" });
-    expect(error({ porters: { count: 5, hours: 1 } }).code).toBe("invalid_input");
-    expect(error({ porters: { count: 1, hours: 2, legIndex: 1 } }).code).toBe("invalid_input");
+  it("porters: porter_hour disabled, package disabled or missing → service_unavailable", () => {
+    const unavailable = { code: "service_unavailable", service: "porters" };
+    expect(error({ porters: { packageCode: "parcels" } }, withRule(makeConfig(), "porter_hour", { isEnabled: false }))).toEqual(unavailable);
+    const pkgOff = makeConfig();
+    pkgOff.porterPackages = pkgOff.porterPackages.map((p) => (p.code === "bilocale" ? { ...p, isEnabled: false } : p));
+    expect(error({ porters: { packageCode: "bilocale" } }, pkgOff)).toEqual(unavailable);
+    expect(error({ porters: { packageCode: "bilocale" } }, makeConfig({ porterPackages: [] }))).toEqual(unavailable);
+  });
+
+  it("porters: fewer persons than the package, more than 4, unknown package, bad leg → invalid_input", () => {
+    expect(error({ porters: { packageCode: "trilocale_plus", count: 2 } })).toMatchObject({ code: "invalid_input", message: expect.stringMatching(/at least 3/) });
+    expect(error({ porters: { packageCode: "bilocale", count: 5 } }).code).toBe("invalid_input");
+    expect(error({ porters: { packageCode: "villa" as never } }).code).toBe("invalid_input");
+    expect(error({ porters: { packageCode: "parcels", legIndex: 1 } }).code).toBe("invalid_input");
   });
 });
 
@@ -233,7 +274,7 @@ describe("storage (D55)", () => {
 
 describe("customer type (D3)", () => {
   it("private and business get identical amounts; only the display mode differs", () => {
-    const input = { porters: { count: 1, hours: 2 }, packing: { itemsCount: 3 } };
+    const input = { porters: { packageCode: "monolocale" as const }, packing: { itemsCount: 3 } };
     const p = quote({ ...input, customerType: "private" });
     const b = quote({ ...input, customerType: "business" });
     expect(p.display).toBe("gross");
@@ -274,7 +315,7 @@ describe("carrier amount (D6, D14, D57)", () => {
     const q = quote({
       now: at("2026-11-13T10:00:00Z"),
       legs: [leg({ pickupAt: at("2026-11-14T08:00:00Z"), pickupFloor: 2 })], // urgent + weekend + 2 floors
-      porters: { count: 2, hours: 1 },
+      porters: { packageCode: "parcels", count: 2 }, // 2 × 1 h
       packing: { itemsCount: 2 },
     });
     // transport group: 4500 + 1350 + 900 + 2000 = 8750 → 70 % = 6125
@@ -293,7 +334,7 @@ describe("carrier amount (D6, D14, D57)", () => {
 
   it("carrier share above the group net amount → negative_margin warning (not capped)", () => {
     const config = withRule(makeConfig(), "carrier_share_porters", { kind: "fixed", amountCents: 10_000, percentBp: null });
-    const q = quote({ porters: { count: 1, hours: 1 } }, config);
+    const q = quote({ porters: { packageCode: "parcels" } }, config);
     expect(lineOf(q, "porters")[0].carrierAmountCents).toBe(10_000);
     expect(q.warnings).toEqual([{ code: "negative_margin", group: "porters", legIndex: null }]);
   });
@@ -364,11 +405,11 @@ describe("legs (D47)", () => {
 });
 
 describe("reference case from the project plan", () => {
-  it("Milano–Torino: 143 122 m (Google Routes) → 144 km, furgone medio, 2 porters × 2 h", () => {
+  it("Milano–Torino: 143 122 m (Google Routes) → 144 km, furgone medio, porters monolocale (2 × 2 h)", () => {
     const q = quote({
       customerType: "business",
       legs: [leg({ vehicleTypeId: V.vanMedium, distanceM: 143_122, pickupProvince: "MI" })],
-      porters: { count: 2, hours: 2 },
+      porters: { packageCode: "monolocale" },
     });
     expect(q.lines.map((l) => [l.lineType, l.quantity, l.unitAmountCents, l.netCents, l.vatCents, l.grossCents, l.carrierAmountCents])).toEqual([
       ["transport", 144, 140, 20_160, 4435, 24_595, 14_112],

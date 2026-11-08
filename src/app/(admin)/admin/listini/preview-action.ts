@@ -7,7 +7,7 @@ import { adminAction } from "@/lib/admin/server";
 import { calculatePrice } from "@/lib/pricing/calculate";
 import { romeLocalToDate } from "@/lib/pricing/calendar";
 import { loadPricingConfig, PricingConfigError } from "@/lib/pricing/load";
-import type { PriceInput, PricingError, Quote } from "@/lib/pricing/types";
+import { PORTER_PACKAGE_CODES, type PorterPackageCode, type PriceInput, type PricingError, type Quote } from "@/lib/pricing/types";
 
 export type PreviewState = { quote?: Quote; error?: string };
 
@@ -47,7 +47,9 @@ export async function previewQuoteAction(_prev: PreviewState, fd: FormData): Pro
   }
   config = { ...config, serviceAreaProvinces: [PREVIEW_PROVINCE] };
 
-  const portersCount = int(fd, "porters_count");
+  const packageCode = str(fd, "porter_package");
+  const hasPorters = (PORTER_PACKAGE_CODES as readonly string[]).includes(packageCode);
+  const portersCount = str(fd, "porters_count");
   const packingItems = int(fd, "packing_items");
   const storageDays = str(fd, "storage_days");
   const input: PriceInput = {
@@ -65,7 +67,9 @@ export async function previewQuoteAction(_prev: PreviewState, fd: FormData): Pro
         deliveryHasElevator: fd.get("delivery_elevator") === "on",
       },
     ],
-    porters: portersCount > 0 ? { count: portersCount, hours: int(fd, "porters_hours") } : undefined,
+    porters: hasPorters
+      ? { packageCode: packageCode as PorterPackageCode, count: portersCount === "" ? undefined : int(fd, "porters_count") }
+      : undefined,
     packing: packingItems > 0 ? { itemsCount: packingItems } : undefined,
     storage: storageDays !== "" ? { days: int(fd, "storage_days"), pallets: int(fd, "storage_pallets") || undefined } : undefined,
   };

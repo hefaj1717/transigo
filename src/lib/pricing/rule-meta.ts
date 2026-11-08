@@ -1,4 +1,4 @@
-import type { PriceRuleCode, PriceRuleKind } from "./types";
+import type { PorterPackageCode, PriceRuleCode, PriceRuleKind } from "./types";
 
 // Admin UI metadata for pricing rules (Italian labels). Allowed kinds mirror the check constraint
 // in the pricing migration.
@@ -8,7 +8,8 @@ export const RULE_META: Record<PriceRuleCode, RuleMeta> = {
   surcharge_urgent: { label: "Urgenza (ritiro entro le ore indicate)", section: "Supplementi", kinds: ["percent", "fixed"] },
   surcharge_weekend_holiday: { label: "Weekend e festivi", section: "Supplementi", kinds: ["percent", "fixed"] },
   surcharge_floor_no_elevator: { label: "Piano senza ascensore", section: "Supplementi", kinds: ["per_unit"], unit: "piano" },
-  porter_hour: { label: "Facchinaggio", section: "Servizi", kinds: ["per_unit"], unit: "persona/ora" },
+  porter_hour: { label: "Facchinaggio (ore incluse)", section: "Servizi", kinds: ["per_unit"], unit: "persona/ora" },
+  porter_overtime_hour: { label: "Facchinaggio, ora extra iniziata", section: "Servizi", kinds: ["per_unit"], unit: "persona/ora" },
   packing_flat: { label: "Imballaggio, forfait", section: "Servizi", kinds: ["fixed"] },
   packing_per_item: { label: "Imballaggio, per collo", section: "Servizi", kinds: ["per_unit"], unit: "collo" },
   transshipment_flat: { label: "Trasbordo (0 giorni)", section: "Deposito", kinds: ["fixed"] },
@@ -22,3 +23,12 @@ export const RULE_META: Record<PriceRuleCode, RuleMeta> = {
 };
 
 export const KIND_LABEL: Record<PriceRuleKind, string> = { percent: "%", fixed: "€ fisso", per_unit: "€ per unità" };
+
+
+/** Italian labels of the porter packages (D67), shown in Listini and in the booking wizard. */
+export const PORTER_PACKAGE_LABEL: Record<PorterPackageCode, string> = {
+  parcels: "Pochi colli / oggetti singoli",
+  monolocale: "Monolocale",
+  bilocale: "Bilocale",
+  trilocale_plus: "Trilocale e oltre",
+};

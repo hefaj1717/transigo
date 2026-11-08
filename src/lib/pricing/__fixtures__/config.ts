@@ -26,6 +26,13 @@ export function makeConfig(overrides: Partial<PricingConfig> = {}): PricingConfi
     urgentLeadHours: 24,
     storageShortTermMaxDays: 30,
     storageBillingUnit: "pallet_day",
+    porterOvertimeGraceMinutes: 15,
+    porterPackages: [
+      { code: "parcels", portersCount: 1, includedHours: 1, isEnabled: true },
+      { code: "monolocale", portersCount: 2, includedHours: 2, isEnabled: true },
+      { code: "bilocale", portersCount: 2, includedHours: 3, isEnabled: true },
+      { code: "trilocale_plus", portersCount: 3, includedHours: 4, isEnabled: true },
+    ],
     vehicleRates: [
       { vehicleTypeId: V.car, nameIt: "Auto / station wagon", ratePerKmCents: 90, minPriceCents: 3500 },
       { vehicleTypeId: V.vanSmall, nameIt: "Furgone piccolo", ratePerKmCents: 110, minPriceCents: 4500 },
@@ -38,6 +45,7 @@ export function makeConfig(overrides: Partial<PricingConfig> = {}): PricingConfi
       rule("surcharge_weekend_holiday", "percent", 2000),
       rule("surcharge_floor_no_elevator", "per_unit", 1000),
       rule("porter_hour", "per_unit", 3000),
+      rule("porter_overtime_hour", "per_unit", 3500),
       rule("packing_flat", "fixed", 1500),
       rule("packing_per_item", "per_unit", 500),
       rule("storage_day", "per_unit", 800),
