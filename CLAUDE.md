@@ -26,11 +26,11 @@ Zlecenie jest opłacone **wyłącznie** po webhooku Stripe — nigdy na podstawi
 1. Klient płaci przy rezerwacji (Stripe Checkout). Wycena bez logowania, konto obowiązkowe przed płatnością.
 2. Zaraz po webhooku płatności Transigo wystawia klientowi e-fakturę SDI przez **Fatture in Cloud** — zawsze przez adapter (`lib/einvoice`), żeby dało się zmienić dostawcę.
 3. Wypłata Stripe Connect (Express) po **każdej** dostawie, automatycznie, gdy: `consegnato` z podpisem/zdjęciem + faktura przewoźnika wgrana i kwotowo zgodna (inaczej „Da verificare” → admin) + minęło okno (domyślnie 24 h, konfigurowalne) + brak otwartej reklamacji.
-4. Admin może wstrzymać wypłatę i zwrócić pieniądze klientowi. Zwrot po wykonanej wypłacie = koszt Transigo; admin może dodać potrącenie do następnej wypłaty (`payout_adjustments`).
+4. Admin może wstrzymać wypłatę i zwrócić pieniądze klientowi. Zwrot po wykonanej wypłacie = koszt Transigo; admin może dodać potrącenie do następnej wypłaty (`payout_adjustments`). Faktura przewoźnika jest zawsze na pełną kwotę przewoźnika; potrącenia zmniejszają tylko przelew i mają osobny dokument.
 
-**Cena:** `dystans (Google Maps) × stawka/km typu pojazdu + dopłaty (pilne, weekend, winda, tragarze, pakowanie) + magazyn (za dzień lub paletę)`. Kwota dla przewoźnika = osobna reguła (procent lub kwota) dla transportu, tragarzy i pakowania; magazyn w 100% dla Transigo. Typy pojazdów, cennik, okno wypłaty i obszar obsługi (lista prowincji) edytowalne w panelu admina. Klient prywatny widzi ceny z IVA, firma netto + IVA.
+**Cena:** `dystans (Google Maps) × stawka/km typu pojazdu + dopłaty (pilne, weekend, winda, tragarze, pakowanie) + magazyn (za dzień lub paletę)`. Kwota dla przewoźnika = osobna reguła (procent lub kwota) dla transportu, tragarzy i pakowania; magazyn w 100% dla Transigo. Typy pojazdów, cennik, okno wypłaty i obszar obsługi (prowincje odbioru + maks. dystans trasy) edytowalne w panelu admina. Klient prywatny widzi ceny z IVA, firma netto + IVA.
 
-Pełna lista decyzji: [docs/spec.md, sekcja 0](docs/spec.md#0-rejestr-decyzji-2026-11-08). Decyzje D1–D3 (e-faktury, moment faktury, prezentacja IVA) czekają na potwierdzenie z commercialista — budujemy według nich.
+Pełna lista decyzji: [docs/spec.md, sekcja 0](docs/spec.md#0-rejestr-decyzji-2026-11-08). Decyzje D1–D3 (e-faktury, moment faktury, prezentacja IVA) oraz dokument potrącenia z D12 czekają na potwierdzenie z commercialista — budujemy według nich.
 
 ## Stack
 

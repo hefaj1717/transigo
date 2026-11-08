@@ -17,8 +17,14 @@
 | D7 | Typy pojazdów | 5 typów startowych, lista edytowalna w panelu admina (nazwa, ładowność, wymiary, stawka/km, cena minimalna). |
 | D8 | Konto klienta | Obowiązkowe, zakładane na końcu kreatora przed płatnością. Wycena dostępna bez logowania. |
 | D9 | Magazyn | Jeden magazyn w MVP, model danych wielomagazynowy. Składowanie płatne z góry za wybrany okres; przedłużenie przez link płatności Stripe wysyłany klientowi. |
-| D10 | Zasięg | Obszar obsługi = lista prowincji ustawiana przez admina; na start jeden region. Poza obszarem: komunikat + formularz kontaktowy. |
+| D10 | Zasięg | Obszar obsługi = lista prowincji ustawiana przez admina; na start jeden region. Poza obszarem: komunikat + formularz kontaktowy. *(Reguła adresów doprecyzowana w D13.)* |
 | D11 | GPS | W MVP tylko przy otwartej aplikacji; przewoźnik dostaje komunikat, by trzymał ją otwartą w trakcie kursu. |
+| D12 | Faktura przewoźnika a potrącenia | Faktura przewoźnika zawsze na pełną kwotę przewoźnika za zlecenie (`carrier_amount`). Potrącenia nie zmieniają faktury — zmniejszają tylko kwotę przelewu i są dokumentowane osobno (rodzaj dokumentu **[DO POTWIERDZENIA Z COMMERCIALISTA]**). Walidacja: kwota na fakturze = `carrier_amount` (przed potrąceniami). |
+| D13 | Reguła obszaru obsługi | Adres **odbioru** musi leżeć w obsługiwanej prowincji. Adres **dostawy** dowolny, o ile dystans trasy ≤ maksymalny dystans (km) ustawiany przez admina. |
+| D14 | Dopłaty w części przewoźnika | Dopłaty pilne, weekend/święto i winda/piętra liczone do części transportowej przewoźnika (podlegają regule transportu z D6). |
+| D15 | Potrącenia większe niż wypłata | Przelew nie może być ujemny; nadwyżka potrącenia przechodzi na kolejną wypłatę przewoźnika. |
+| D16 | Uruchamianie wypłat | Zaplanowany job (cron) co 15 min sprawdza warunki i wykonuje transfery idempotentnie. |
+| D17 | Interwał GPS | Lokalizacja wysyłana co 15 s podczas aktywnego kursu (przy otwartej aplikacji). |
 
 ## 1. Słownik
 
@@ -46,11 +52,12 @@
    Rozliczanie za dzień lub za paletę (konfigurowalne).
    Składowanie **płatne z góry** za okres wybrany w kreatorze; przedłużenie przez link płatności Stripe wysyłany klientowi (D9). Przychód z magazynu w 100% dla Transigo.
 
-## 2a. Obszar obsługi (D10)
+## 2a. Obszar obsługi (D10, D13)
 
-- Admin ustawia listę obsługiwanych prowincji (na start jeden region).
-- Adres odbioru **i** dostawy muszą leżeć w obsługiwanych prowincjach (prowincja z Google Geocoding / Places).
-- Poza obszarem kreator nie pokazuje ceny, tylko komunikat („Al momento non serviamo questa zona”) i formularz kontaktowy (zapis do tabeli zapytań + e-mail do admina).
+- Admin ustawia listę obsługiwanych prowincji (na start jeden region) oraz maksymalny dystans trasy w km.
+- Adres **odbioru** musi leżeć w obsługiwanej prowincji (prowincja z Google Geocoding / Places).
+- Adres **dostawy** może być dowolny, jeśli dystans trasy ≤ maksymalny dystans.
+- Poza obszarem (odbiór spoza prowincji lub zbyt długa trasa) kreator nie pokazuje ceny, tylko komunikat („Al momento non serviamo questa zona”) i formularz kontaktowy (zapis do tabeli zapytań + e-mail do admina).
 
 ## 3. Silnik cenowy
 
@@ -65,7 +72,7 @@ subtotal   = transport + surcharges + storage
 vat        = round(subtotal × vat_rate)          (IVA 22%)
 total      = subtotal + vat
 
-carrier_amount = carrier_share(transport_part)   # transport + jego dopłaty (pilne, weekend, winda)
+carrier_amount = carrier_share(transport_part)   # transport + jego dopłaty (pilne, weekend, winda) — D14
                + carrier_share(porters_part)
                + carrier_share(packing_part)
                # storage → 0 (100% Transigo)
@@ -86,7 +93,6 @@ carrier_share(x) = round(x × percent)  |  fixed_cents   # osobna reguła dla ka
 
 ### 3.3 Otwarte pytania cenowe
 - Czy dystans liczy dojazd przewoźnika do miejsca odbioru? **[DO USTALENIA]** (domyślnie: nie)
-- Które dopłaty transportowe zalicza się do części przewoźnika — przyjęto wszystkie (pilne, weekend, winda). **[DO USTALENIA]**
 - Definicja „pilne” (np. realizacja < 24 h) i „weekend” (sobota/niedziela + święta włoskie?). **[DO USTALENIA]**
 
 ## 4. Statusy zlecenia
@@ -138,7 +144,7 @@ Reklamacje (`claims`): klient lub admin otwiera reklamację do zlecenia; otwarta
 
 Kroki (pasek postępu, cena na żywo w panelu bocznym / dolnym na mobile):
 
-1. **Percorso** — adres odbioru i dostawy (Google Places autocomplete), opcjonalne przystanki pośrednie **[DO USTALENIA: czy w MVP]**; mapa z trasą i dystansem. Sprawdzenie obszaru obsługi (sekcja 2a) — poza obszarem komunikat + formularz kontaktowy.
+1. **Percorso** — adres odbioru i dostawy (Google Places autocomplete), opcjonalne przystanki pośrednie **[DO USTALENIA: czy w MVP]**; mapa z trasą i dystansem. Sprawdzenie obszaru obsługi (sekcja 2a: prowincja odbioru + maks. dystans) — poza obszarem komunikat + formularz kontaktowy.
 2. **Data e ora** — data i okno czasowe odbioru; opcja „Urgente”. System sam nalicza dopłatę weekendową/świąteczną.
 3. **Merce e veicolo** — opis towaru, liczba sztuk, wymiary/waga orientacyjnie, wybór typu pojazdu.
 4. **Servizi extra** — piętro i winda na odbiorze/dostawie, liczba tragarzy, pakowanie, magazyn (typ, liczba dni/palet).
@@ -175,9 +181,9 @@ Mobile-first, instalowalna (manifest + service worker), działa przy słabym zas
 ### 8.2 Ekrany
 - **Corse disponibili:** lista kursów `paid` pasujących do typu pojazdu przewoźnika; karta: trasa (miasta), data/okno, dystans, typ pojazdu, usługi extra, **kwota dla przewoźnika**. Szczegóły przed przyjęciem bez danych osobowych klienta. Przycisk **„Accetta la Corsa”** — przyjęcie atomowe (kto pierwszy, ten ma; drugi dostaje komunikat).
 - **Le mie corse:** przypisane / w realizacji / zakończone.
-- **Esecuzione corsa:** pełne adresy i kontakty, nawigacja (link do Google Maps), przyciski statusów: „Ritirato” (zdjęcie ładunku), „In viaggio”, „Consegnato” (zdjęcia + podpis odbiorcy na ekranie + imię odbiorcy). GPS wysyłany co N sekund **tylko przy otwartej aplikacji** (D11) **[DO USTALENIA interwał, domyślnie 15 s]**. Przez cały kurs widoczny baner: „Tieni l'app aperta durante la corsa per condividere la posizione”; Wake Lock API, gdy dostępne. Brak sygnału GPS > X min → ostrzeżenie dla przewoźnika.
-- **Fattura:** po dostawie upload faktury przewoźnika dla Transigo (PDF/XML) z podaną kwotą. Walidacja automatyczna (D4): kwota = `carrier_amount` (+ suma `payout_adjustments` przypisanych do tej wypłaty) → wypłata przechodzi dalej; niezgodność → `to_verify` i komunikat dla przewoźnika, decyzja admina.
-- **Guadagni:** lista wypłat i ich statusy (z przewidywaną datą wypłaty po oknie), potrącenia (`payout_adjustments`) z powodem, suma w okresie, link do panelu Stripe Express.
+- **Esecuzione corsa:** pełne adresy i kontakty, nawigacja (link do Google Maps), przyciski statusów: „Ritirato” (zdjęcie ładunku), „In viaggio”, „Consegnato” (zdjęcia + podpis odbiorcy na ekranie + imię odbiorcy). GPS wysyłany co 15 s (D17) **tylko przy otwartej aplikacji** (D11). Przez cały kurs widoczny baner: „Tieni l'app aperta durante la corsa per condividere la posizione”; Wake Lock API, gdy dostępne. Brak sygnału GPS > X min → ostrzeżenie dla przewoźnika.
+- **Fattura:** po dostawie upload faktury przewoźnika dla Transigo (PDF/XML) z podaną kwotą. Faktura zawsze na pełną kwotę przewoźnika za zlecenie (D12). Walidacja automatyczna (D4, D12): kwota = `carrier_amount` (przed potrąceniami) → wypłata przechodzi dalej; niezgodność → `to_verify` i komunikat dla przewoźnika, decyzja admina.
+- **Guadagni:** lista wypłat i ich statusy (z przewidywaną datą wypłaty po oknie), rozbicie każdej wypłaty: kwota z faktury − potrącenia (`payout_adjustments`, z powodem) = przelew, suma w okresie, link do panelu Stripe Express.
 - **Profilo e documenti:** dane, pojazdy, dokumenty z datami ważności (ostrzeżenie przed wygaśnięciem; po wygaśnięciu brak dostępu do nowych kursów).
 - **Powiadomienia:** nowe kursy w okolicy (push web / SMS **[DO USTALENIA]**).
 
@@ -190,10 +196,10 @@ Mobile-first, instalowalna (manifest + service worker), działa przy słabym zas
 - **Reclami:** lista reklamacji, otwarcie/zamknięcie z notatką; otwarta reklamacja wstrzymuje wypłatę.
 - **Veicoli:** CRUD typów pojazdów (nazwa, ładowność, wymiary, stawka/km, cena minimalna, aktywny) — D7.
 - **Listino prezzi (cennik):** dopłaty (kwotowe/procentowe), stawki usług (tragarze, pakowanie), stawki magazynowe (dzień/paleta), stawka IVA, **reguły kwoty przewoźnika: osobno dla transportu, tragarzy i pakowania** (procent lub kwota; magazyn zawsze 0) — D6. Wersjonowanie cennika + podgląd przykładowej wyceny przed zapisem.
-- **Area di servizio:** lista obsługiwanych prowincji (D10); zapytania z formularza kontaktowego spoza obszaru.
+- **Area di servizio:** lista obsługiwanych prowincji odbioru i maksymalny dystans trasy w km (D10, D13); zapytania z formularza kontaktowego spoza obszaru.
 - **Magazzino:** jeden magazyn w MVP (tabela `warehouses`, gotowa na kolejne) — D9. Lista pozycji (zlecenie, klient, liczba palet, data wejścia, opłacone do, naliczone dni), przyjęcie/wydanie, lokalizacja w magazynie. Pozycje z kończącym się okresem → przycisk „Invia link di pagamento” (Stripe Payment Link / Checkout na przedłużenie; po webhooku przesuwa datę „opłacone do” i wystawia fakturę).
 - **Fatture:** faktury wystawione klientom (status SDI: inviata, consegnata, scartata) z ponowieniem; faktury przewoźników (podgląd, akceptacja/odrzucenie).
-- **Pagamenti / Payouts:** lista wypłat wg statusów (sekcja 4), kolejka **„Da verificare”** (podgląd faktury przewoźnika vs `carrier_amount`, akceptuj / odrzuć z powodem), **wstrzymaj / zwolnij** z powodem, ponowienie nieudanej, **potrącenia** (`payout_adjustments`: przewoźnik, kwota w centach, powód, powiązane zlecenie; rozliczane przy następnej wypłacie).
+- **Pagamenti / Payouts:** lista wypłat wg statusów (sekcja 4), kolejka **„Da verificare”** (podgląd faktury przewoźnika vs `carrier_amount`, akceptuj / odrzuć z powodem), **wstrzymaj / zwolnij** z powodem, ponowienie nieudanej, **potrącenia** (`payout_adjustments`: przewoźnik, kwota w centach, powód, powiązane zlecenie; rozliczane przy następnej wypłacie; nie zmieniają faktury przewoźnika, dokument potrącenia generowany osobno — D12).
 - **Impostazioni:** dane firmy Transigo (do faktur), okno wypłaty w godzinach (domyślnie 24), szablony e-mail/SMS, użytkownicy admin.
 
 ## 10. Płatności i wypłaty — reguły
@@ -202,15 +208,16 @@ Mobile-first, instalowalna (manifest + service worker), działa przy słabym zas
 - **Model Connect:** „separate charges and transfers” — płatność na konto Transigo, a po spełnieniu warunków `Transfer` na konto Express przewoźnika (`transfer_group = order_id`).
 - **Warunki automatycznej wypłaty** (D4, wszystkie muszą być spełnione):
   1. status `delivered` z zapisanym podpisem i ≥1 zdjęciem,
-  2. przewoźnik wgrał fakturę, a jej kwota = kwota wypłaty (automatyczna walidacja; niezgodność → `to_verify`, admin akceptuje lub odrzuca),
+  2. przewoźnik wgrał fakturę, a jej kwota = `carrier_amount` przed potrąceniami (automatyczna walidacja, D12; niezgodność → `to_verify`, admin akceptuje lub odrzuca),
   3. minęło okno od `delivered` (domyślnie 24 h, konfigurowalne w panelu admina),
   4. brak otwartej reklamacji i brak ręcznej blokady `on_hold`,
   5. konto Connect przewoźnika ma aktywne `payouts_enabled`.
-  Sprawdzanie realizuje zaplanowany job (cron, np. co 15 min) — idempotentnie, z `idempotency_key` na transferze Stripe.
-- **Kwota wypłaty** = `carrier_amount` zlecenia + suma nierozliczonych `payout_adjustments` przewoźnika (potrącenia ujemne). Wypłata nie może zejść poniżej 0 — nadwyżka potrącenia przechodzi na kolejną wypłatę.
+  Sprawdzanie realizuje zaplanowany job (cron co 15 min, D16) — idempotentnie, z `idempotency_key` na transferze Stripe.
+- **Kwota przelewu** = `carrier_amount` zlecenia (= kwota faktury) + suma nierozliczonych `payout_adjustments` przewoźnika (potrącenia ujemne). Przelew nie może zejść poniżej 0 — nadwyżka potrącenia przechodzi na kolejną wypłatę (D15).
+- **Potrącenia a dokumenty (D12):** faktura przewoźnika się nie zmienia; każde rozliczone potrącenie dostaje osobny dokument (rodzaj **[DO POTWIERDZENIA Z COMMERCIALISTA]**) powiązany z wypłatą.
 - **Wstrzymanie:** admin ustawia `on_hold` z powodem; zwolnienie przywraca ocenę warunków.
 - **Zwroty:** pełne lub częściowe z poziomu admina (Stripe Refunds → nota di credito). Jeśli wypłata już poszła, **koszt ponosi Transigo** (bez reversal transferu); admin może ręcznie dodać potrącenie do następnej wypłaty przewoźnika (D5).
-- **Testy jednostkowe** obowiązkowe dla: wyliczania ceny, kwoty przewoźnika (3 reguły), warunków wypłaty i okna czasowego, walidacji kwoty faktury, potrąceń, zaokrągleń, zwrotów częściowych.
+- **Testy jednostkowe** obowiązkowe dla: wyliczania ceny, kwoty przewoźnika (3 reguły), warunków wypłaty i okna czasowego, walidacji kwoty faktury, potrąceń (w tym przeniesienia nadwyżki), zaokrągleń, zwrotów częściowych, reguły obszaru obsługi.
 
 ## 11. E-faktury (SDI)
 
