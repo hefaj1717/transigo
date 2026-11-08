@@ -50,7 +50,7 @@ export async function updateVehicleAction(_prev: ActionResult, fd: FormData): Pr
   if (!parsed.success) return invalid(parsed.error);
   const { data, error } = await db.from("vehicle_types").update(parsed.data).eq("id", id.data).select("id");
   if (error || !data?.length) return dbError(error);
-  await audit(ctx.userId, "vehicle_type.update", "vehicle_type", id.data, parsed.data);
+  await audit(ctx, "vehicle_type.update", "vehicle_type", id.data, parsed.data);
   refresh();
   return ok("Salvato.");
 }
@@ -61,7 +61,7 @@ export async function createVehicleAction(_prev: ActionResult, fd: FormData): Pr
   if (!parsed.success) return invalid(parsed.error);
   const { data, error } = await db.from("vehicle_types").insert(parsed.data).select("id").single();
   if (error || !data) return dbError(error);
-  await audit(ctx.userId, "vehicle_type.create", "vehicle_type", data.id, parsed.data);
+  await audit(ctx, "vehicle_type.create", "vehicle_type", data.id, parsed.data);
   refresh();
   return ok("Veicolo aggiunto. Ricorda di aggiungere la tariffa in un nuovo listino.");
 }

@@ -54,6 +54,8 @@ Uwagi techniczne:
 - **Schemat bazy:** przed każdą zmianą schematu (migracja, tabela, kolumna, polityka RLS) pokaż plan i **poczekaj na zgodę**.
 - **RLS na każdej tabeli:** klient widzi tylko swoje dane, przewoźnik tylko przypisane mu zlecenia (oraz zanonimizowaną listę kursów dostępnych do przyjęcia), admin wszystko. Operacje uprzywilejowane tylko po stronie serwera (service role nigdy w kliencie).
 - **Testy:** logika cen i wypłat ma testy jednostkowe — bez nich zmiana nie jest skończona.
+- **Konta:** konta adminów i przewoźników blokujemy, nie usuwamy (D66). Usuwanie kont tylko w testach lub na żądanie GDPR (D35).
+- **Audit log:** każdą akcję admina zapisuje `audit(ctx, …)` (`src/lib/admin/server.ts`) — log jest append-only i trzyma `actor_id` + `actor_email` (D65). W `audit_log.data` nie zapisujemy danych osobowych klientów (adresy, telefony itp.), tylko ID i zmienione wartości biznesowe.
 - **Decyzje:** nowe ustalenia dopisuj do rejestru decyzji w `docs/spec.md` (sekcja 0).
 - **Stripe tylko w trybie testowym**, dopóki właściciel nie powie inaczej. Klucze wyłącznie w `.env*`, nigdy w kodzie ani w commitach.
 - **Małe kroki:** jedno zadanie naraz, po każdym działającym kroku commit.

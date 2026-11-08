@@ -38,15 +38,29 @@ export async function createUser(metadata: Record<string, unknown> = {}): Promis
   return { id: data.user.id, email, client };
 }
 
-/** Deletes all users created by this test run (cascades to profiles, customers, carriers, ...). */
+/**
+ * Deletes all users created by this test run (cascades to profiles, customers, carriers, ...).
+ * Fails loudly if a user cannot be deleted — a leftover user means a schema bug (e.g. a blocking FK action).
+ */
 export async function deleteCreatedUsers() {
+  const failures: string[] = [];
   for (const id of created.splice(0)) {
     const { data: files } = await service.storage.from("carrier-documents").list(id);
     if (files?.length) {
       await service.storage.from("carrier-documents").remove(files.map((f) => `${id}/${f.name}`));
     }
-    await service.auth.admin.deleteUser(id);
+    const { error } = await service.auth.admin.deleteUser(id);
+    if (error) failures.push(`${id}: ${error.message}`);
   }
+  if (failures.length) throw new Error(`Could not delete test users:\n${failures.join("\n")}`);
+}
+
+/** Deletes one test user now (and forgets it), throwing on failure. */
+export async function deleteUserNow(user: TestUser) {
+  const i = created.indexOf(user.id);
+  if (i >= 0) created.splice(i, 1);
+  const { error } = await service.auth.admin.deleteUser(user.id);
+  if (error) throw error;
 }
 
 export async function profileRole(id: string) {

@@ -27,7 +27,7 @@ export async function updateAreaSettingsAction(_prev: ActionResult, fd: FormData
   };
   const { data, error } = await db.from("settings").update(patch).eq("id", true).select("id");
   if (error || !data?.length) return dbError(error);
-  await audit(ctx.userId, "settings.service_area", "settings", null, patch);
+  await audit(ctx, "settings.service_area", "settings", null, patch);
   refresh();
   return ok("Impostazioni salvate.");
 }
@@ -47,7 +47,7 @@ export async function updateRegionAction(_prev: ActionResult, fd: FormData): Pro
     const { error } = await db.from("service_area_provinces").update({ is_active: isActive }).eq("region_it", region).in("province_code", codes);
     if (error) return dbError(error);
   }
-  await audit(ctx.userId, "service_area.update", "service_area_provinces", null, { region, active: on });
+  await audit(ctx, "service_area.update", "service_area_provinces", null, { region, active: on });
   refresh();
   return ok(`${region}: ${on.length} province attive.`);
 }

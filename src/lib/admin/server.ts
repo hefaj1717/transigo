@@ -14,9 +14,22 @@ export async function adminAction() {
   return { ctx, db: await createClient() };
 }
 
-/** Writes an audit_log entry (service role; audit_log is server-write only). Never throws. */
-export async function audit(actorId: string, action: string, entityType: string, entityId: string | null, data: Record<string, unknown> = {}) {
-  const { error } = await createServiceClient().from("audit_log").insert({ actor_id: actorId, action, entity_type: entityType, entity_id: entityId, data });
+/**
+ * Writes an audit_log entry (service role; audit_log is server-write only and append-only, D65).
+ * The author's id and e-mail are stored in the row, so the entry keeps its author even if the account is
+ * deleted later. `data` holds ids and changed business values only — never customers' personal data
+ * (addresses, phone numbers, …). Never throws.
+ */
+export async function audit(
+  actor: { userId: string; email: string },
+  action: string,
+  entityType: string,
+  entityId: string | null,
+  data: Record<string, unknown> = {},
+) {
+  const { error } = await createServiceClient()
+    .from("audit_log")
+    .insert({ actor_id: actor.userId, actor_email: actor.email, action, entity_type: entityType, entity_id: entityId, data });
   if (error) console.error("[audit] insert failed", { action, code: error.code, message: error.message });
 }
 

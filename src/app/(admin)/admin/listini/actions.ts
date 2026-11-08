@@ -25,7 +25,7 @@ export async function cloneListAction(_prev: ActionResult, fd: FormData): Promis
   if (!sourceId) return { error: "Listino non valido." };
   const { data, error } = await db.rpc("clone_price_list", { p_source_id: sourceId });
   if (error || !data) return dbError(error);
-  await audit(ctx.userId, "price_list.clone", "price_list", data as string, { source_id: sourceId });
+  await audit(ctx, "price_list.clone", "price_list", data as string, { source_id: sourceId });
   redirect(`/admin/listini/${data}`);
 }
 
@@ -58,7 +58,7 @@ export async function updateListSettingsAction(_prev: ActionResult, fd: FormData
   };
   const { data, error } = await db.from("price_lists").update(patch).eq("id", id).select("id");
   if (error || !data?.length) return dbError(error);
-  await audit(ctx.userId, "price_list.update", "price_list", id, patch);
+  await audit(ctx, "price_list.update", "price_list", id, patch);
   refresh();
   return ok("Impostazioni salvate.");
 }
@@ -90,7 +90,7 @@ export async function updateRatesAction(_prev: ActionResult, fd: FormData): Prom
       : await db.from("price_list_vehicle_rates").insert({ price_list_id: id, ...row });
     if (error) return dbError(error);
   }
-  await audit(ctx.userId, "price_list.rates", "price_list", id, { rates: rows });
+  await audit(ctx, "price_list.rates", "price_list", id, { rates: rows });
   refresh();
   return ok("Tariffe salvate.");
 }
@@ -126,7 +126,7 @@ export async function updateRulesAction(_prev: ActionResult, fd: FormData): Prom
       : await db.from("price_rules").insert({ price_list_id: id, code, ...patch });
     if (error) return dbError(error);
   }
-  await audit(ctx.userId, "price_list.rules", "price_list", id, { rules: rows });
+  await audit(ctx, "price_list.rules", "price_list", id, { rules: rows });
   refresh();
   return ok("Regole salvate.");
 }
@@ -137,7 +137,7 @@ export async function publishListAction(_prev: ActionResult, fd: FormData): Prom
   if (!id) return { error: "Listino non valido." };
   const { error } = await db.rpc("publish_price_list", { p_price_list_id: id });
   if (error) return dbError(error);
-  await audit(ctx.userId, "price_list.publish", "price_list", id);
+  await audit(ctx, "price_list.publish", "price_list", id);
   refresh();
   return ok("Listino pubblicato: è ora quello attivo.");
 }
@@ -148,6 +148,6 @@ export async function deleteDraftAction(_prev: ActionResult, fd: FormData): Prom
   if (!id) return { error: "Listino non valido." };
   const { data, error } = await db.from("price_lists").delete().eq("id", id).eq("status", "draft").select("id");
   if (error || !data?.length) return dbError(error);
-  await audit(ctx.userId, "price_list.delete", "price_list", id);
+  await audit(ctx, "price_list.delete", "price_list", id);
   redirect("/admin/listini");
 }

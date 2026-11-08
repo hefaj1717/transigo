@@ -14,7 +14,7 @@ export async function addHolidayAction(_prev: ActionResult, fd: FormData): Promi
   if (!parsed.success) return { error: "Inserisci data e nome." };
   const { error } = await db.from("holidays").insert(parsed.data);
   if (error) return error.code === "23505" ? { error: "Esiste già una festività in questa data." } : dbError(error);
-  await audit(ctx.userId, "holiday.add", "holiday", null, parsed.data);
+  await audit(ctx, "holiday.add", "holiday", null, parsed.data);
   refresh();
   return ok("Festività aggiunta.");
 }
@@ -25,7 +25,7 @@ export async function deleteHolidayAction(_prev: ActionResult, fd: FormData): Pr
   if (!parsed.success) return { error: "Data non valida." };
   const { data, error } = await db.from("holidays").delete().eq("date", parsed.data).select("date");
   if (error || !data?.length) return dbError(error);
-  await audit(ctx.userId, "holiday.delete", "holiday", null, { date: parsed.data });
+  await audit(ctx, "holiday.delete", "holiday", null, { date: parsed.data });
   refresh();
   return ok("Eliminata.");
 }

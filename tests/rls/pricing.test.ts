@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { anon, createUser, deleteCreatedUsers, service, type TestUser } from "./helpers";
+import { anon, createUser, deleteCreatedUsers, deleteUserNow, service, type TestUser } from "./helpers";
 
 // Stage 2a security tests: price lists (admin only, drafts editable, published immutable),
 // holidays, service area provinces, pricing settings. See docs/spec.md D59–D61.
@@ -39,11 +39,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  // Restore the original active list if a test published a draft, then drop test drafts.
-  const current = await activeList();
-  if (current.id !== activeId) {
-    throw new Error("A test left a different active price list; inspect manually");
-  }
+  // Local database only (D64), reset before every run — just drop the test drafts.
   if (createdDrafts.length) {
     await service.from("price_lists").delete().in("id", createdDrafts).eq("status", "draft");
   }
@@ -177,6 +173,34 @@ describe("price list versioning (D60)", () => {
     const pub = await admin.client.rpc("publish_price_list", { p_price_list_id: restoredId });
     expect(pub.error).toBeNull();
     activeId = restoredId as string;
+  });
+});
+
+describe("deleting the publisher's account", () => {
+  it("succeeds and only clears published_by; the published list stays unchanged", async () => {
+    const publisher = await createUser({});
+    await service.from("profiles").update({ role: "admin" }).eq("id", publisher.id);
+    const { data: draftId, error: cloneErr } = await publisher.client.rpc("clone_price_list", { p_source_id: activeId });
+    expect(cloneErr).toBeNull();
+    const pub = await publisher.client.rpc("publish_price_list", { p_price_list_id: draftId });
+    expect(pub.error).toBeNull();
+    activeId = draftId as string;
+
+    const before = await service.from("price_lists").select("version, status, vat_rate_bp, published_at, published_by").eq("id", activeId).single();
+    expect(before.data?.published_by).toBe(publisher.id);
+    const rulesBefore = await service.from("price_rules").select("*").eq("price_list_id", activeId).order("code");
+
+    await deleteUserNow(publisher); // used to fail with "Price list status cannot change from active to active"
+
+    const after = await service.from("price_lists").select("version, status, vat_rate_bp, published_at, published_by").eq("id", activeId).single();
+    expect(after.data).toEqual({ ...before.data, published_by: null });
+    const rulesAfter = await service.from("price_rules").select("*").eq("price_list_id", activeId).order("code");
+    expect(rulesAfter.data).toEqual(rulesBefore.data);
+  });
+
+  it("clearing published_by does not open other edits of a published list", async () => {
+    const r = await service.from("price_lists").update({ published_by: null, notes: "changed" }).eq("id", activeId);
+    expect(r.error).not.toBeNull();
   });
 });
 

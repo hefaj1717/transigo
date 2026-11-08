@@ -573,9 +573,9 @@ Płatność trafia do `payments` (`purpose = storage_extension`). Fakturę wysta
 **RLS:** tylko admin (odczyt); zapis serwer.
 
 #### `audit_log` — działania admina i zdarzenia systemowe
-`id bigint identity`, `actor_id uuid` null, `action text` (np. `payout.hold`, `carrier.activate`, `order.refund`), `entity_type text`, `entity_id uuid`, `data jsonb`, `created_at`.
+`id bigint identity`, `actor_id uuid` null (bez FK — przetrwa usunięcie konta, D65), `actor_email text` (snapshot), `action text` (np. `payout.hold`, `carrier.activate`, `order.refund`), `entity_type text`, `entity_id uuid`, `data jsonb`, `created_at`.
 Indeks: `(entity_type, entity_id, created_at)`.
-**RLS:** tylko admin (odczyt); zapis serwer. Wpisy nie są edytowane.
+**RLS:** tylko admin (odczyt); zapis serwer. Append-only: trigger odrzuca UPDATE/DELETE/TRUNCATE, także dla service role (D65). W `data` tylko ID i wartości biznesowe, bez danych osobowych klientów.
 
 ---
 
