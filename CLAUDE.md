@@ -102,3 +102,4 @@ Uwagi techniczne:
 - [ ] 6. E-faktury SDI i automatyczne wypłaty
 - [ ] 7. Magazyn i dashboard admina
 - [ ] 8. Testy end-to-end, dokumenty prawne, wdrożenie
+  - Założyć osobny projekt Supabase na produkcję; obecny projekt zostaje jako staging do testów (w tym test:rls).
