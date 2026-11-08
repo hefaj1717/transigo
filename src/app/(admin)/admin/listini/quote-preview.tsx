@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { startTransition, useActionState, useState, type FormEvent } from "react";
 import { formatCents } from "@/lib/pricing/money";
 import { previewQuoteAction, type PreviewState } from "./preview-action";
 
@@ -8,10 +8,23 @@ const input = "rounded-md border border-zinc-300 px-2 py-1 text-sm text-zinc-900
 
 export function QuotePreview({ priceListId, vehicles, defaultPickup }: { priceListId: string; vehicles: { id: string; name: string }[]; defaultPickup: string }) {
   const [state, action, pending] = useActionState<PreviewState, FormData>(previewQuoteAction, {});
+  // Fields stay as typed: we submit via onSubmit + startTransition instead of <form action>, because
+  // React resets uncontrolled fields after a form action. Any edit after a calculation marks the result
+  // as stale until the next "Calcola preventivo".
+  const [stale, setStale] = useState(false);
+  const outdated = stale || pending;
   const q = state.quote;
+
+  function onSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    setStale(false);
+    startTransition(() => action(fd));
+  }
+
   return (
     <div>
-      <form action={action} className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+      <form onSubmit={onSubmit} onChange={() => setStale(true)} className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
         <input type="hidden" name="id" value={priceListId} />
         <label className="flex flex-col gap-1">Distanza (km)<input name="distance_km" defaultValue="143,122" className={input} /></label>
         <label className="flex flex-col gap-1">Veicolo
@@ -39,9 +52,12 @@ export function QuotePreview({ priceListId, vehicles, defaultPickup }: { priceLi
         </div>
       </form>
 
-      {state.error ? <p role="alert" className="mt-3 text-sm text-red-700">{state.error}</p> : null}
+      {(state.error || q) && stale ? (
+        <p role="status" className="mt-3 text-sm font-medium text-amber-700">Dati modificati: risultato non aggiornato. Premi «Calcola preventivo».</p>
+      ) : null}
+      {state.error ? <p role="alert" className={`mt-3 text-sm text-red-700 ${outdated ? "opacity-40" : ""}`}>{state.error}</p> : null}
       {q ? (
-        <div className="mt-4 overflow-x-auto">
+        <div aria-hidden={outdated || undefined} className={`mt-4 overflow-x-auto transition-opacity ${outdated ? "opacity-40" : ""}`}>
           <table className="w-full text-sm">
             <thead className="text-left text-zinc-500">
               <tr><th className="py-1">Voce</th><th>Q.tà</th><th className="text-right">Netto</th><th className="text-right">IVA</th><th className="text-right">Lordo</th><th className="text-right">Padroncino</th></tr>
