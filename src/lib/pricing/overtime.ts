@@ -2,7 +2,7 @@ import { applyBp, mulDivRoundHalfUp } from "./money";
 import type { QuotePorters } from "./types";
 
 // Porter overtime after the job (D68, D69). Pure; used in Stages 4/6 with the porter terms stored
-// with the order (Quote.porters), never with the current price list.
+// with the order (Quote.porters[], per leg — D74), never with the current price list.
 //
 // Working time = loading + unloading only (arrival at pickup → loaded, arrival at delivery → unloaded),
 // NOT the driving time. The caller passes the sum of those two segments in minutes.

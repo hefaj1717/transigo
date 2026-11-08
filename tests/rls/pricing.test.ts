@@ -61,7 +61,10 @@ describe("price tables are admin-only (D59)", () => {
     const { data: types } = await service.from("vehicle_types").select("id").eq("is_active", true);
     expect(rates?.length).toBe(types?.length);
     const { data: rules } = await admin.client.from("price_rules").select("code").eq("price_list_id", activeId);
-    expect(rules?.length).toBe(14); // seeded v1, published before D68 (no porter_overtime_hour)
+    // Every rule of the active list (the active version depends on earlier test files, e.g. orders.test.ts publishes one).
+    const { count: allRules } = await service.from("price_rules").select("code", { count: "exact", head: true }).eq("price_list_id", activeId);
+    expect(allRules).toBeGreaterThanOrEqual(14);
+    expect(rules?.length).toBe(allRules);
   });
 
   it("non-admins cannot clone or publish", async () => {
