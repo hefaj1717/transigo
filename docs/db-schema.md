@@ -1,6 +1,6 @@
 # Transigo — projekt schematu bazy danych
 
-> Status: **PROJEKT do zatwierdzenia** (Etap 1b, 2026-11-08). Migracje powstaną dopiero po akceptacji.
+> Status: **ZATWIERDZONY projekt** (2026-11-08) — decyzje W1–W21 jako D18–D37 w [spec.md](spec.md#0-rejestr-decyzji-2026-11-08). Migracje powstają etapami wg sekcji 9; każdą migrację przed utworzeniem pokazuję do akceptacji.
 > Źródło wymagań: [spec.md](spec.md). Nazwy w bazie po angielsku, opisy po polsku.
 
 ## 1. Konwencje
@@ -40,7 +40,7 @@
 | `carrier_status` | `pending_review`, `active`, `rejected`, `suspended` | spec 8.1. |
 | `carrier_document_type` | `transport_license`, `insurance_rca`, `goods_insurance`, `vehicle_registration`, `identity_document`, `driving_license` | |
 | `review_status` | `pending`, `approved`, `rejected` | dokumenty przewoźnika. |
-| `order_status` | `draft`, `pending_payment`, `expired`, `paid`, `assigned`, `picked_up`, `in_transit`, `delivered`, `completed`, `cancelled`, `refunded` | spec 4. |
+| `order_status` | `draft`, `pending_payment`, `expired`, `paid`, `assigned`, `picked_up`, `in_transit`, `delivered`, `completed`, `cancellation_review`, `cancelled`, `refunded` | spec 4, 4a (D33). |
 | `status_source` | `customer_app`, `carrier_app`, `admin_panel`, `stripe_webhook`, `system_job` | skąd przyszła zmiana statusu. |
 | `order_line_type` | `transport`, `surcharge_urgent`, `surcharge_weekend_holiday`, `surcharge_floors`, `porters`, `packing`, `storage` | pozycje rozbicia ceny. |
 | `carrier_share_group` | `transport`, `porters`, `packing`, `none` | do której reguły D6 należy pozycja (dopłaty → `transport`, D14; magazyn → `none`). |
@@ -76,8 +76,7 @@
 | `first_name` | `text` | |
 | `last_name` | `text` | |
 | `email` | `text` not null | 🔒 kopia z `auth.users`, synchronizowana triggerem (do list w panelu admina). |
-| `phone` | `text` | format E.164. |
-| `phone_verified_at` | `timestamptz` | 🔒 po weryfikacji SMS. |
+| `phone` | `text` | format E.164. Klient: bez weryfikacji (D34). |
 | `is_blocked` | `boolean` not null default false | 🔒 blokada konta przez admina. |
 | `privacy_accepted_at` | `timestamptz` | zgoda GDPR przy rejestracji. |
 | `created_at`, `updated_at` | `timestamptz` | |
@@ -120,6 +119,7 @@ Indeks: `(customer_id)`.
 | `fiscal_code` | `text` | |
 | `pec`, `sdi_code` | `text` | |
 | `hq_street`, `hq_city`, `hq_postal_code`, `hq_province` | `text` | siedziba |
+| `phone_verified_at` | `timestamptz` | 🔒 po weryfikacji SMS (Twilio Verify) — tylko przewoźnicy (D34) |
 | `stripe_account_id` | `text` unique | 🔒 konto Connect Express |
 | `stripe_details_submitted` | `boolean` not null default false | 🔒 z webhooka `account.updated` |
 | `stripe_payouts_enabled` | `boolean` not null default false | 🔒 z webhooka `account.updated` (warunek 5 wypłaty) |
@@ -173,6 +173,7 @@ Indeksy: `(carrier_id, doc_type)`, `(expires_at)` dla alertów o wygasaniu (30 i
 | `payload_kg` | `integer` | |
 | `cargo_length_cm`, `cargo_width_cm`, `cargo_height_cm` | `integer` | |
 | `cargo_volume_dm3` | `integer` | 3 m³ = 3000 |
+| `size_rank` | `smallint` not null unique | kolejność wielkości (1 = najmniejszy). Przewoźnik widzi kursy dla typów o `size_rank` ≤ największego z jego aktywnych pojazdów (D22). |
 | `is_active` | `boolean` not null default true | |
 | `sort_order` | `integer` not null default 0 | |
 | `created_at`, `updated_at` | | |
@@ -227,6 +228,8 @@ PK `(price_list_id, code)`. Check: dokładnie jedno z `amount_cents` / `percent_
 | `max_route_distance_m` | `integer` not null | D13 (admin wpisuje km, zapisujemy metry) |
 | `gps_interval_s` | `integer` not null default 15 | D17 |
 | `unassigned_alert_hours` | `integer` not null default 4 | dashboard: `paid` bez przewoźnika |
+| `free_cancellation_hours` | `integer` not null default 24 | D33: bezpłatne anulowanie do X h przed `pickup_window_start` |
+| `late_cancellation_fee_bp` | `integer` not null default 5000 check 0–10000 | D33: opłata Y % (50 %) przy późnym anulowaniu |
 | `company_name`, `company_vat_number`, `company_fiscal_code`, `company_street`, `company_city`, `company_postal_code`, `company_province`, `company_pec`, `company_sdi_code`, `company_email`, `company_phone` | `text` | dane Transigo do faktur |
 | `updated_at`, `updated_by` | | |
 
@@ -297,11 +300,17 @@ PK `(price_list_id, code)`. Check: dokładnie jedno z `amount_cents` / `percent_
 | `assigned_at`, `picked_up_at`, `in_transit_at`, `delivered_at`, `completed_at`, `cancelled_at` | `timestamptz` | 🔒 |
 | `paid_at` | `timestamptz` | 🔒 tylko z webhooka Stripe |
 | `cancel_reason` | `text` | 🔒 |
+| `cancellation_requested_at` | `timestamptz` | 🔒 zgłoszenie anulowania przez klienta (D33) |
+| `cancellation_requested_by` | `uuid` FK → `profiles` | 🔒 |
+| `cancellation_fee_cents` | `integer` check ≥ 0 | 🔒 opłata zatrzymana przez Transigo (późne anulowanie / decyzja admina) |
+| `cancellation_carrier_amount_cents` | `integer` check ≥ 0 | 🔒 kwota dla przewoźnika ustalona przez admina w `cancellation_review` (domyślnie brak) |
+| `cancellation_decided_by`, `cancellation_decided_at` | | 🔒 decyzja admina |
 | `tracking_token` | `text` unique | 🔒 publiczny link trackingu (W8) |
 | `created_at`, `updated_at` | | |
 
 Indeksy: `(customer_id, created_at desc)`, `(carrier_id, status)`, `(status, pickup_date)` dla listy dostępnych kursów, `(status, paid_at)` dla alertu „bez przewoźnika”, `unique(tracking_token)`.
-Checki: `paid_at is not null` gdy status ∈ {`paid` … `completed`}; `carrier_id is not null` gdy status ∈ {`assigned`, `picked_up`, `in_transit`, `delivered`, `completed`}.
+Checki: `paid_at is not null` gdy status ∈ {`paid` … `completed`}; `carrier_id is not null` gdy status ∈ {`assigned`, `picked_up`, `in_transit`, `delivered`, `completed`, `cancellation_review`}.
+Anulowanie (D33) realizuje serwer: route handler liczy opłatę wg `settings`, wykonuje zwrot w Stripe i zapisuje status.
 **RLS:**
 - **cliente:** `select` swoich zleceń (`customer_id = auth.uid()`). Bez bezpośredniego `insert/update`: zlecenie tworzy i aktualizuje serwer, bo cena musi pochodzić z serwera (W3).
 - **padroncino:** `select` zleceń, w których `carrier_id = auth.uid()`. Kursów `paid` nieprzypisanych **nie** widzi w tej tabeli, tylko przez funkcję `available_jobs()` (sekcja 4). Zmiany statusów robi wyłącznie przez RPC.
@@ -463,7 +472,7 @@ Indeksy: `(order_id)`, `(carrier_id)`, częściowy `unique(order_id) where statu
 | `order_id` | `uuid` FK → `orders` unique | |
 | `carrier_id` | `uuid` FK → `carriers` | |
 | `status` | `payout_status` not null default `not_ready` | 🔒 |
-| `carrier_amount_cents` | `integer` not null check ≥ 0 | 🔒 = `orders.carrier_amount_cents` (kwota faktury) |
+| `carrier_amount_cents` | `integer` not null check ≥ 0 | 🔒 = `orders.carrier_amount_cents` (kwota faktury); dla zlecenia anulowanego w `cancellation_review` = `cancellation_carrier_amount_cents` (patrz A3) |
 | `adjustments_cents` | `integer` not null default 0 check ≤ 0 | 🔒 potrącenia rozliczone w tej wypłacie |
 | `transfer_amount_cents` | `integer` check ≥ 0 | 🔒 = kwota + potrącenia, min. 0 (D15) |
 | `eligible_at` | `timestamptz` | 🔒 `delivered_at + payout_window_hours` |
@@ -549,7 +558,7 @@ Indeks: `(entity_type, entity_id, created_at)`.
 
 | Obiekt | Typ | Kto | Co robi |
 |---|---|---|---|
-| `available_jobs()` | funkcja `SECURITY DEFINER` → tabela | aktywny przewoźnik | Zwraca zlecenia `paid` bez przewoźnika, pasujące do typów jego aktywnych pojazdów (W6). Pola: `id`, miasto i prowincja odbioru/dostawy, data i okno, `distance_m`, typ pojazdu, flagi usług extra (piętra, tragarze, pakowanie), `carrier_amount_cents`. **Bez** adresów, nazwisk, telefonów i cen klienta. |
+| `available_jobs()` | funkcja `SECURITY DEFINER` → tabela | aktywny przewoźnik | Zwraca zlecenia `paid` bez przewoźnika, których typ pojazdu ma `size_rank` ≤ największego `size_rank` wśród jego aktywnych, zatwierdzonych pojazdów (D22). Kwota = `carrier_amount_cents` zlecenia (wg typu ze zlecenia, nie pojazdu przewoźnika). Pola: `id`, miasto i prowincja odbioru/dostawy, data i okno, `distance_m`, typ pojazdu, flagi usług extra (piętra, tragarze, pakowanie), `carrier_amount_cents`. **Bez** adresów, nazwisk, telefonów i cen klienta. |
 | `accept_job(order_id)` | funkcja `SECURITY DEFINER` | aktywny przewoźnik | Atomowo: `update orders set carrier_id = auth.uid(), status = 'assigned' … where id = $1 and status = 'paid' and carrier_id is null returning …`. 0 wierszy → „Corsa già assegnata”. Zapisuje historię statusu. |
 | `set_order_status(order_id, to_status, lat, lng)` | funkcja `SECURITY DEFINER` | przypisany przewoźnik | Tylko przejścia `assigned→picked_up` (wymaga zdjęcia `pickup`) i `picked_up→in_transit`. |
 | `complete_delivery(order_id, recipient_name, signature_path, lat, lng)` | funkcja `SECURITY DEFINER` | przypisany przewoźnik | `in_transit→delivered` + POD + utworzenie `payouts` (`not_ready`). |
@@ -645,28 +654,72 @@ erDiagram
     storage_extensions ||--o| payments : ""
 ```
 
-## 8. Wątpliwości do rozstrzygnięcia przed migracjami
+## 8. Decyzje i otwarte pytania
 
-| # | Temat | Propozycja |
+Propozycje W1–W21 zatwierdzone 2026-11-08 jako decyzje **D18–D37** (rejestr w [spec.md](spec.md#0-rejestr-decyzji-2026-11-08)). Zmiany względem propozycji: W6 → D22 (także typy mniejsze, `size_rank`), W17 → D33 (polityka anulowania w MVP), W18 → D34 (SMS tylko dla przewoźników).
+
+Otwarte pytania wynikłe z D33 (dotyczą Etapu 3/6, nie blokują Etapu 1):
+
+| # | Pytanie | Propozycja |
 |---|---|---|
-| W1 | Gdzie trzymać stawkę/km i cenę minimalną pojazdu | W wersji cennika (`price_list_vehicle_rates`), nie w `vehicle_types`. Edycja stawek = nowa wersja cennika, dzięki czemu historia jest spójna. |
-| W2 | Cennik: tabele vs jeden `jsonb` | Tabele (`price_rules` z enumem kodów). Baza pilnuje typów (centy, bp), a zmiany są łatwe do audytu. |
-| W3 | Tworzenie zleceń | Wyłącznie przez serwer (route handler liczy cenę i zapisuje zlecenie + pozycje), bez `INSERT` z przeglądarki. |
-| W4 | Przystanki pośrednie | Poza MVP. Na razie kolumny `pickup_*` i `delivery_*` w `orders`; przystanki później jako osobna tabela `order_stops`. |
-| W5 | Warunki przyjęcia kursu | `carriers.status = active` + zatwierdzone, nieprzeterminowane dokumenty obowiązkowe + **`stripe_payouts_enabled = true`**, żeby nikt nie wykonał kursu bez możliwości wypłaty. |
-| W6 | Dopasowanie kursu do pojazdu | Przewoźnik widzi kursy dla typów, które ma. Do ustalenia: czy także dla mniejszych typów (np. przewoźnik z 3,5 t widzi kursy na furgone piccolo)? Propozycja: tylko dokładny typ. |
-| W7 | Konto firmowe | Jedno konto = jeden użytkownik; brak wielu użytkowników jednej firmy w MVP. |
-| W8 | Publiczny link trackingu dla odbiorcy | Kolumna `tracking_token` przygotowana (nullable); funkcja `tracking_by_token` tylko po decyzji „tak”. |
-| W9 | Retencja GPS | Usuwanie punktów `order_locations` po 30 dniach od `delivered` (cron). |
-| W10 | Faktura klienta | Jedna faktura na płatność (zlecenie albo przedłużenie magazynu), pozycje z `order_lines`. Zwrot = nota korygująca powiązana z fakturą. |
-| W11 | Święta | Tabela `holidays` edytowana przez admina, zasilona świętami włoskimi (w tym Wielkanocny Poniedziałek). Czy dodać święta lokalne (patron miasta)? Propozycja: tylko krajowe. |
-| W12 | Tragarze | Klient deklaruje liczbę osób i godzin w kreatorze, płaci z góry. Czy dopuszczamy dopłatę za nadgodziny po fakcie? Propozycja: nie w MVP. |
-| W13 | Co przewoźnik widzi z ceny | Tylko swoją kwotę (`carrier_amount_cents`) i pozycje usług, bez kwot klienta i marży Transigo. Odczyt `order_lines` dla przewoźnika przez widok bez `amount_cents`. |
-| W14 | Reklamacja a przewoźnik | Przewoźnik widzi, że jest otwarta reklamacja i jej opis (wyjaśnia wstrzymanie wypłaty), bez danych klienta. Czy może odpowiadać? Propozycja: nie w MVP, kontakt przez admina. |
-| W15 | Powód wstrzymania wypłaty | Przewoźnik widzi status `on_hold` i powód wpisany przez admina. |
-| W16 | Częściowy zwrot **przed** wypłatą | Czy zmniejsza `carrier_amount` (i wtedy fakturę przewoźnika)? Propozycja: nie automatycznie; admin decyduje i ewentualnie dodaje potrącenie. Faktura pozostaje na pełną kwotę (D12). |
-| W17 | Anulowanie po przypisaniu | Czy przewoźnik dostaje rekompensatę za anulowany kurs? Propozycja: poza MVP; admin może ręcznie. Schemat tego nie przewiduje. |
-| W18 | Weryfikacja SMS telefonu | Twilio Verify (nasz kod) czy Supabase Phone Auth? Propozycja: Twilio Verify, logowanie zostaje e-mailowe; `phone_verified_at` w `profiles`. |
-| W19 | GDPR „usuń dane” vs obowiązek przechowywania faktur (10 lat) | Anonimizacja profilu (imię, telefon, adresy) zamiast usunięcia; zlecenia i faktury zostają z danymi fiskalnymi ze snapshotu. |
-| W20 | Dane do faktury per zlecenie | Domyślnie z profilu, klient może je zmienić w kroku „Riepilogo” dla danego zlecenia (snapshot w `orders.billing_details`) bez zmiany profilu. |
-| W21 | Kto tworzy wiersz `customers` / `carriers` | Serwer po rejestracji (formularz → route handler), nie trigger, bo potrzebne są dane z formularza. `profiles` tworzy trigger. |
+| A1 | Od jakiej kwoty liczona opłata Y %? | Od `total_cents` (brutto, łącznie z magazynem). Zwrot = total − opłata; nota korygująca na zwróconą część. |
+| A2 | Czy przewoźnik może sam zrezygnować z przyjętego kursu? | Nie w aplikacji w MVP — kontakt z adminem, admin odpina przewoźnika (status wraca do `paid`). |
+| A3 | Kwota dla przewoźnika przy anulowaniu (decyzja admina) | Tworzy wypłatę na `cancellation_carrier_amount_cents`: wymaga faktury przewoźnika na tę kwotę, bez wymogu POD, okno liczone od decyzji admina. |
+| A4 | Status `refunded` vs `cancelled` | Anulowanie (D33) zawsze kończy się `cancelled` (kwota zwrotu w `refunded_cents`). `refunded` = pełny zwrot zlecenia z innego powodu (np. nieudana dostawa) decyzją admina. |
+
+## 9. Plan migracji (etapami)
+
+Zasady:
+- Pliki tworzone przez `npm run db:new <nazwa>` (`supabase/migrations/<timestamp>_<nazwa>.sql`), wysyłane `npm run db:push` (`--remote`). Nie edytujemy migracji już wysłanych — poprawki jako nowa migracja.
+- Każda migracja zawiera razem: enumy → tabele → indeksy → triggery/funkcje → `enable row level security` → polityki. Żadna tabela nie powstaje bez RLS.
+- Enum powstaje w etapie, w którym jest pierwszy raz używany (wartości dodajemy przez `alter type … add value`).
+- Przed każdym etapem pokazuję treść migracji do akceptacji (CLAUDE.md).
+
+### Etap 1 — konta i role
+
+| Migracja | Zawartość |
+|---|---|
+| `accounts` | **Enumy:** `user_role`, `customer_type`, `carrier_status`. **Funkcje:** `set_updated_at()` (trigger). **Tabele:** `profiles`, `customers`, `carriers` (z `phone_verified_at` i polami Stripe — zapis i tak tylko serwer). **Funkcje RLS:** `current_role()`, `is_admin()` (`SECURITY DEFINER`, `search_path = ''`). **Triggery:** `handle_new_user` na `auth.users` insert (tworzy `profiles`, rola z metadanych: tylko `cliente`/`padroncino`, wszystko inne → `cliente`); `sync_profile_email` na `auth.users` update; `protect_columns` (blokuje zmianę 🔒 kolumn `profiles`, `customers.customer_type`, `carriers.status/…/stripe_*` przez kogoś innego niż service role). **Uprawnienia kolumnowe:** `revoke update` na tabelach + `grant update (kolumny edytowalne)` dla `authenticated`. **RLS:** jak w sekcji 3.1 / macierz 6 (w tym `not is_blocked`). |
+| `vehicles_documents` | **Enumy:** `carrier_document_type`, `review_status`. **Tabele:** `vehicle_types` (z `size_rank`, bez stawek — te w Etapie 2), `carrier_vehicles`, `carrier_documents`. **Dane startowe:** 5 typów pojazdów (D7) z `size_rank` 1–5. **Storage:** prywatny bucket `carrier-documents` + polityki `storage.objects` (przewoźnik: zapis i odczyt w folderze `{auth.uid()}/`, admin: odczyt wszystkiego). **RLS:** sekcje 3.1–3.2. |
+| `settings_audit` | **Tabele:** `settings` (jeden wiersz: `payout_window_hours`, `gps_interval_s`, `unassigned_alert_hours`, `free_cancellation_hours`, `late_cancellation_fee_bp`, dane firmy Transigo), `audit_log`. **Dane startowe:** wiersz `settings` z wartościami domyślnymi. **RLS:** tylko admin (odczyt; `settings` także zapis). |
+| *(poza migracją)* | Nadanie roli admin: ręcznie w SQL Editor (`update profiles set role = 'admin' where email = '…'`) — instrukcja w README, nigdy w migracji ani formularzu. |
+
+Weryfikacja po `db:push`: konto testowe `cliente` i `padroncino` przez rejestrację; sprawdzenie, że rola z metadanych `admin` daje `cliente`, że użytkownik nie zmieni `role`/`status`, że nie widzi cudzych wierszy, że przewoźnik nie czyta cudzego folderu w Storage. Ekrany logowania/rejestracji z rolami — kolejny krok Etapu 1 po migracjach.
+
+### Etap 2 — silnik cenowy, kreator, strona publiczna
+- **Enumy:** `price_list_status`, `price_rule_kind`, `price_rule_code`, `order_status` (z `cancellation_review`), `status_source`, `order_line_type`, `carrier_share_group`, `storage_type`, `storage_billing_unit`, `out_of_area_reason`.
+- **Tabele:** `price_lists`, `price_list_vehicle_rates`, `price_rules`, `holidays` (+ święta krajowe na 2026–2028), `service_area_provinces` (+ lista prowincji, wszystkie nieaktywne), `out_of_area_requests`, `customer_addresses`, `orders` (wszystkie kolumny, w tym anulowanie i `tracking_token`), `order_lines`, `order_status_history`.
+- **Zmiany:** `settings.max_route_distance_m`.
+- **Funkcje:** sekwencja i trigger `order_number`; trigger blokujący edycję cennika `active`/`archived`.
+- **RLS:** odczyt publiczny konfiguracji (typy, aktywny cennik, prowincje, święta); zlecenia — odczyt własnych, zapis tylko serwer.
+
+### Etap 3 — płatność klienta
+- **Enumy:** `payment_purpose`, `payment_status`, `refund_status`, `notification_channel`.
+- **Tabele:** `payments` (bez `storage_extension_id`), `refunds`, `stripe_events`, `order_internal_notes`, `message_templates` (+ szablony startowe), `notification_log`.
+- Anulowanie (D33) i zwroty — logika w route handlerach, bez nowych tabel.
+
+### Etap 4 — PWA przewoźnika
+- **Enumy:** `photo_kind`, `carrier_invoice_status`.
+- **Tabele:** `order_photos`, `delivery_proofs`, `carrier_invoices`.
+- **Funkcje (`SECURITY DEFINER`):** `is_active_carrier()` (D21), `available_jobs()` (D22, D29), `accept_job()`, `set_order_status()`, `complete_delivery()` (bez tworzenia wypłaty — dochodzi w Etapie 6).
+- **Storage:** `order-photos`, `signatures`, `carrier-invoices` + polityki.
+
+### Etap 5 — tracking i potwierdzenie dostawy
+- **Enumy:** `claim_status`.
+- **Tabele:** `order_locations` (+ publikacja Realtime), `claims` (+ FK `order_photos.claim_id`).
+- **Widoki:** `order_carrier_public`; Realtime na `orders` (status).
+- Retencja GPS 30 dni (D25) — job (Vercel Cron → route handler). `tracking_by_token()` tylko po decyzji D24.
+
+### Etap 6 — e-faktury SDI i wypłaty
+- **Enumy:** `invoice_kind`, `sdi_status`, `payout_status`.
+- **Tabele:** `customer_invoices`, `payouts`, `payout_adjustments`, `payout_adjustment_settlements`, `deduction_documents`.
+- **Funkcje:** rozszerzenie `complete_delivery()` o tworzenie `payouts`; trigger reklamacja → `on_hold`.
+- **Storage:** `invoices`, `deduction-documents`. Job wypłat co 15 min (D16).
+
+### Etap 7 — magazyn i dashboard
+- **Enumy:** `storage_item_status`.
+- **Tabele:** `warehouses` (+ jeden magazyn), `storage_items`, `storage_extensions`; kolumna `payments.storage_extension_id`.
+- **Widoki** dashboardu admina (przychód, marża, zlecenia wg statusów, wygasające dokumenty).
+
+### Etap 8 — testy E2E, prawo, wdrożenie
+- Funkcja anonimizacji GDPR (D35), przegląd indeksów i polityk przed produkcją.

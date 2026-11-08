@@ -25,6 +25,26 @@
 | D15 | Potrącenia większe niż wypłata | Przelew nie może być ujemny; nadwyżka potrącenia przechodzi na kolejną wypłatę przewoźnika. |
 | D16 | Uruchamianie wypłat | Zaplanowany job (cron) co 15 min sprawdza warunki i wykonuje transfery idempotentnie. |
 | D17 | Interwał GPS | Lokalizacja wysyłana co 15 s podczas aktywnego kursu (przy otwartej aplikacji). |
+| D18 | Cennik w bazie | Stawka/km i cena minimalna należą do **wersji cennika** (`price_list_vehicle_rates`), nie do typu pojazdu. Reguły (dopłaty, usługi, magazyn, kwoty przewoźnika) w tabeli `price_rules` z enumem kodów, nie w JSON. *(db-schema W1, W2)* |
+| D19 | Zapis zleceń | Zlecenia, pozycje ceny, płatności, faktury i wypłaty zapisuje wyłącznie serwer; przewoźnik zmienia statusy przez funkcje RPC. Brak bezpośredniego `INSERT/UPDATE` z przeglądarki. *(W3)* |
+| D20 | Przystanki pośrednie | Poza MVP (później tabela `order_stops`). *(W4)* |
+| D21 | Warunki przyjęcia kursu | Konto przewoźnika `active` + zatwierdzone, ważne dokumenty obowiązkowe + `payouts_enabled` w Stripe Connect. *(W5)* |
+| D22 | Dopasowanie kursu do pojazdu | Przewoźnik widzi kursy na swój typ pojazdu **i typy mniejsze** (kolejność wg `vehicle_types.size_rank`). Kwota dla przewoźnika zawsze według typu pojazdu ze zlecenia. *(W6)* |
+| D23 | Konto firmowe | Jedno konto = jeden użytkownik; brak wielu użytkowników jednej firmy w MVP. *(W7)* |
+| D24 | Publiczny link trackingu | Kolumna `tracking_token` przygotowana, funkcja wyłączona do osobnej decyzji. *(W8)* |
+| D25 | Retencja GPS | Punkty GPS usuwane 30 dni po `delivered` (job). *(W9)* |
+| D26 | Faktura klienta | Jedna faktura na płatność (zlecenie albo przedłużenie magazynu); zwrot = nota korygująca do tej faktury. *(W10)* |
+| D27 | Święta | Tabela świąt edytowana przez admina, tylko święta krajowe (bez patronów lokalnych). *(W11)* |
+| D28 | Tragarze | Liczba osób i godzin deklarowana w kreatorze, płatna z góry; bez dopłat za nadgodziny w MVP. *(W12)* |
+| D29 | Co przewoźnik widzi z ceny | Tylko swoją kwotę i listę usług — bez ceny klienta i marży Transigo. *(W13)* |
+| D30 | Reklamacja a przewoźnik | Przewoźnik widzi otwartą reklamację i jej opis (bez danych klienta), nie odpowiada w aplikacji — kontakt przez admina. *(W14)* |
+| D31 | Wstrzymanie wypłaty | Przewoźnik widzi status `on_hold` i powód wpisany przez admina. *(W15)* |
+| D32 | Częściowy zwrot przed wypłatą | Nie zmienia automatycznie kwoty przewoźnika ani jego faktury; admin decyduje i ewentualnie dodaje potrącenie. *(W16)* |
+| D33 | Polityka anulowania (MVP) | Klient anuluje bezpłatnie do **X h** przed początkiem okna odbioru (domyślnie 24), później opłata **Y %** (domyślnie 50) — oba w `settings`. Anulowanie **po przyjęciu kursu** przez przewoźnika → status `cancellation_review`; decyzję (zwrot częściowy, ewentualna kwota dla przewoźnika) podejmuje admin. Bez automatycznych rekompensat dla przewoźnika. *(W17; szczegóły: sekcja 4a)* |
+| D34 | Weryfikacja telefonu | Weryfikacja SMS (Twilio Verify) **tylko dla przewoźników**. Klienci: tylko e-mail (telefon bez weryfikacji). *(W18)* |
+| D35 | GDPR — usunięcie danych | Anonimizacja profilu (imię, telefon, adresy) zamiast usunięcia; zlecenia i faktury zostają z danymi fiskalnymi ze snapshotu (obowiązek przechowywania 10 lat). *(W19)* |
+| D36 | Dane do faktury | Domyślnie z profilu; klient może je zmienić dla danego zlecenia w „Riepilogo” (snapshot w zleceniu, profil bez zmian). *(W20)* |
+| D37 | Tworzenie kont | `profiles` tworzy trigger przy rejestracji; `customers` / `carriers` tworzy serwer z danych formularza. Rola `admin` nadawana wyłącznie ręcznie. *(W21)* |
 
 ## 1. Słownik
 
@@ -100,6 +120,8 @@ carrier_share(x) = round(x × percent)  |  fixed_cents   # osobna reguła dla ka
 ```
 draft → pending_payment → paid → assigned → picked_up → in_transit → delivered → completed
                     ↘ expired      ↘ cancelled / refunded (admin)
+                                   paid → cancelled (klient, D33)
+                                   assigned → cancellation_review → cancelled (decyzja admina, D33)
 ```
 
 | Status (kod) | UI (IT) | Kiedy |
@@ -113,7 +135,8 @@ draft → pending_payment → paid → assigned → picked_up → in_transit →
 | `in_transit` | In viaggio | W drodze, GPS aktywny |
 | `delivered` | Consegnato | Podpis + zdjęcie zapisane |
 | `completed` | Completato | Wypłata wykonana |
-| `cancelled` | Annullato | Anulowane przez admina |
+| `cancellation_review` | Annullamento in revisione | Klient anulował po przyjęciu kursu przez przewoźnika; czeka na decyzję admina (D33) |
+| `cancelled` | Annullato | Anulowane (przez klienta wg D33 lub przez admina) |
 | `refunded` | Rimborsato | Zwrot pełny (zwrot częściowy to zdarzenie, nie status) |
 
 Każda zmiana statusu zapisywana w tabeli historii (kto, kiedy, skąd, lokalizacja GPS jeśli dotyczy).
@@ -132,6 +155,17 @@ Statusy wypłaty (osobno):
 
 Reklamacje (`claims`): klient lub admin otwiera reklamację do zlecenia; otwarta reklamacja blokuje wypłatę (`on_hold`), zamknięcie przywraca ocenę warunków.
 
+## 4a. Anulowanie zlecenia (D33)
+
+- Ustawienia admina (`settings`): `free_cancellation_hours` (domyślnie 24) i `late_cancellation_fee_bp` (domyślnie 5000 = 50 %).
+- Moment odniesienia: początek okna odbioru (`pickup_window_start`).
+- **Status `paid` (brak przewoźnika):**
+  - ≥ X h przed odbiorem → anulowanie bezpłatne, pełny zwrot automatycznie, status `cancelled`;
+  - < X h przed odbiorem → opłata Y % kwoty, zwrot reszty automatycznie, status `cancelled`.
+- **Status `assigned` (przewoźnik przyjął kurs):** klient zgłasza anulowanie → `cancellation_review`; przewoźnik dostaje informację, że kursu nie wykonuje. Admin decyduje: kwota zwrotu dla klienta i ewentualna kwota dla przewoźnika (bez automatycznych rekompensat) → `cancelled`.
+- Od `picked_up` klient nie anuluje w aplikacji — tylko przez reklamację / kontakt z adminem.
+- Każdy zwrot (pełny lub częściowy) → nota di credito (D26).
+
 ## 5. Strona publiczna
 
 - **Home:** hero z mini-formularzem (Da / A / Data) → przejście do kreatora; opis usług; jak to działa (3 kroki); typy pojazdów; CTA „Diventa partner” dla przewoźników; FAQ; stopka z danymi firmy i linkami prawnymi.
@@ -144,7 +178,7 @@ Reklamacje (`claims`): klient lub admin otwiera reklamację do zlecenia; otwarta
 
 Kroki (pasek postępu, cena na żywo w panelu bocznym / dolnym na mobile):
 
-1. **Percorso** — adres odbioru i dostawy (Google Places autocomplete), opcjonalne przystanki pośrednie **[DO USTALENIA: czy w MVP]**; mapa z trasą i dystansem. Sprawdzenie obszaru obsługi (sekcja 2a: prowincja odbioru + maks. dystans) — poza obszarem komunikat + formularz kontaktowy.
+1. **Percorso** — adres odbioru i dostawy (Google Places autocomplete), bez przystanków pośrednich w MVP (D20); mapa z trasą i dystansem. Sprawdzenie obszaru obsługi (sekcja 2a: prowincja odbioru + maks. dystans) — poza obszarem komunikat + formularz kontaktowy.
 2. **Data e ora** — data i okno czasowe odbioru; opcja „Urgente”. System sam nalicza dopłatę weekendową/świąteczną.
 3. **Merce e veicolo** — opis towaru, liczba sztuk, wymiary/waga orientacyjnie, wybór typu pojazdu.
 4. **Servizi extra** — piętro i winda na odbiorze/dostawie, liczba tragarzy, pakowanie, magazyn (typ, liczba dni/palet).
@@ -158,20 +192,20 @@ Kroki 1–6 (wycena) dostępne bez logowania; konto jest obowiązkowe przed pła
 ## 7. Panel klienta
 
 - **I miei ordini:** lista z filtrami (aktywne / zakończone), status, data, kwota.
-- **Dettaglio ordine:** trasa, rozbicie ceny, oś czasu statusów, dane przewoźnika (imię, pojazd, tablica — po przypisaniu), mapa trackingu na żywo (od `picked_up` do `delivered`), POD: podpis + zdjęcia do pobrania, faktury PDF.
+- **Dettaglio ordine:** trasa, rozbicie ceny, oś czasu statusów, dane przewoźnika (imię, pojazd, tablica — po przypisaniu), mapa trackingu na żywo (od `picked_up` do `delivered`), POD: podpis + zdjęcia do pobrania, faktury PDF, przycisk „Annulla ordine” z informacją o opłacie wg D33 (sekcja 4a).
 - **Fatture:** lista e-faktur (PDF + status SDI), noty korygujące przy zwrotach.
 - **Reclami:** otwarcie reklamacji do zlecenia (opis + zdjęcia), podgląd statusu.
 - **Deposito:** pozycje w magazynie, data końca opłaconego okresu, przedłużenie przez link płatności (D9).
 - **Profilo:** dane osobowe/firmowe, dane do faktury, adresy zapisane, zmiana hasła.
 - **Powiadomienia (e-mail/SMS):** potwierdzenie płatności, przypisanie przewoźnika, odbiór, link do trackingu, dostawa z POD, faktura.
-- **Link trackingu publiczny** (bez logowania, z tokenem) dla odbiorcy **[DO USTALENIA]**.
+- **Link trackingu publiczny** (bez logowania, z tokenem) dla odbiorcy — przygotowane w bazie, wyłączone do osobnej decyzji (D24).
 
 ## 8. PWA przewoźnika (Padroncino)
 
 Mobile-first, instalowalna (manifest + service worker), działa przy słabym zasięgu (kolejka wysyłek zdjęć/statusów offline **[DO USTALENIA: zakres w MVP]**).
 
 ### 8.1 Rejestracja i onboarding
-1. Konto: imię, nazwisko, e-mail, telefon (weryfikacja SMS).
+1. Konto: imię, nazwisko, e-mail, telefon (weryfikacja SMS przez Twilio Verify — tylko przewoźnicy, D34).
 2. Firma: ragione sociale, P.IVA, codice fiscale, adres siedziby, PEC/codice SDI.
 3. Dokumenty (upload do Supabase Storage, z datą ważności): licencja przewozowa (iscrizione Albo autotrasportatori / licenza), polisa OC (RCA) + ewentualnie ubezpieczenie towaru, dowód rejestracyjny pojazdu (libretto), dokument tożsamości, prawo jazdy.
 4. Pojazd(y): typ (z listy Transigo), tablica, ładowność, wymiary przestrzeni ładunkowej.
@@ -179,7 +213,7 @@ Mobile-first, instalowalna (manifest + service worker), działa przy słabym zas
 6. Status konta: `pending_review` → admin aktywuje (`active`) lub odrzuca z powodem; możliwe `suspended`.
 
 ### 8.2 Ekrany
-- **Corse disponibili:** lista kursów `paid` pasujących do typu pojazdu przewoźnika; karta: trasa (miasta), data/okno, dystans, typ pojazdu, usługi extra, **kwota dla przewoźnika**. Szczegóły przed przyjęciem bez danych osobowych klienta. Przycisk **„Accetta la Corsa”** — przyjęcie atomowe (kto pierwszy, ten ma; drugi dostaje komunikat).
+- **Corse disponibili:** lista kursów `paid` na typ pojazdu przewoźnika lub mniejszy (D22), dostępna po spełnieniu warunków D21; karta: trasa (miasta), data/okno, dystans, typ pojazdu, usługi extra, **kwota dla przewoźnika**. Szczegóły przed przyjęciem bez danych osobowych klienta. Przycisk **„Accetta la Corsa”** — przyjęcie atomowe (kto pierwszy, ten ma; drugi dostaje komunikat).
 - **Le mie corse:** przypisane / w realizacji / zakończone.
 - **Esecuzione corsa:** pełne adresy i kontakty, nawigacja (link do Google Maps), przyciski statusów: „Ritirato” (zdjęcie ładunku), „In viaggio”, „Consegnato” (zdjęcia + podpis odbiorcy na ekranie + imię odbiorcy). GPS wysyłany co 15 s (D17) **tylko przy otwartej aplikacji** (D11). Przez cały kurs widoczny baner: „Tieni l'app aperta durante la corsa per condividere la posizione”; Wake Lock API, gdy dostępne. Brak sygnału GPS > X min → ostrzeżenie dla przewoźnika.
 - **Fattura:** po dostawie upload faktury przewoźnika dla Transigo (PDF/XML) z podaną kwotą. Faktura zawsze na pełną kwotę przewoźnika za zlecenie (D12). Walidacja automatyczna (D4, D12): kwota = `carrier_amount` (przed potrąceniami) → wypłata przechodzi dalej; niezgodność → `to_verify` i komunikat dla przewoźnika, decyzja admina.
@@ -190,7 +224,7 @@ Mobile-first, instalowalna (manifest + service worker), działa przy słabym zas
 ## 9. Panel admina
 
 - **Dashboard:** przychód (brutto/netto), marża (przychód netto − wypłaty), liczba zleceń wg statusu, wypłaty wstrzymane, dokumenty przewoźników wygasające w ciągu 30 dni, zlecenia `paid` bez przewoźnika dłużej niż X godzin.
-- **Ordini:** lista z filtrami i wyszukiwarką; szczegóły; ręczne przypisanie/odpięcie przewoźnika; zmiana statusu z powodem; anulowanie; **zwrot** (pełny/częściowy przez Stripe Refunds → nota korygująca SDI); notatki wewnętrzne; log zdarzeń.
+- **Ordini:** lista z filtrami i wyszukiwarką; szczegóły; ręczne przypisanie/odpięcie przewoźnika; zmiana statusu z powodem; anulowanie; kolejka `cancellation_review` (decyzja: kwota zwrotu + ewentualna kwota dla przewoźnika — D33); **zwrot** (pełny/częściowy przez Stripe Refunds → nota korygująca SDI); notatki wewnętrzne; log zdarzeń.
 - **Padroncini:** lista, weryfikacja dokumentów, aktywacja/odrzucenie/zawieszenie, pojazdy, status Stripe Connect, historia kursów i wypłat.
 - **Clienti:** lista, szczegóły, zlecenia, faktury, blokada konta.
 - **Reclami:** lista reklamacji, otwarcie/zamknięcie z notatką; otwarta reklamacja wstrzymuje wypłatę.
@@ -200,7 +234,7 @@ Mobile-first, instalowalna (manifest + service worker), działa przy słabym zas
 - **Magazzino:** jeden magazyn w MVP (tabela `warehouses`, gotowa na kolejne) — D9. Lista pozycji (zlecenie, klient, liczba palet, data wejścia, opłacone do, naliczone dni), przyjęcie/wydanie, lokalizacja w magazynie. Pozycje z kończącym się okresem → przycisk „Invia link di pagamento” (Stripe Payment Link / Checkout na przedłużenie; po webhooku przesuwa datę „opłacone do” i wystawia fakturę).
 - **Fatture:** faktury wystawione klientom (status SDI: inviata, consegnata, scartata) z ponowieniem; faktury przewoźników (podgląd, akceptacja/odrzucenie).
 - **Pagamenti / Payouts:** lista wypłat wg statusów (sekcja 4), kolejka **„Da verificare”** (podgląd faktury przewoźnika vs `carrier_amount`, akceptuj / odrzuć z powodem), **wstrzymaj / zwolnij** z powodem, ponowienie nieudanej, **potrącenia** (`payout_adjustments`: przewoźnik, kwota w centach, powód, powiązane zlecenie; rozliczane przy następnej wypłacie; nie zmieniają faktury przewoźnika, dokument potrącenia generowany osobno — D12).
-- **Impostazioni:** dane firmy Transigo (do faktur), okno wypłaty w godzinach (domyślnie 24), szablony e-mail/SMS, użytkownicy admin.
+- **Impostazioni:** dane firmy Transigo (do faktur), okno wypłaty w godzinach (domyślnie 24), polityka anulowania (X h bezpłatnie, Y % opłaty — D33), szablony e-mail/SMS, użytkownicy admin.
 
 ## 10. Płatności i wypłaty — reguły
 
@@ -234,7 +268,7 @@ Mobile-first, instalowalna (manifest + service worker), działa przy słabym zas
 - Supabase Auth; rola zapisana w profilu, egzekwowana przez RLS i middleware.
 - RLS na każdej tabeli: `cliente` — tylko swoje zlecenia/faktury; `padroncino` — tylko przypisane zlecenia + widok kursów dostępnych bez danych osobowych; `admin` — pełny dostęp.
 - Storage: prywatne buckety (dokumenty, POD, faktury), dostęp przez signed URL.
-- Lokalizacja GPS przechowywana tylko dla aktywnych kursów; retencja **[DO USTALENIA]**.
+- Lokalizacja GPS przechowywana tylko dla aktywnych kursów; retencja 30 dni po dostawie (D25).
 - GDPR: zgoda na przetwarzanie, eksport/usunięcie danych na żądanie.
 - Sekrety tylko w zmiennych środowiskowych (Vercel / `.env.local`).
 
