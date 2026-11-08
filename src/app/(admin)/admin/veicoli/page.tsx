@@ -6,13 +6,16 @@ import { AdminShell, inputClass } from "@/components/admin/admin-nav";
 import { requireArea } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { formatCents } from "@/lib/pricing/money";
-import { createVehicleAction, updateVehicleAction } from "./actions";
+import { formatDm3AsCubicMetres } from "@/lib/admin/units";
+import { PORTER_PACKAGE_LABEL } from "@/lib/pricing/rule-meta";
+import { PORTER_PACKAGE_CODES } from "@/lib/pricing/types";
+import { createVehicleAction, saveCategoryMinimumsAction, updateVehicleAction } from "./actions";
 
 export const metadata = { title: "Veicoli – Transigo" };
 
 type Vehicle = {
   id?: string; code: string; name_it: string; payload_kg: number | null; cargo_length_cm: number | null; cargo_width_cm: number | null;
-  cargo_height_cm: number | null; cargo_volume_dm3: number | null; size_rank: number; sort_order: number; is_active: boolean;
+  cargo_height_cm: number | null; cargo_volume_dm3: number | null; euro_pallets: number | null; size_rank: number; sort_order: number; is_active: boolean;
 };
 
 export default function Page() {
@@ -26,16 +29,19 @@ export default function Page() {
 async function Content() {
   await requireArea("admin", "/admin/veicoli");
   const db = await createClient();
-  const [{ data: vehicles }, { data: active }] = await Promise.all([
+  const [{ data: vehicles }, { data: active }, { data: minimums }] = await Promise.all([
     db.from("vehicle_types").select("*").order("size_rank"),
     db.from("price_lists").select("id, version, price_list_vehicle_rates(vehicle_type_id, rate_per_km_cents, min_price_cents)").eq("status", "active").maybeSingle(),
+    db.from("porter_package_min_vehicle").select("package_code, vehicle_type_id"),
   ]);
+  const minimumOf = new Map((minimums ?? []).map((m) => [m.package_code as string, m.vehicle_type_id as string]));
   const rates = new Map((active?.price_list_vehicle_rates ?? []).map((r: { vehicle_type_id: string; rate_per_km_cents: number; min_price_cents: number }) => [r.vehicle_type_id, r]));
   const nextRank = Math.max(0, ...(vehicles ?? []).map((v) => v.size_rank)) + 1;
 
   return (
     <AdminShell title="Tipi di veicolo">
       <p className="mb-4 text-sm">
+        Portata, dimensioni del vano, volume e pallet EUR sono obbligatori: servono a consigliare il veicolo al cliente e a bloccare quelli troppo piccoli.
         La <strong>classe di grandezza</strong> (1 = più piccolo) decide quali corse vede un padroncino: quelle per il suo veicolo e per i veicoli più piccoli.
         Tariffa €/km e prezzo minimo si modificano nel <Link href="/admin/listini" className="text-blue-700 hover:underline">listino</Link>
         {active ? ` (attivo: v${active.version})` : ""}.
@@ -59,10 +65,32 @@ async function Content() {
         <div className="rounded-md border border-dashed border-zinc-300 p-3">
           <p className="mb-2 text-sm font-semibold">Nuovo tipo di veicolo</p>
           <ActionForm action={createVehicleAction} submitLabel="Aggiungi">
-            <VehicleFields v={{ code: "", name_it: "", payload_kg: null, cargo_length_cm: null, cargo_width_cm: null, cargo_height_cm: null, cargo_volume_dm3: null, size_rank: nextRank, sort_order: nextRank * 10, is_active: false }} />
+            <VehicleFields v={{ code: "", name_it: "", payload_kg: null, cargo_length_cm: null, cargo_width_cm: null, cargo_height_cm: null, cargo_volume_dm3: null, euro_pallets: null, size_rank: nextRank, sort_order: nextRank * 10, is_active: false }} />
           </ActionForm>
         </div>
       </div>
+
+      <section className="mt-8">
+        <h2 className="mb-2 text-lg font-semibold">Veicolo minimo per tipo di trasporto</h2>
+        <p className="mb-3 text-sm">
+          Il preventivatore consiglia almeno questo veicolo per il tipo di trasporto scelto dal cliente. Il cliente può comunque scegliere un veicolo più piccolo (con un avviso), se peso, oggetto più grande e pallet ci stanno.
+        </p>
+        <ActionForm action={saveCategoryMinimumsAction} submitLabel="Salva veicoli minimi">
+          <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+            {PORTER_PACKAGE_CODES.map((code) => (
+              <label key={code} className="flex flex-col gap-1">
+                {PORTER_PACKAGE_LABEL[code]}
+                <select name={`min_${code}`} defaultValue={minimumOf.get(code) ?? ""} className={inputClass}>
+                  <option value="">Nessun minimo</option>
+                  {(vehicles ?? []).map((v) => (
+                    <option key={v.id} value={v.id}>{v.name_it}{v.is_active ? "" : " (non attivo)"}</option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          </div>
+        </ActionForm>
+      </section>
     </AdminShell>
   );
 }
@@ -79,7 +107,8 @@ function VehicleFields({ v }: { v: Vehicle }) {
       <label className="flex flex-col gap-1">Lunghezza (cm)<input name="cargo_length_cm" defaultValue={n(v.cargo_length_cm)} className={inputClass} /></label>
       <label className="flex flex-col gap-1">Larghezza (cm)<input name="cargo_width_cm" defaultValue={n(v.cargo_width_cm)} className={inputClass} /></label>
       <label className="flex flex-col gap-1">Altezza (cm)<input name="cargo_height_cm" defaultValue={n(v.cargo_height_cm)} className={inputClass} /></label>
-      <label className="flex flex-col gap-1">Volume (dm³)<input name="cargo_volume_dm3" defaultValue={n(v.cargo_volume_dm3)} className={inputClass} /></label>
+      <label className="flex flex-col gap-1">Volume (m³)<input name="cargo_volume_m3" defaultValue={v.cargo_volume_dm3 == null ? "" : formatDm3AsCubicMetres(v.cargo_volume_dm3)} inputMode="decimal" className={inputClass} /></label>
+      <label className="flex flex-col gap-1">Pallet EUR<input name="euro_pallets" defaultValue={n(v.euro_pallets)} inputMode="numeric" className={inputClass} /></label>
       <label className="flex items-center gap-2"><input type="checkbox" name="is_active" defaultChecked={v.is_active} /> Attivo</label>
     </div>
   );
