@@ -1,5 +1,6 @@
 import { Suspense } from "react";
-import { Loading, PanelShell } from "@/components/panel-shell";
+import { Loading } from "@/components/panel-shell";
+import { AdminShell } from "@/components/admin/admin-nav";
 import { requireArea } from "@/lib/auth/session";
 
 export const metadata = { title: "Amministrazione – Transigo" };
@@ -15,8 +16,8 @@ export default function Page() {
 async function Content() {
   const ctx = await requireArea("admin", "/admin");
   return (
-    <PanelShell title={`Ciao${ctx.firstName ? `, ${ctx.firstName}` : ""}!`}>
+    <AdminShell title={`Ciao${ctx.firstName ? `, ${ctx.firstName}` : ""}!`}>
       <p>Pannello di amministrazione Transigo.</p>
-    </PanelShell>
+    </AdminShell>
   );
 }
