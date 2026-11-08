@@ -71,6 +71,7 @@
 | D61 | Obszar obsługi — szczegóły | Na start wszystkie prowincje nieaktywne; admin włącza region w „Area di servizio”. Domyślny maks. dystans 300 km. Przy wielu odcinkach: prowincja odbioru **każdego** odcinka w obszarze i każdy odcinek ≤ maks. dystans. Autocomplete adresów tylko Włochy (`includedRegionCodes: ['it']`). |
 | D62 | Ważność wyceny | Wycena ważna `settings.quote_valid_minutes` (domyślnie 30); przy tworzeniu płatności serwer zawsze przelicza cenę i, jeśli się zmieniła, pokazuje ją klientowi ponownie. Implementacja w Etapie 2b/3. |
 | D63 | RLS zleceń — warunek ukończenia 2b | Polityki `orders` / `order_lines` / `order_status_history` (cliente tylko swoje, padroncino tylko przypisane, admin wszystko, zapis tylko serwer) powstają w 2b razem z migracją `orders`, z testami w `tests/rls/`. **Bez zielonych testów RLS zleceń Etap 2b nie jest ukończony.** |
+| D64 | Środowisko testów RLS | `npm run test:rls` działa **wyłącznie na lokalnym Supabase** (Docker, `supabase start`, porty 553xx). Przed każdym uruchomieniem lokalna baza jest resetowana do migracji z repo; testy odrzucają każdy inny adres niż `http://127.0.0.1:55321`, więc nigdy nie zmieniają stagingu ani produkcji. Staging (chmura) służy do testów ręcznych. Docker tylko do testów — wdrożenia i `db:push` bez zmian. |
 
 ## 1. Słownik
 

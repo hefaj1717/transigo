@@ -13,6 +13,9 @@
     "db:push": "supabase db push --remote",
     "db:new": "supabase migration new",
     "db:list": "supabase migration list --remote",
+    "db:local:start": "supabase start",
+    "db:local:stop": "supabase stop",
+    "db:local:reset": "supabase db reset --no-seed",
     "test:rls": "vitest run --config vitest.rls.config.mts"
   },
   "dependencies": {

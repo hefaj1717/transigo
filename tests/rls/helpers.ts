@@ -1,18 +1,11 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
+import { inject } from "vitest";
+import { assertLocalTarget } from "./target";
 
-try {
-  process.loadEnvFile(".env.local");
-} catch {
-  // env may already be provided by the shell
-}
-
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-if (!url || !anonKey || !serviceKey) {
-  throw new Error("RLS tests need NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY");
-}
+// Connection data comes from tests/rls/global-setup.ts (local Supabase only, D64) — never from .env.local.
+const { url: providedUrl, anonKey, serviceKey } = inject("supabase");
+const url = assertLocalTarget(providedUrl); // second check, in every test worker
 
 const noSession = { auth: { persistSession: false, autoRefreshToken: false } };
 
