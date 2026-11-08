@@ -1,0 +1,131 @@
+// Pricing engine types. Mirrors the price tables (supabase/migrations/*_pricing.sql) and
+// order_lines (Stage 2b). All amounts in EUR cents, percentages in basis points.
+
+export const PRICE_RULE_CODES = [
+  "surcharge_urgent",
+  "surcharge_weekend_holiday",
+  "surcharge_floor_no_elevator",
+  "porter_hour",
+  "packing_flat",
+  "packing_per_item",
+  "storage_day",
+  "storage_pallet_day",
+  "storage_day_long",
+  "storage_pallet_day_long",
+  "transshipment_flat",
+  "carrier_share_transport",
+  "carrier_share_porters",
+  "carrier_share_packing",
+] as const;
+export type PriceRuleCode = (typeof PRICE_RULE_CODES)[number];
+
+export type PriceRuleKind = "fixed" | "percent" | "per_unit";
+export type StorageBillingUnit = "day" | "pallet_day";
+export type StorageType = "transshipment" | "short_term" | "long_term";
+export type CustomerType = "private" | "business";
+
+export type OrderLineType =
+  | "transport"
+  | "surcharge_urgent"
+  | "surcharge_weekend_holiday"
+  | "surcharge_floors"
+  | "porters"
+  | "packing"
+  | "storage";
+
+export type CarrierShareGroup = "transport" | "porters" | "packing" | "none";
+
+export type PriceRule = {
+  code: PriceRuleCode;
+  kind: PriceRuleKind;
+  amountCents: number | null; // fixed / per_unit
+  percentBp: number | null; // percent
+  isEnabled: boolean;
+};
+
+export type VehicleRate = {
+  vehicleTypeId: string;
+  nameIt: string;
+  ratePerKmCents: number;
+  minPriceCents: number;
+};
+
+/** Everything calculatePrice needs besides the order itself. Built by the server-side loader. */
+export type PricingConfig = {
+  priceListId: string;
+  priceListVersion: number;
+  vatRateBp: number;
+  urgentLeadHours: number; // D49
+  storageShortTermMaxDays: number; // D55
+  storageBillingUnit: StorageBillingUnit; // D55
+  vehicleRates: VehicleRate[]; // active vehicle types with a rate in this price list
+  rules: PriceRule[];
+  holidays: string[]; // "YYYY-MM-DD" (Europe/Rome calendar dates), D27
+  serviceAreaProvinces: string[]; // active province codes (sigle), D13
+  maxRouteDistanceM: number; // D13
+  minBookingLeadHours: number; // D50
+};
+
+/** One transport leg (D47). A warehouse order has two legs: A→warehouse and warehouse→B. */
+export type PriceLeg = {
+  distanceM: number; // road distance from Google Routes (server)
+  vehicleTypeId: string;
+  pickupAt: Date; // start of the pickup window
+  pickupProvince: string; // sigla of the pickup address
+  pickupFloor: number;
+  pickupHasElevator: boolean;
+  deliveryFloor: number;
+  deliveryHasElevator: boolean;
+};
+
+export type PriceInput = {
+  customerType: CustomerType;
+  now: Date; // quote time (urgent / lead-time checks)
+  legs: PriceLeg[];
+  porters?: { count: number; hours: number; legIndex?: number };
+  packing?: { itemsCount: number; legIndex?: number };
+  storage?: { days: number; pallets?: number }; // days = 0 → transshipment
+};
+
+export type QuoteLine = {
+  lineType: OrderLineType;
+  labelIt: string;
+  legIndex: number | null; // null for storage
+  quantity: number;
+  unitAmountCents: number | null;
+  netCents: number;
+  vatCents: number;
+  grossCents: number;
+  carrierShareGroup: CarrierShareGroup;
+  carrierAmountCents: number;
+};
+
+export type QuoteWarning = { code: "negative_margin"; group: CarrierShareGroup; legIndex: number | null };
+
+export type Quote = {
+  priceListId: string;
+  priceListVersion: number;
+  customerType: CustomerType;
+  /** D3: private customers see gross prices, businesses net + VAT. Amounts are the same. */
+  display: "gross" | "net_plus_vat";
+  vatRateBp: number;
+  lines: QuoteLine[];
+  subtotalCents: number; // net
+  vatCents: number;
+  totalCents: number; // gross = amount charged in Stripe
+  carrierAmountCents: number;
+  carrierAmountByLegCents: number[];
+  storageType: StorageType | null;
+  isUrgentByLeg: boolean[];
+  warnings: QuoteWarning[];
+};
+
+export type PricingError =
+  | { code: "pickup_province"; legIndex: number; province: string }
+  | { code: "max_distance"; legIndex: number; distanceM: number; maxDistanceM: number }
+  | { code: "too_soon"; legIndex: number }
+  | { code: "vehicle_not_priced"; legIndex: number; vehicleTypeId: string }
+  | { code: "service_unavailable"; service: "porters" | "packing" | "storage" }
+  | { code: "invalid_input"; message: string };
+
+export type PriceResult = { ok: true; quote: Quote } | { ok: false; error: PricingError };
