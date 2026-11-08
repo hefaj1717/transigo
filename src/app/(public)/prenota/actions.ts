@@ -7,7 +7,8 @@ import { billingDetails, businessBillingSchema, contactsSchema, fieldErrors, pri
 import { bookingErrorMessage, bookingErrorStep, type BookingStep } from "@/lib/booking/messages";
 import { buildOrderPayload } from "@/lib/booking/order-payload";
 import { toPublicQuote, type PublicQuote } from "@/lib/booking/public-quote";
-import { loadBookingOptions, loadStoredQuote, quoteBooking, rehydrateLegs, type ServerQuote } from "@/lib/booking/server";
+import { loadBookingOptions, loadFleet, loadStoredQuote, quoteBooking, rehydrateLegs, vehicleCheck, type ServerQuote } from "@/lib/booking/server";
+import { loadPricingConfig } from "@/lib/pricing/load";
 import { priceRelevantKey, wizardStateSchema } from "@/lib/booking/state";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -88,13 +89,21 @@ export async function submitBooking(raw: unknown): Promise<SubmitResult> {
       };
     }
 
-    // 4. Minimum lead time is checked against the confirmation time, not the quote time (D50, D76).
+    // 4. Vehicle check on current vehicle data (D84): a blocked vehicle can never be booked.
+    const config = await loadPricingConfig(db);
+    const check = vehicleCheck(state, await loadFleet(db, config));
+    const blocked = check.byVehicle[quote.input.vehicleTypeId]?.blocked ?? [];
+    if (blocked.length || !check.byVehicle[quote.input.vehicleTypeId]) {
+      return { status: "error", message: blocked[0] ?? "Il veicolo scelto non è disponibile. Scegline un altro.", step: "veicolo" };
+    }
+
+    // 5. Minimum lead time is checked against the confirmation time, not the quote time (D50, D76).
     const legs = rehydrateLegs(quote.input);
     if (legs.some((l) => l.windowStart.getTime() - now.getTime() < options.minLeadHours * 3_600_000)) {
       return { status: "error", message: bookingErrorMessage({ code: "too_soon", legIndex: 0 }, errorContext), step: "data" };
     }
 
-    // 5. Billing snapshot (D36) and terms version (D42).
+    // 6. Billing snapshot (D36) and terms version (D42).
     const [{ data: profile, error: profileError }, { data: settings, error: settingsError }] = await Promise.all([
       db.from("profiles").select("first_name, last_name, email").eq("id", ctx.userId).single(),
       db.from("settings").select("terms_version").single(),
@@ -120,6 +129,11 @@ export async function submitBooking(raw: unknown): Promise<SubmitResult> {
     payload.items_count = state.goods.itemsCount;
     payload.weight_kg = state.goods.weightKg;
     payload.goods_dimensions_note = state.goods.dimensionsNote.trim() || null;
+    payload.largest_item_length_cm = state.goods.largestItem.lengthCm;
+    payload.largest_item_width_cm = state.goods.largestItem.widthCm;
+    payload.largest_item_height_cm = state.goods.largestItem.heightCm;
+    payload.pallets_count = state.goods.palletsCount;
+    payload.load_category = state.goods.loadCategory;
 
     const { data, error } = await db.rpc("create_order", { p: payload });
     if (error) {

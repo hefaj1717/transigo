@@ -7,6 +7,8 @@ import { isIsoDate, TIME_WINDOWS } from "./windows";
 
 export const WIZARD_STORAGE_KEY = "transigo.booking.v1";
 
+const dimension = z.number().int().min(1).max(2_000).nullable(); // cm
+
 const isoDate = z.string().refine(isIsoDate, { error: "Data non valida" });
 
 const placeChoice = z.object({
@@ -33,8 +35,14 @@ export const wizardStateSchema = z.object({
   goods: z.object({
     description: z.string().max(2000),
     itemsCount: z.number().int().min(1).max(10_000).nullable(),
-    weightKg: z.number().int().min(1).max(50_000).nullable(),
+    weightKg: z.number().int().min(1).max(50_000).nullable(), // total, indicative (D86)
     dimensionsNote: z.string().max(500),
+    // D83, D86 — defaults keep states saved before these fields existed valid
+    loadCategory: z.enum(PORTER_PACKAGE_CODES).nullable().default(null), // null = not a move
+    largestItem: z
+      .object({ lengthCm: dimension, widthCm: dimension, heightCm: dimension })
+      .default({ lengthCm: null, widthCm: null, heightCm: null }),
+    palletsCount: z.number().int().min(1).max(100).nullable().default(null), // EUR pallets
   }),
   /** Porters at pickup (leg 1) and — with storage only — at delivery (leg 2), D74. */
   portersPickup: porterChoice.nullable(),
@@ -50,7 +58,8 @@ export const wizardStateSchema = z.object({
     .nullable(),
 });
 
-export type WizardState = z.infer<typeof wizardStateSchema>;
+export type WizardState = z.output<typeof wizardStateSchema>;
+export type WizardStateInput = z.input<typeof wizardStateSchema>;
 export type PlaceChoice = z.infer<typeof placeChoice>;
 export type PorterChoice = z.infer<typeof porterChoice>;
 
@@ -62,7 +71,15 @@ export const EMPTY_WIZARD_STATE: WizardState = {
   pickupDate: null,
   pickupWindow: null,
   urgent: false,
-  goods: { description: "", itemsCount: null, weightKg: null, dimensionsNote: "" },
+  goods: {
+    description: "",
+    itemsCount: null,
+    weightKg: null,
+    dimensionsNote: "",
+    loadCategory: null,
+    largestItem: { lengthCm: null, widthCm: null, heightCm: null },
+    palletsCount: null,
+  },
   portersPickup: null,
   portersDelivery: null,
   vehicleTypeId: null,
@@ -99,4 +116,14 @@ export function priceRelevantKey(state: WizardState): string {
     state.packingItems,
     state.storage ? [state.storage.returnDate, state.storage.returnWindow, state.storage.pallets] : null,
   ]);
+}
+
+/** What the vehicle check needs from the wizard state (D82–D86). */
+export function loadNeeds(state: WizardState) {
+  return {
+    weightKg: state.goods.weightKg,
+    largestItem: state.goods.largestItem,
+    pallets: state.goods.palletsCount,
+    loadCategory: state.goods.loadCategory,
+  };
 }

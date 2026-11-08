@@ -548,7 +548,7 @@ describe("payload from the booking code is accepted by create_order (TS ↔ SQL)
       delivery: { placeId: "place-bbbbbbbbbb", label: "B", floor: 0, hasElevator: true },
       pickupDate: "2026-12-01",
       pickupWindow: "10-12",
-      goods: { description: "Trasloco bilocale", itemsCount: 30, weightKg: null, dimensionsNote: "" },
+      goods: { ...EMPTY_WIZARD_STATE.goods, description: "Trasloco bilocale", itemsCount: 30, loadCategory: "bilocale", largestItem: { lengthCm: 220, widthCm: 90, heightCm: 85 }, palletsCount: 2 },
       portersPickup: { packageCode: "bilocale" },
       portersDelivery: { packageCode: "monolocale", count: 3 },
       packingItems: 4,

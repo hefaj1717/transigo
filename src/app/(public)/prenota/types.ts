@@ -1,6 +1,7 @@
 // Types shared by the wizard's client components (no server code here).
 import type { BookingError, BookingStep } from "@/lib/booking/messages";
 import type { PublicPorterTerms, PublicQuote } from "@/lib/booking/public-quote";
+import type { VehicleCheck } from "@/lib/booking/server";
 
 export type WizardSession =
   | { kind: "anonymous" }
@@ -18,6 +19,7 @@ export type QuoteResponse =
       customerType: "private" | "business";
       distancesKm: number[];
       vehicles: VehiclePriceView[];
+      fit: VehicleCheck;
       porters: PublicPorterTerms[];
       selected: { quoteId: string; validUntil: string; quote: PublicQuote } | null;
     }

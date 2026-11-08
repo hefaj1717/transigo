@@ -20,7 +20,7 @@ const state = (patch: Partial<WizardState> = {}): WizardState => ({
   delivery: { placeId: "place-bbbbbbbbbb", label: "Via Po 2, Torino", floor: 1, hasElevator: false },
   pickupDate: "2026-11-11",
   pickupWindow: "10-12",
-  goods: { description: "Divano", itemsCount: 1, weightKg: 80, dimensionsNote: "" },
+  goods: { ...EMPTY_WIZARD_STATE.goods, description: "Divano", itemsCount: 1, weightKg: 80 },
   vehicleTypeId: "00000000-0000-4000-8000-000000000001",
   ...patch,
 });
@@ -210,6 +210,14 @@ describe("wizard state (D78)", () => {
   it("holds no contact or billing fields", () => {
     const keys = Object.keys(wizardStateSchema.shape);
     for (const forbidden of ["contacts", "billing", "fiscalCode", "phone", "email", "name"]) expect(keys).not.toContain(forbidden);
+  });
+
+  it("a state saved before the goods fields of D86 still loads, with empty values", () => {
+    const old = JSON.parse(JSON.stringify(state()));
+    delete old.goods.loadCategory;
+    delete old.goods.largestItem;
+    delete old.goods.palletsCount;
+    expect(parseStoredState(JSON.stringify(old))?.goods).toMatchObject({ loadCategory: null, largestItem: { lengthCm: null, widthCm: null, heightCm: null }, palletsCount: null });
   });
 
   it("parseStoredState drops anything invalid", () => {

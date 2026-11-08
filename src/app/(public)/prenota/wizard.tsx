@@ -400,7 +400,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
                   >
                     <span className="block font-semibold text-zinc-900">{v.nameIt}</span>
                     <span className="block text-xs text-zinc-500">
-                      {[v.volumeM3 ? `${v.volumeM3.toLocaleString("it-IT")} m³` : null, v.payloadKg ? `${v.payloadKg} kg` : null].filter(Boolean).join(" · ")}
+                      {[v.volumeDm3 ? `${(v.volumeDm3 / 1000).toLocaleString("it-IT")} m³` : null, v.payloadKg ? `${v.payloadKg} kg` : null].filter(Boolean).join(" · ")}
                     </span>
                     <span className="mt-2 block">
                       {price && "headlineCents" in price ? <Headline cents={price.headlineCents} display={display} /> : unavailable ? <span className="text-sm text-zinc-500">Non disponibile</span> : <span className="text-sm text-zinc-400">{quoting ? "Calcolo…" : "—"}</span>}

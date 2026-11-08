@@ -8,7 +8,16 @@ import type { PorterPackageCode, PricingConfig, Quote, StorageBillingUnit } from
 import { planLegs, priceInputFor, type Endpoint, type ResolvedLeg, type WarehousePoint } from "./build";
 import type { BookingError } from "./messages";
 import { headlineCents, toPublicQuote, type PublicPorterTerms, type PublicQuote } from "./public-quote";
-import { priceRelevantKey, type WizardState } from "./state";
+import { loadNeeds, priceRelevantKey, type WizardState } from "./state";
+import {
+  assessVehicles,
+  belowMinimumText,
+  blockText,
+  NO_VEHICLE_FITS,
+  recommendationText,
+  type CategoryMinimums,
+  type VehicleCapacity,
+} from "./vehicle-fit";
 
 // Server side of the booking wizard (D72, D76). Reads price tables and settings with the service-role
 // client (D59) — callers pass createServiceClient(). Places and routes are always resolved here; the
@@ -20,7 +29,8 @@ import { priceRelevantKey, type WizardState } from "./state";
 
 export type BookingOptions = {
   available: boolean; // false: no active price list (wizard shows a message)
-  vehicles: { id: string; nameIt: string; payloadKg: number | null; volumeM3: number | null }[];
+  /** Active, priced vehicle types with their capacity (D81), smallest first. */
+  vehicles: (VehicleCapacity & { volumeDm3: number | null })[];
   porterPackages: { code: PorterPackageCode; labelIt: string; persons: number; includedHours: number }[];
   packingAvailable: boolean;
   storage: { available: boolean; billingUnit: StorageBillingUnit; warehouseCity: string | null };
@@ -76,25 +86,11 @@ export async function loadBookingOptions(db: SupabaseClient): Promise<BookingOpt
     };
   }
 
-  const [types, warehouse, validMinutes] = await Promise.all([
-    db.from("vehicle_types").select("id, payload_kg, cargo_volume_dm3, sort_order, size_rank").eq("is_active", true).order("sort_order").order("size_rank"),
-    loadActiveWarehouse(db),
-    quoteValidMinutes(db),
-  ]);
-  if (types.error) throw types.error;
-
-  const priced = new Map(config.vehicleRates.map((r) => [r.vehicleTypeId, r]));
+  const [fleet, warehouse, validMinutes] = await Promise.all([loadFleet(db, config), loadActiveWarehouse(db), quoteValidMinutes(db)]);
   const perPallet = config.storageBillingUnit === "pallet_day";
   return {
     available: true,
-    vehicles: (types.data ?? [])
-      .filter((t) => priced.has(t.id))
-      .map((t) => ({
-        id: t.id,
-        nameIt: priced.get(t.id)!.nameIt,
-        payloadKg: t.payload_kg,
-        volumeM3: t.cargo_volume_dm3 === null ? null : t.cargo_volume_dm3 / 1000,
-      })),
+    vehicles: fleet.vehicles,
     porterPackages: enabled(config, "porter_hour")
       ? config.porterPackages.filter((p) => p.isEnabled).map((p) => ({ code: p.code, labelIt: PORTER_PACKAGE_LABEL[p.code], persons: p.portersCount, includedHours: p.includedHours }))
       : [],
@@ -107,6 +103,69 @@ export async function loadBookingOptions(db: SupabaseClient): Promise<BookingOpt
     minLeadHours: config.minBookingLeadHours,
     maxDistanceKm: Math.floor(config.maxRouteDistanceM / 1000),
     quoteValidMinutes: validMinutes,
+  };
+}
+
+/**
+ * Vehicles the customer can book (active and priced in `config`), with capacities (D81), and the minimum
+ * vehicle per load category (D83). Always read fresh: the vehicle check uses current data (D84).
+ */
+export async function loadFleet(
+  db: SupabaseClient,
+  config: PricingConfig,
+): Promise<{ vehicles: (VehicleCapacity & { volumeDm3: number | null })[]; minimums: CategoryMinimums }> {
+  const [types, minimums] = await Promise.all([
+    db
+      .from("vehicle_types")
+      .select("id, size_rank, payload_kg, cargo_length_cm, cargo_width_cm, cargo_height_cm, cargo_volume_dm3, euro_pallets")
+      .eq("is_active", true)
+      .order("size_rank"),
+    db.from("porter_package_min_vehicle").select("package_code, vehicle_type_id"),
+  ]);
+  if (types.error) throw types.error;
+  if (minimums.error) throw minimums.error;
+  const priced = new Map(config.vehicleRates.map((r) => [r.vehicleTypeId, r]));
+  return {
+    vehicles: (types.data ?? [])
+      .filter((t) => priced.has(t.id))
+      .map((t) => ({
+        id: t.id,
+        nameIt: priced.get(t.id)!.nameIt,
+        sizeRank: t.size_rank,
+        payloadKg: t.payload_kg,
+        lengthCm: t.cargo_length_cm,
+        widthCm: t.cargo_width_cm,
+        heightCm: t.cargo_height_cm,
+        euroPallets: t.euro_pallets,
+        volumeDm3: t.cargo_volume_dm3,
+      })),
+    minimums: Object.fromEntries((minimums.data ?? []).map((m) => [m.package_code, m.vehicle_type_id])) as CategoryMinimums,
+  };
+}
+
+export type VehicleCheck = {
+  recommended: { vehicleTypeId: string; reason: string } | null;
+  /** Per vehicle: why it cannot be chosen (D84) and a warning below the category minimum (D83). */
+  byVehicle: Record<string, { blocked: string[]; warning: string | null }>;
+  noneFits: string | null;
+};
+
+/** Runs the vehicle check (D82–D85) and turns it into Italian texts for the wizard. */
+export function vehicleCheck(state: WizardState, fleet: Awaited<ReturnType<typeof loadFleet>>): VehicleCheck {
+  const needs = loadNeeds(state);
+  const fit = assessVehicles(fleet.vehicles, needs, fleet.minimums);
+  const byVehicle: VehicleCheck["byVehicle"] = {};
+  fit.assessments.forEach((a, i) => {
+    const v = fleet.vehicles[i];
+    byVehicle[a.vehicleTypeId] = {
+      blocked: a.blockedBy.map((r) => blockText(r, v)),
+      warning: a.belowCategoryMinimum && needs.loadCategory ? belowMinimumText(needs.loadCategory) : null,
+    };
+  });
+  return {
+    recommended: fit.recommended ? { vehicleTypeId: fit.recommended.vehicleTypeId, reason: recommendationText(fit.recommended.reason) } : null,
+    byVehicle,
+    noneFits: fit.recommended ? null : NO_VEHICLE_FITS,
   };
 }
 
@@ -165,6 +224,8 @@ export type QuoteOutcome =
       ok: true;
       distancesKm: number[];
       vehicles: VehiclePrice[];
+      /** Recommendation and blocks (D82–D85). */
+      fit: VehicleCheck;
       /** Porter terms (same for every vehicle), for the sentence under the porter choice (D67, D68). */
       porters: PublicPorterTerms[];
       /** Only when a priced vehicle is selected. */
@@ -244,6 +305,9 @@ export async function quoteBooking(
       config,
     );
 
+  const fit = vehicleCheck(state, await loadFleet(db, config));
+  const isBlocked = (id: string) => (fit.byVehicle[id]?.blocked.length ?? 0) > 0;
+
   const vehicles: VehiclePrice[] = [];
   let anyQuote: Quote | null = null;
   let selectedQuote: Quote | null = null;
@@ -255,7 +319,8 @@ export async function quoteBooking(
       continue;
     }
     anyQuote ??= r.quote;
-    if (rate.vehicleTypeId === state.vehicleTypeId) selectedQuote = r.quote;
+    // A blocked vehicle (D84) never gets a stored quote, so it cannot be booked.
+    if (rate.vehicleTypeId === state.vehicleTypeId && !isBlocked(rate.vehicleTypeId)) selectedQuote = r.quote;
     vehicles.push({ vehicleTypeId: rate.vehicleTypeId, headlineCents: headlineCents(r.quote) });
   }
   if (!anyQuote) return fail({ code: "pricing_unavailable" });
@@ -289,6 +354,7 @@ export async function quoteBooking(
       ok: true,
       distancesKm: legs.map((l) => Math.ceil(l.distanceM / 1000)),
       vehicles,
+      fit,
       porters: toPublicQuote(anyQuote).porters,
       selected: server ? { quoteId: server.quoteId, validUntil: server.validUntil.toISOString(), quote: toPublicQuote(server.quote) } : null,
     },
