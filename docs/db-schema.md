@@ -792,6 +792,7 @@ Weryfikacja po `db:push`: konto testowe `cliente` i `padroncino` przez rejestrac
 - **Przesunięte:** `order_internal_notes` → panel admina zleceń (Etap 6/7); `message_templates` → szablony w kodzie (D93), edycja przez admina później; `notification_log` → `email_outbox` dla maili, SMS w Etapie 5; `notification_channel` razem z SMS.
 
 ### Etap 4 — PWA przewoźnika
+- **Część 1 (migracja `20261109120000_carrier_onboarding`, D97–D103):** enumy `carrier_document_scope`, `carrier_document_expiry`; tabela `carrier_document_types` (konfiguracja typów, odczyt dla zalogowanych, zapis tylko migracją); `carrier_documents` + `file_name`, `mime_type`, `size_bytes`, format i unikalność `storage_path`, trigger `validate_carrier_document()` (reguły wg typu); `carrier_vehicles.payload_kg` not null, format `plate`; `carriers` + `submitted_at`, `decided_at`, `decided_by` (🔒); funkcje `carrier_onboarding_missing()`, `submit_carrier_for_review()`, `decide_carrier_review()` (tylko service role). Testy: `tests/rls/carrier-onboarding.test.ts`.
 - **Enumy:** `photo_kind`, `carrier_invoice_status`, `order_issue_reason`, `order_issue_status`.
 - **Tabele:** `order_photos`, `delivery_proofs`, `carrier_invoices`, `order_issues` (D39).
 - **Funkcje (`SECURITY DEFINER`):** `is_active_carrier()` (D21), `available_jobs()` (D22, D29), `accept_job()`, `set_order_status()`, `complete_delivery()` (bez tworzenia wypłaty — dochodzi w Etapie 6).

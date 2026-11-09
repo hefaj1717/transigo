@@ -12,6 +12,14 @@ let carrierB: TestUser;
 let admin: TestUser;
 let blocked: TestUser;
 
+// Valid plate (D102): upper-case letters and digits.
+const plate = (prefix: string) => `${prefix}${randomUUID().replace(/-/g, "").slice(0, 6).toUpperCase()}`;
+// Valid document row (D98): {carrier}/{uuid}.pdf + file metadata.
+const doc = (carrierId: string, docType: string, extra: Record<string, unknown> = {}) => ({
+  carrier_id: carrierId, doc_type: docType, storage_path: `${carrierId}/${randomUUID()}.pdf`,
+  file_name: "documento.pdf", mime_type: "application/pdf", size_bytes: 1024, ...extra,
+});
+
 const vat = () => `IT${Math.floor(Math.random() * 1e11).toString().padStart(11, "0")}`;
 
 beforeAll(async () => {
@@ -224,7 +232,7 @@ describe("carrier_vehicles", () => {
   it("carrier adds own vehicle", async () => {
     const { data, error } = await carrierA.client
       .from("carrier_vehicles")
-      .insert({ carrier_id: carrierA.id, vehicle_type_id: vanSmallId, plate: `AA${randomUUID().slice(0, 5)}` })
+      .insert({ carrier_id: carrierA.id, vehicle_type_id: vanSmallId, plate: plate("AA"), payload_kg: 1000 })
       .select("id")
       .single();
     expect(error).toBeNull();
@@ -232,12 +240,12 @@ describe("carrier_vehicles", () => {
   });
   it("carrier cannot add a vehicle for another carrier", async () => {
     const { error } = await carrierA.client
-      .from("carrier_vehicles").insert({ carrier_id: carrierB.id, vehicle_type_id: vanSmallId, plate: `BB${randomUUID().slice(0, 5)}` });
+      .from("carrier_vehicles").insert({ carrier_id: carrierB.id, vehicle_type_id: vanSmallId, plate: plate("BB"), payload_kg: 1000 });
     expect(error).not.toBeNull();
   });
   it("carrier cannot self-approve a vehicle", async () => {
     const ins = await carrierA.client.from("carrier_vehicles").insert({
-      carrier_id: carrierA.id, vehicle_type_id: vanSmallId, plate: `CC${randomUUID().slice(0, 5)}`, approved_at: new Date().toISOString(),
+      carrier_id: carrierA.id, vehicle_type_id: vanSmallId, plate: plate("CC"), payload_kg: 1000, approved_at: new Date().toISOString(),
     });
     expect(ins.error).not.toBeNull();
     const upd = await carrierA.client.from("carrier_vehicles").update({ approved_at: new Date().toISOString() }).eq("id", vehicleId);
@@ -260,7 +268,7 @@ describe("carrier_vehicles", () => {
   });
   it("customer cannot add vehicles", async () => {
     const { error } = await clienteA.client
-      .from("carrier_vehicles").insert({ carrier_id: clienteA.id, vehicle_type_id: vanSmallId, plate: `DD${randomUUID().slice(0, 5)}` });
+      .from("carrier_vehicles").insert({ carrier_id: clienteA.id, vehicle_type_id: vanSmallId, plate: plate("DD"), payload_kg: 1000 });
     expect(error).not.toBeNull();
   });
   it("carrier cannot delete vehicles (deactivate instead)", async () => {
@@ -279,7 +287,7 @@ describe("carrier_documents (table)", () => {
   it("carrier registers a document in own folder", async () => {
     const { data, error } = await carrierA.client
       .from("carrier_documents")
-      .insert({ carrier_id: carrierA.id, doc_type: "insurance_rca", storage_path: `${carrierA.id}/rca.pdf`, expires_at: "2027-12-31" })
+      .insert(doc(carrierA.id, "driving_license", { expires_at: "2027-12-31" }))
       .select("id, review_status")
       .single();
     expect(error).toBeNull();
@@ -288,22 +296,22 @@ describe("carrier_documents (table)", () => {
   });
   it("carrier cannot point a document at another carrier's folder", async () => {
     const { error } = await carrierA.client
-      .from("carrier_documents").insert({ carrier_id: carrierA.id, doc_type: "identity_document", storage_path: `${carrierB.id}/id.pdf` });
+      .from("carrier_documents").insert(doc(carrierA.id, "transport_license", { storage_path: `${carrierB.id}/${randomUUID()}.pdf` }));
     expect(error).not.toBeNull();
   });
   it("carrier cannot link another carrier's vehicle", async () => {
     const { data: v } = await service.from("carrier_vehicles")
-      .insert({ carrier_id: carrierB.id, vehicle_type_id: (await service.from("vehicle_types").select("id").eq("code", "car").single()).data!.id, plate: `EE${randomUUID().slice(0, 5)}` })
+      .insert({ carrier_id: carrierB.id, vehicle_type_id: (await service.from("vehicle_types").select("id").eq("code", "car").single()).data!.id, plate: plate("EE"), payload_kg: 1000 })
       .select("id").single();
-    const { error } = await carrierA.client.from("carrier_documents").insert({
-      carrier_id: carrierA.id, vehicle_id: v!.id, doc_type: "vehicle_registration", storage_path: `${carrierA.id}/lib.pdf`,
-    });
+    const { error } = await carrierA.client.from("carrier_documents").insert(
+      doc(carrierA.id, "vehicle_registration", { vehicle_id: v!.id, expires_at: "2027-12-31" }),
+    );
     expect(error).not.toBeNull();
   });
   it("carrier cannot self-approve or edit a document", async () => {
-    const ins = await carrierA.client.from("carrier_documents").insert({
-      carrier_id: carrierA.id, doc_type: "driving_license", storage_path: `${carrierA.id}/dl.pdf`, review_status: "approved",
-    });
+    const ins = await carrierA.client.from("carrier_documents").insert(
+      doc(carrierA.id, "driving_license", { expires_at: "2027-12-31", review_status: "approved" }),
+    );
     expect(ins.error).not.toBeNull();
     const upd = await carrierA.client.from("carrier_documents").update({ expires_at: "2099-01-01" }).eq("id", docId);
     expect(upd.error).not.toBeNull();
