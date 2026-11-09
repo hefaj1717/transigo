@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { SignOutButton } from "@/components/sign-out-button";
 
 // Mobile-first frame of the carrier app (D104): sticky top bar in the brand colour, one narrow column,
 // room for the phone's safe areas (notch, home indicator). The bottom navigation comes with the
 // onboarding / jobs sections (Stage 4).
-export function CarrierShell({ title, children }: { title: string; children: ReactNode }) {
+export function CarrierShell({ title, children, back }: { title: string; children: ReactNode; back?: { href: string; label: string } }) {
   return (
     <div className="flex min-h-dvh flex-1 flex-col bg-zinc-50">
       <header className="sticky top-0 z-10 bg-[#0B3B8C] pt-[env(safe-area-inset-top)] text-white shadow">
@@ -17,6 +18,11 @@ export function CarrierShell({ title, children }: { title: string; children: Rea
         </div>
       </header>
       <main className="mx-auto w-full max-w-md flex-1 px-4 pt-5 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
+        {back ? (
+          <Link href={back.href} className="-ml-1 mb-2 inline-flex min-h-11 items-center gap-1 px-1 text-sm font-medium text-[#0B3B8C]">
+            <span aria-hidden>←</span> {back.label}
+          </Link>
+        ) : null}
         <h1 className="text-2xl font-semibold text-zinc-900">{title}</h1>
         <div className="mt-4 text-zinc-700">{children}</div>
       </main>

@@ -175,6 +175,20 @@ export const ONBOARDING_MSG = {
   generic: "Si è verificato un errore. Riprova più tardi.",
 } as const;
 
+/**
+ * Vehicles (D112): editable during onboarding and also when the account is active (a new vehicle, a change of
+ * type or payload — D107 then sends it back to the admin). Blocked while in review (D109) and when suspended.
+ */
+export function canEditVehicles(view: CarrierOnboardingView): boolean {
+  return canEditOnboarding(view) || view === "active";
+}
+
+/** Why a vehicle change is refused in this view (null = allowed). */
+export function vehicleEditBlock(view: CarrierOnboardingView): string | null {
+  if (canEditVehicles(view)) return null;
+  return view === "in_review" ? ONBOARDING_MSG.inReview : ONBOARDING_MSG.notEditable;
+}
+
 /** Why a change is refused in this view (null = allowed). */
 export function onboardingEditBlock(view: CarrierOnboardingView): string | null {
   if (canEditOnboarding(view)) return null;

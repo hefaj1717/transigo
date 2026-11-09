@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canEditOnboarding,
+  canEditVehicles,
   carrierOnboarding,
   carrierOnboardingView,
   describeMissing,
@@ -9,6 +10,7 @@ import {
   ONBOARDING_MSG,
   parseMissingCode,
   type CarrierOnboardingInput,
+  vehicleEditBlock,
 } from "./onboarding";
 
 const V1 = "11111111-1111-4111-8111-111111111111";
@@ -28,6 +30,12 @@ describe("carrierOnboardingView (D100, D109)", () => {
     expect(onboardingEditBlock("incomplete")).toBeNull();
     expect(onboardingEditBlock("in_review")).toBe(ONBOARDING_MSG.inReview);
     expect(onboardingEditBlock("active")).toBe(ONBOARDING_MSG.notEditable);
+  });
+  it("vehicles are also editable when active, not in review or suspended (D112)", () => {
+    for (const v of ["incomplete", "rejected", "active"] as const) expect(canEditVehicles(v)).toBe(true);
+    for (const v of ["in_review", "suspended", "missing"] as const) expect(canEditVehicles(v)).toBe(false);
+    expect(vehicleEditBlock("in_review")).toBe(ONBOARDING_MSG.inReview);
+    expect(vehicleEditBlock("suspended")).toBe(ONBOARDING_MSG.notEditable);
   });
 });
 

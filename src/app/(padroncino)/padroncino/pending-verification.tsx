@@ -1,5 +1,6 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { carrierOnboarding, carrierOnboardingView } from "@/lib/carriers/onboarding";
+import { canEditVehicles, carrierOnboarding, carrierOnboardingView } from "@/lib/carriers/onboarding";
 import type { CarrierStatus } from "@/lib/auth/routing";
 
 // Shown instead of the carrier panel while carriers.status <> 'active'.
@@ -31,16 +32,23 @@ export async function PendingVerification({ userId }: { userId: string }) {
           Per iniziare a ricevere corse completa i passaggi qui sotto. Il team Transigo verificherà i tuoi dati e attiverà l&apos;account.
         </p>
       )}
-      <ul className="mt-4 space-y-2">
+      <ul className="mt-2">
         {items.map((item) => {
           // If the check failed, show nothing as done (fail closed).
           const done = missingResult.error && item.key !== "approval" ? false : item.done;
+          // The documents screen comes with the next step of Stage 4.1.
+          const href = item.href && item.key !== "documents" && (item.key !== "vehicle" || canEditVehicles(view) || view === "in_review") ? item.href : null;
+          const label = (
+            <>
+              {item.label}
+              <span className="sr-only">{done ? " (completato)" : " (da completare)"}</span>
+            </>
+          );
           return (
             <li key={item.key} className="flex items-start gap-2 text-sm">
-              <span aria-hidden className={done ? "text-green-700" : "text-zinc-400"}>{done ? "✓" : "○"}</span>
-              <span className={done ? "text-zinc-700" : "text-zinc-900"}>
-                {item.label}
-                <span className="sr-only">{done ? " (completato)" : " (da completare)"}</span>
+              <span aria-hidden className={`min-h-11 py-3 ${done ? "text-green-700" : "text-zinc-400"}`}>{done ? "✓" : "○"}</span>
+              <span className={`py-3 ${done ? "text-zinc-700" : "text-zinc-900"}`}>
+                {href ? <Link href={href} className="font-medium text-[#0B3B8C] underline">{label}</Link> : label}
                 {!done && item.comingSoon ? <span className="ml-2 text-xs text-zinc-500">disponibile a breve</span> : null}
               </span>
             </li>

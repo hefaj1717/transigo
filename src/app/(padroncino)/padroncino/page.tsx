@@ -1,6 +1,8 @@
 import { Suspense } from "react";
 import { Loading } from "@/components/panel-shell";
-import { CarrierShell } from "@/components/padroncino/carrier-shell";
+import Link from "next/link";
+import { bigButtonSecondary, CarrierShell } from "@/components/padroncino/carrier-shell";
+import { CARRIER_PATHS } from "@/lib/carriers/onboarding";
 import { requireArea } from "@/lib/auth/session";
 import { carrierPanelView } from "@/lib/auth/routing";
 import { PendingVerification } from "./pending-verification";
@@ -29,6 +31,7 @@ async function Content() {
   return (
     <CarrierShell title={greeting}>
       <p>Il tuo account è attivo. A breve qui troverai le corse disponibili.</p>
+      <Link href={CARRIER_PATHS.vehicles} className={`${bigButtonSecondary} mt-6`}>I miei veicoli</Link>
     </CarrierShell>
   );
 }
