@@ -1,6 +1,5 @@
 import { Suspense, type ReactNode } from "react";
 import Link from "next/link";
-import { notFound } from "next/navigation";
 import { Loading } from "@/components/panel-shell";
 import { bigButton, bigButtonSecondary, CarrierShell } from "@/components/padroncino/carrier-shell";
 import { ContactTransigo, JobAmount, Notice, RouteList, Section, UrgentBadge } from "@/components/padroncino/job-views";
@@ -58,7 +57,9 @@ async function Content({ params, searchParams }: Pick<PageProps<"/padroncino/le-
       </CarrierShell>
     );
   }
-  if (!job) notFound();
+  // Not (or no longer) this carrier's job — e.g. an old link after "Rinuncia" or "Rimuovi padroncino". RLS returns
+  // nothing, so there is nothing to leak: an Italian notice instead of the framework's English 404.
+  if (!job) return <NotMine />;
 
   const back = { href: myJobsHref({ tab: job.tab }), label: "Le mie corse" };
   const confirmation = typeof esito === "string" ? ESITO[esito] : undefined;
@@ -173,6 +174,20 @@ async function Content({ params, searchParams }: Pick<PageProps<"/padroncino/le-
         ) : null}
 
         <Link href={back.href} className={bigButtonSecondary}>
+          Torna a «Le mie corse»
+        </Link>
+      </div>
+    </CarrierShell>
+  );
+}
+
+/** Shown for any id that is not the carrier's job (released, reassigned, someone else's, malformed). */
+function NotMine() {
+  return (
+    <CarrierShell title="Corsa non disponibile" back={{ href: JOB_PATHS.mine, label: "Le mie corse" }}>
+      <div className="space-y-4">
+        <Notice tone="info">{JOB_MSG.notAssigned}</Notice>
+        <Link href={JOB_PATHS.mine} className={bigButtonSecondary}>
           Torna a «Le mie corse»
         </Link>
       </div>

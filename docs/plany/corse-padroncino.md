@@ -1,5 +1,7 @@
 # Plan: ekrany kursów przewoźnika („Accetta la Corsa”, „Rinuncia”)
 
+**Zamknięty 2026-11-09** — wszystkie kroki zrobione. Otwarte sprawy przeniesione do CLAUDE.md (sekcja „Odłożone: PWA przewoźnika”) i D128.
+
 Zatwierdzony przez właściciela 2026-11-09. Po każdym kroku: testy, commit, push, krótkie podsumowanie „co sprawdzić” — i stop (nowa sesja zaczyna od tego pliku).
 
 ## Punkt wyjścia
@@ -64,12 +66,14 @@ Zatwierdzony przez właściciela 2026-11-09. Po każdym kroku: testy, commit, pu
   - „Rinuncia alla corsa” z potwierdzeniem, terminem (Europe/Rome) i blokadą przycisku; po terminie „Contatta Transigo” („Segnala un problema” D39 — w kroku realizacji);
   - `/padroncino` (aktywny): liczniki dostępnych i „Da fare”;
   - zawieszony (D116): na „Account sospeso” link i licznik „Le mie corse”.
-- [ ] **Krok 6 — przegląd w przeglądarce i dokumentacja**
-  - lokalnie na demo: przyjęcie → mail w outboxie, „già accettata” z drugiego konta, Rinuncia w obu wariantach, zawieszony przewoźnik;
-  - CLAUDE.md (odhaczone TODO, nowe TODO niżej), decyzje w `docs/spec.md` sekcja 0;
-  - widok na telefonie — do sprawdzenia przez właściciela.
+- [x] **Krok 6 — przegląd w przeglądarce i dokumentacja** — zrobione 2026-11-09.
+  - Przegląd kodu `a2cc49f..HEAD`: dane osobowe przed przyjęciem i po rezygnacji, service role dopiero po sesji i udanym RPC (id do maila czytane sesją przewoźnika), w `corse/actions.ts` tylko `acceptJobAction` i `releaseJobAction`, do UI tylko teksty `JOB_MSG` (bez błędów bazy), daty Europe/Rome i kwoty `formatCents` — bez problemów. Poprawione: stary link `/padroncino/le-mie-corse/[id]` (po rezygnacji / „Rimuovi padroncino”) zamiast angielskiego 404 pokazuje „Questa corsa non è più assegnata a te.”; statusy kursu w rodzaju żeńskim jak w „Storico” („Ritirata”, „Consegnata”, „Completata”); „Trasbordo” zamiast „Transbordo” w `jobs.ts`.
+  - Nowy test `tests/rls/carrier-job-history.test.ts` (rezygnacja i „Rimuovi padroncino” → drugi przewoźnik): poprzedni nie czyta nic ze zlecenia, nowy nie widzi firmy/pojazdów/dokumentów poprzedniego ani `audit_log`. **Znaleziona luka D128:** `order_status_history.changed_by` pokazuje nowemu przewoźnikowi UUID poprzedniego — `it.fails`, naprawa wymaga migracji (do decyzji).
+  - Przejście w przeglądarce (Playwright, 375 px, świeże seedy): przyjęcie 000011 → `order_assigned` w outboxie, „già accettata” u Galliego + odświeżona lista, 000014 bez „Rinuncia” z „Contatta Transigo”, 000015 „Puoi rinunciare fino alle 14:00 di venerdì 13 novembre.” → rezygnacja → mail `carrier_released_job` → stary adres z komunikatem → 000015 wraca u Galliego; Neri (zawieszony): blokada listy, rezygnacja z 000017 + mail.
+  - Decyzje D127, D128 w `docs/spec.md`; CLAUDE.md zaktualizowane.
+  - Widok na telefonie — do sprawdzenia przez właściciela (wynik testu po 4b nie został podany).
 
 ## TODO do przeniesienia do CLAUDE.md (krok 6)
 
 - ~~Brak drugiego `order_assigned`…~~ — przeniesione do CLAUDE.md jako jedno TODO „migracja klucza outboxu” (razem z `carrier_released_job` bez `order_id`).
-- Możliwa pętla przyjmij/zrezygnuj w oknie 15 min (blokowanie kursu przez jednego przewoźnika) — później licznik rezygnacji w panelu admina.
+- ~~Możliwa pętla przyjmij/zrezygnuj…~~ — przeniesione do CLAUDE.md.

@@ -180,7 +180,7 @@ export function routeLabel(stops: readonly RouteStop[]): string {
 }
 
 const STORAGE_LABEL: Record<StorageType, string> = {
-  transshipment: "Transbordo in magazzino",
+  transshipment: "Trasbordo in magazzino",
   short_term: "Deposito a breve termine",
   long_term: "Deposito a lungo termine",
 };
@@ -495,10 +495,11 @@ export function myJobsNotice(param: unknown): string | null {
 
 export const CARRIER_JOB_STATUS_LABEL: Record<string, string> = {
   assigned: "Da ritirare",
-  picked_up: "Ritirato",
+  // feminine: they describe "la corsa" (same words as "Storico" on the job page)
+  picked_up: "Ritirata",
   in_transit: "In viaggio",
-  delivered: "Consegnato",
-  completed: "Completato",
+  delivered: "Consegnata",
+  completed: "Completata",
 };
 
 // ---------------------------------------------------------------------------
