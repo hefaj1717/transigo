@@ -63,6 +63,20 @@ Uwagi techniczne:
 - **Małe kroki:** jedno zadanie naraz, po każdym działającym kroku commit, a po commicie `git push` na `origin` (prywatne repo `hefaj1717/transigo`).
 - **Gdy czegoś nie wiesz — pytaj, zamiast zgadywać.**
 
+## Odłożone: PWA przewoźnika (priorytet: najpierw demo dla klienta, 2026-11-09)
+
+Decyzje właściciela (D117–D121 w spec):
+- **Magazyn:** teraz model A (kurs = całe zlecenie, jeden przewoźnik na oba odcinki). Model B (kurs i wypłata per odcinek) **przed Etapem 7 i przed startem produkcyjnym** — do tego czasu kreator **bez „stoccaggio lungo termine”**.
+- **`payouts_enabled`** (D21) — dopiero w kroku Stripe Connect (D118).
+- **Rezygnacja:** opcja b (D121) — „Rinuncia” w ciągu 15 min od przyjęcia albo ≥ 48 h przed odbiorem; każda rezygnacja → e-mail do admina, kurs wraca na listę.
+- **Przed/po przyjęciu** (D119) i **dopasowanie pojazdu** (D120) zaakceptowane; na karcie kursu przed przyjęciem dystans w km i szacowany czas jazdy.
+
+Stan:
+- **Baza gotowa** (migracja `20261110100000_carrier_jobs.sql`, testy `tests/rls/carrier-jobs.test.ts`, w tym wyścig 2 i 5 przewoźników): `carrier_job_eligibility()`, `list_available_jobs()`, `accept_job()`, `release_job()`, blokada pojazdu w kursie (trigger). Funkcje działają w sesji przewoźnika (`auth.uid()`), nie service role.
+- **Do zrobienia po powrocie:** ekrany `/padroncino/corse` (+ `[id]` z „Accetta la Corsa”), `/padroncino/le-mie-corse` (+ „Rinuncia” z mailem do admina), Server Actions z testem „każdy eksport jako nie-przewoźnik”, seed z kursami (w tym kurs przypisany przewoźnikowi → ostrzeżenie D116 przy „Sospendi”, dopisać do `docs/testy-reczne/admin-padroncini.md`), `docs/testy-reczne/corse-padroncino.md`.
+- **TODO (krok Stripe Connect, D118):** lista i `accept_job()` wymagają `carriers.stripe_payouts_enabled` — migracja + test RLS.
+- Dalej (bez zmian): statusy w PWA, GPS, podpis i zdjęcia (Etap 4/5), „Segnala un problema” (D39), Stripe Connect, SMS.
+
 ## Struktura folderów (docelowa)
 
 ```
@@ -163,6 +177,7 @@ Uwagi techniczne:
     - **TODO (krok z listą kursów i „Accetta la Corsa”):** lista dostępnych kursów i przyjęcie wymagają `carriers.status = active` (D21) — w bazie, z testem RLS, że `suspended` (oraz `pending_review`, `rejected`) nie widzi listy i nie przyjmie kursu. Seed (`scripts/seed-local-carriers.mjs`) tworzy kurs przypisany przewoźnikowi (w toku) i ręcznie sprawdzamy ostrzeżenie o kursach w toku w `/admin/padroncini` przy „Sospendi” i u zawieszonego (D116) — dopisać do `docs/testy-reczne/admin-padroncini.md`.
     - **TODO (krok z realizacją kursu):** zmiana statusów, GPS, zdjęcia i podpis działają dla przypisanego kursu także przy `suspended` (test). Ekran „Account sospeso” pokazuje też kursy w toku.
     - **TODO (Etap 6):** warunki wypłaty (D4) nie sprawdzają statusu konta — test, że wypłata dla `suspended` idzie normalnie; wstrzymanie tylko ręczne.
+  - **Kursy dla przewoźnika — patrz sekcja „Odłożone: PWA przewoźnika” niżej.** Baza gotowa (migracja `carrier_jobs`), ekrany odłożone.
   - Pojazd przewoźnika musi spełniać wymagania zlecenia (waga, największy przedmiot, palety) przy „Accetta la Corsa”; prawo jazdy kat. C dla camion — do ustalenia (D87).
     - **TODO (krok z „Accetta la Corsa”):** blokada **w bazie** (nie tylko w UI) dezaktywacji pojazdu i zmiany typu lub ładowności, gdy pojazd jest przypisany do kursu w toku albo zaplanowanego.
   - Czas pracy tragarzy statusami (przyjazd na odbiór → załadowano, przyjazd na dostawę → rozładowano; bez jazdy), potwierdzenie podpisem klienta (D69).
@@ -170,6 +185,8 @@ Uwagi techniczne:
 - [ ] 6. E-faktury SDI i automatyczne wypłaty
   - Dopłata za nadgodziny tragarzy: link od admina, osobna e-faktura, kwota przewoźnika do wypłaty (D69). Przed etapem rozstrzygnąć otwartą kwestię D69 (wypłata, gdy klient nie zapłaci dopłaty).
 - [ ] 7. Magazyn i dashboard admina
+  - **TWARDE TODO (przed Etapem 7 i przed startem produkcyjnym, D117):** model B — każdy odcinek zlecenia z magazynem to osobny kurs (osobny przewoźnik, statusy per odcinek) z **osobną wypłatą per odcinek**. Do tego czasu kreator **nie oferuje** „stoccaggio lungo termine” (`long_term`).
 - [ ] 8. Testy end-to-end, dokumenty prawne, wdrożenie
   - Na stagingu „Confirm email” w Supabase Auth jest **wyłączone**; na produkcji musi być **włączone**, z własnym SMTP (Resend, D79).
+  - **Przed startem:** model B kursów per odcinek (D117, TODO w Etapie 7) — warunek startu.
   - **Przed startem** założyć osobny projekt Supabase na produkcję; obecny `bacabuzzevwwdxrswbnc` zostaje stagingiem (testy ręczne). Testy RLS działają lokalnie (D64).
