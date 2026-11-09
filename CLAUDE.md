@@ -128,7 +128,7 @@ Uwagi techniczne:
       - `/api/booking/quote` i `/api/maps/*` publiczne — przed produkcją rate limiting.
   - [ ] **2c. Strona publiczna**
   - **TODO przed Etapem 3** (maile z potwierdzeniem zamówienia): Resend + SMTP dla Supabase Auth, instrukcja w D79 (kupić domenę, DNS SPF/DKIM, klucz API, SMTP w Supabase, Rate Limits).
-- [ ] 3. Płatność klienta (Stripe Checkout + webhook) — **migracje na stagingu (2026-11-09); test E2E przeszedł (4242, 0002, 3155/3DS, „Paga ora”, ponowne wysłanie zdarzenia ignorowane); do ponownego sprawdzenia w bazie: „Annulla ordine” (brak śladu po pierwszym teście)**
+- [x] 3. Płatność klienta (Stripe Checkout + webhook) — **ukończony 2026-11-09** (D88–D96): migracje na stagingu; test E2E na stagingu: 4242, 0002 (odrzucona), 3155 (3D Secure), „Paga ora” po wyjściu z Checkout, „Annulla ordine” (zlecenie `expired`, sesja wygaszona w Stripe), `stripe events resend` → `[200]` bez zmian w bazie.
   - Powstało: migracje `payments_enum`, `payments` (`payments`, `refunds` — model, `stripe_events`, `email_outbox`, `orders.payment_due_at`, kolumny anulowania, funkcje `start_order_payment` / `confirm_order_payment` / `expire_*`); `src/lib/stripe/` (klucze tylko testowe), `src/lib/payments/` (parametry sesji, webhook, serwer, cron), `src/lib/notifications/` (adapter maili + szablon `order_paid`); `/api/webhooks/stripe`, `/api/cron/expire-orders`; `/cliente/ordini/[id]` („Paga ora”, „Annulla ordine”, „Pagamento in verifica”); `/admin/ordini`; testy jednostkowe + `tests/rls/payments.test.ts`.
   - Pamiętać:
     - `paid` ustawia **tylko** `confirm_order_payment()` z webhooka; powrót z Checkout niczego nie zmienia. `payments` zapisują wyłącznie funkcje w bazie (nawet service role nie ma `INSERT/UPDATE`).
