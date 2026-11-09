@@ -80,6 +80,8 @@ Test „dwóch kart” ma sens tylko na **tym samym** przewoźniku (ten sam `<TA
 
 ## D. Trasporti Neri (zawieszony)
 
+Zatwierdzanie pojazdów i dokumentów u zawieszonego przewoźnika jest **dozwolone** (D113, D114) — to droga powrotu (np. nowe RCA → ocena → Riattiva). Np. „Approva veicolo” po „Sospendi” (także z karty bez odświeżenia) przechodzi poprawnie.
+
 1. [ ] Na stronie: „1 documento è in attesa di verifica: valutali qui sotto prima di riattivare.”
 2. [ ] „Riattiva” → **odrzucone**: „Prima di riattivare valuta i documenti in attesa di verifica.”
 3. [ ] RCA pojazdu `NE<TAG>A`: „Approva documento” → „Documento approvato.” (bez maila).
