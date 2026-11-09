@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
+import { AUTH_MSG } from "@/lib/auth/errors";
 import { anon, createUser, deleteCreatedUsers, service, type TestUser } from "./helpers";
 
 // Stage 4 / part 1, step 4 — admin actions outside the review of a submission (D113–D115):
@@ -309,5 +310,138 @@ describe("set_carrier_suspension (D115)", () => {
     await run(suspension(user.id, admin.id, true, "Controllo"));
     await user.client.from("carriers").update({ status: "active", status_reason: null }).eq("profile_id", user.id);
     expect(await carrierRow(user.id)).toEqual({ status: "suspended", status_reason: "Controllo" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Server code behind the admin Server Actions (src/lib/carriers/admin-server.ts)
+// ---------------------------------------------------------------------------
+
+describe("admin-server: decisions, e-mails and audit", () => {
+  const APP = "https://transigo.example";
+  const deps = () => ({ admin: { userId: admin.id, email: admin.email }, serviceDb: service, appUrl: APP });
+  const outbox = (carrierId: string, template: string) =>
+    check(service.from("email_outbox").select("to_address, subject, text_body, status").eq("recipient_id", carrierId).eq("template_code", template));
+  let srv: typeof import("@/lib/carriers/admin-server");
+
+  beforeAll(async () => {
+    srv = await import("@/lib/carriers/admin-server");
+  });
+
+  async function submittedCarrier(): Promise<TestUser> {
+    const user = await createUser({ role: "padroncino" });
+    await run(service.from("carriers").insert({ profile_id: user.id, ...company() }));
+    await insertDoc(user, "transport_license");
+    await insertDoc(user, "driving_license", { expires_at: FUTURE });
+    await addVehicle(user);
+    await run(user.client.rpc("submit_carrier_for_review"));
+    return user;
+  }
+
+  it("Approva: active, audit carrier.approved, carrier_approved e-mail to the carrier's address; second decision refused", async () => {
+    const c = await submittedCarrier();
+    expect(await srv.decideCarrier(deps(), { id: c.id, decision: "approve" })).toEqual({ ok: true, message: "Padroncino approvato." });
+    expect((await carrierRow(c.id)).status).toBe("active");
+    expect(await lastAudit(c.id)).toMatchObject({ action: "carrier.approved", actor_id: admin.id, actor_email: admin.email, data: {} });
+    expect(await outbox(c.id, "carrier_approved")).toEqual([expect.objectContaining({ to_address: c.email, status: "captured_dev" })]);
+
+    const again = await srv.decideCarrier(deps(), { id: c.id, decision: "reject", reason: "Ripensamento" });
+    expect(again.ok).toBe(false);
+    expect(await outbox(c.id, "carrier_rejected")).toEqual([]);
+  });
+
+  it("Rifiuta: reason required; e-mail with the reason, audit without it", async () => {
+    const c = await submittedCarrier();
+    expect(await srv.decideCarrier(deps(), { id: c.id, decision: "reject", reason: "  " })).toMatchObject({ ok: false });
+    expect((await carrierRow(c.id)).status).toBe("pending_review");
+    expect((await srv.decideCarrier(deps(), { id: c.id, decision: "reject", reason: "Albo non leggibile" })).ok).toBe(true);
+    expect(await carrierRow(c.id)).toEqual({ status: "rejected", status_reason: "Albo non leggibile" });
+    const [mail] = await outbox(c.id, "carrier_rejected");
+    expect(mail.text_body).toContain("Albo non leggibile");
+    const entry = await lastAudit(c.id);
+    expect(entry.action).toBe("carrier.rejected");
+    expect(JSON.stringify(entry.data)).not.toContain("Albo");
+  });
+
+  it("Approva of an incomplete account names what is missing", async () => {
+    const c = await submittedCarrier();
+    const patente = (await check(service.from("carrier_documents").select("id").eq("carrier_id", c.id).eq("doc_type", "driving_license").single())).id;
+    await run(service.from("carrier_documents").update({ expires_at: PAST }).eq("id", patente));
+    expect(await srv.decideCarrier(deps(), { id: c.id, decision: "approve" })).toEqual({
+      ok: false, error: "La registrazione non è completa: Patente del titolare.",
+    });
+  });
+
+  it("Rifiuta documento: carrier_document_rejected with label, plate, reason and link to the vehicle", async () => {
+    const { user, vehicleId } = await activeCarrier();
+    const rca = await insertDoc(user, "insurance_rca", { vehicle_id: vehicleId, expires_at: FUTURE });
+    expect((await srv.reviewDocument(deps(), { id: rca, decision: "reject", reason: "Targa diversa" })).ok).toBe(true);
+    const plateValue = (await check(service.from("carrier_vehicles").select("plate").eq("id", vehicleId).single())).plate;
+    const [mail] = await outbox(user.id, "carrier_document_rejected");
+    expect(mail.subject).toBe(`Documento rifiutato: Assicurazione RCA del veicolo ${plateValue}`);
+    expect(mail.text_body).toContain("Targa diversa");
+    expect(mail.text_body).toContain(`${APP}/padroncino/veicoli/${vehicleId}#insurance_rca`);
+
+    expect(await srv.reviewDocument(deps(), { id: rca, decision: "approve" })).toEqual({ ok: false, error: "Il documento è già stato valutato. Ricarica la pagina." });
+  });
+
+  it("Approva documento: no e-mail", async () => {
+    const { user } = await activeCarrier();
+    const id = await insertDoc(user, "goods_insurance", { expires_at: FUTURE });
+    expect((await srv.reviewDocument(deps(), { id, decision: "approve" })).ok).toBe(true);
+    expect(await outbox(user.id, "carrier_document_rejected")).toEqual([]);
+  });
+
+  it("Approva veicolo: missing documents named with the plate", async () => {
+    const { user } = await activeCarrier();
+    const v = await addVehicle(user, false);
+    await insertDoc(user, "vehicle_registration", { vehicle_id: v, expires_at: FUTURE });
+    const plateValue = (await check(service.from("carrier_vehicles").select("plate").eq("id", v).single())).plate;
+    expect(await srv.approveVehicle(deps(), { id: v })).toEqual({
+      ok: false, error: `Il veicolo non ha tutti i documenti obbligatori validi: Assicurazione RCA (${plateValue}).`,
+    });
+    await insertDoc(user, "insurance_rca", { vehicle_id: v, expires_at: FUTURE });
+    expect((await srv.approveVehicle(deps(), { id: v })).ok).toBe(true);
+  });
+
+  it("Sospendi / Riattiva: e-mails, pending documents block Riattiva with a clear message", async () => {
+    const { user, vehicleId } = await activeCarrier();
+    expect(await srv.setSuspension(deps(), { id: user.id, decision: "suspend" })).toMatchObject({ ok: false });
+    expect((await srv.setSuspension(deps(), { id: user.id, decision: "suspend", reason: "RCA scaduta" })).ok).toBe(true);
+    expect((await outbox(user.id, "carrier_suspended"))[0].text_body).toContain("RCA scaduta");
+
+    const rca = await insertDoc(user, "insurance_rca", { vehicle_id: vehicleId, expires_at: FUTURE });
+    expect(await srv.setSuspension(deps(), { id: user.id, decision: "reactivate" })).toEqual({
+      ok: false, error: "Prima di riattivare valuta i documenti in attesa di verifica.",
+    });
+    await srv.reviewDocument(deps(), { id: rca, decision: "approve" });
+    expect((await srv.setSuspension(deps(), { id: user.id, decision: "reactivate" })).ok).toBe(true);
+    expect(await outbox(user.id, "carrier_reactivated")).toHaveLength(1);
+  });
+
+  it("Dati aziendali: changed fields only (audit), VAT taken → field error", async () => {
+    const { user } = await activeCarrier();
+    // Valid Italian VAT numbers for the form schema (the generated ones in the database are not).
+    const form = {
+      companyName: "Trasporti Test Srl", vatNumber: "00743110157", fiscalCode: "00743110157",
+      hqStreet: "Via Milano 2", hqCity: "Milano", hqPostalCode: "20100", hqProvince: "MI", sdiCode: "M5UXCR1", pec: "",
+    };
+    const res = await srv.updateCarrierCompany(deps(), user.id, form);
+    expect(res).toEqual({ ok: true, message: "Dati aziendali aggiornati.", changed: ["vat_number", "fiscal_code", "hq_street"] });
+    expect(await lastAudit(user.id)).toMatchObject({ action: "carrier.company_data_updated", data: { fields: ["vat_number", "fiscal_code", "hq_street"] } });
+    expect(await srv.updateCarrierCompany(deps(), user.id, form)).toEqual({ ok: true, message: "Nessuna modifica.", changed: [] });
+
+    expect(await srv.updateCarrierCompany(deps(), user.id, { ...form, vatNumber: "123" })).toMatchObject({ ok: false, errors: { vatNumber: expect.any(String) } });
+
+    const other = await activeCarrier();
+    expect((await srv.updateCarrierCompany(deps(), other.user.id, { ...form, vatNumber: "01234567897" })).ok).toBe(true);
+    expect(await srv.updateCarrierCompany(deps(), user.id, { ...form, vatNumber: "01234567897" })).toEqual({ ok: false, errors: { vatNumber: AUTH_MSG.vatTaken } });
+  });
+
+  it("a blocked admin's id is refused by the database even if it reached the server code", async () => {
+    const c = await submittedCarrier();
+    const res = await srv.decideCarrier({ ...deps(), admin: { userId: blockedAdmin.id, email: blockedAdmin.email } }, { id: c.id, decision: "approve" });
+    expect(res).toEqual({ ok: false, error: "Operazione non consentita." });
+    expect((await carrierRow(c.id)).status).toBe("pending_review");
   });
 });
