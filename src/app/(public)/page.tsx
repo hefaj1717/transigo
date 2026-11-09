@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { FAQS, HOME_FAQ_COUNT, HOW_IT_WORKS, SERVICES } from "@/lib/public/content";
-import { getPublicCatalog, type PublicVehicle } from "@/lib/public/server";
+import { getPublicCatalog } from "@/lib/public/server";
+import { Check, SectionTitle, VehicleGrid } from "@/components/site/ui";
 import { HeroForm } from "./hero-form";
 
 export const metadata: Metadata = {
@@ -75,10 +76,8 @@ export default async function Home() {
         <section className="mx-auto max-w-6xl px-4 py-16">
           <SectionTitle eyebrow="Veicoli" title="Il veicolo giusto per ogni carico" />
           <p className="mt-3 max-w-2xl text-zinc-600">Nella prenotazione ti consigliamo il veicolo adatto in base a peso, misure e numero di pallet.</p>
-          <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {catalog.vehicles.map((v) => (
-              <VehicleCard key={v.id} v={v} />
-            ))}
+          <div className="mt-8">
+            <VehicleGrid vehicles={catalog.vehicles} />
           </div>
         </section>
       ) : null}
@@ -121,47 +120,5 @@ export default async function Home() {
         </div>
       </section>
     </main>
-  );
-}
-
-function SectionTitle({ eyebrow, title, center = false }: { eyebrow: string; title: string; center?: boolean }) {
-  return (
-    <div className={center ? "text-center" : ""}>
-      <p className="text-sm font-semibold uppercase tracking-wide text-accent-600">{eyebrow}</p>
-      <h2 className="mt-2 text-3xl font-bold tracking-tight text-brand-900">{title}</h2>
-    </div>
-  );
-}
-
-const fmt = new Intl.NumberFormat("it-IT");
-
-function VehicleCard({ v }: { v: PublicVehicle }) {
-  const dims = v.lengthCm && v.widthCm && v.heightCm ? `${fmt.format(v.lengthCm)} × ${fmt.format(v.widthCm)} × ${fmt.format(v.heightCm)} cm` : null;
-  const rows: [string, string | null][] = [
-    ["Portata", v.payloadKg ? `${fmt.format(v.payloadKg)} kg` : null],
-    ["Vano di carico", dims],
-    ["Volume", v.volumeM3 ? `${fmt.format(v.volumeM3)} m³` : null],
-    ["Pallet EUR", v.euroPallets ? String(v.euroPallets) : null],
-  ];
-  return (
-    <div className="rounded-xl border border-zinc-200 p-5">
-      <h3 className="text-lg font-semibold text-brand-900">{v.name}</h3>
-      <dl className="mt-3 space-y-1 text-sm">
-        {rows.filter(([, value]) => value).map(([k, value]) => (
-          <div key={k} className="flex justify-between gap-4">
-            <dt className="text-zinc-500">{k}</dt>
-            <dd className="font-medium text-zinc-800">{value}</dd>
-          </div>
-        ))}
-      </dl>
-    </div>
-  );
-}
-
-function Check() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true" className="shrink-0 text-accent-400">
-      <path d="M4 10.5l4 4 8-9" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
   );
 }

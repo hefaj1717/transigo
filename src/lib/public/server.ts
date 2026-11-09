@@ -41,8 +41,12 @@ export type PublicCatalog = {
   portersAvailable: boolean;
   packingAvailable: boolean;
   storageAvailable: boolean;
+  /** Load categories with persons and hours included in the price (D67) — no prices. */
+  porterPackages: { code: string; label: string; persons: number; includedHours: number }[];
   /** Short-term storage limit (D117: no long-term storage offered for now). */
   storageMaxDays: number;
+  storageBillingUnit: "day" | "pallet_day";
+  warehouseCity: string | null;
   maxDistanceKm: number;
   minLeadHours: number;
 };
@@ -66,14 +70,17 @@ export async function getPublicCatalog(): Promise<PublicCatalog> {
         euroPallets: v.euroPallets,
       })),
       portersAvailable: o.porterPackages.length > 0,
+      porterPackages: o.porterPackages.map((p) => ({ code: p.code, label: p.labelIt, persons: p.persons, includedHours: p.includedHours })),
       packingAvailable: o.packingAvailable,
       storageAvailable: o.storage.available,
       storageMaxDays: o.storage.maxDays,
+      storageBillingUnit: o.storage.billingUnit,
+      warehouseCity: o.storage.warehouseCity,
       maxDistanceKm: o.maxDistanceKm,
       minLeadHours: o.minLeadHours,
     };
   } catch (e) {
     console.error("[public] catalog:", e instanceof Error ? e.message : e);
-    return { bookingAvailable: false, vehicles: [], portersAvailable: false, packingAvailable: false, storageAvailable: false, storageMaxDays: 0, maxDistanceKm: 0, minLeadHours: 0 };
+    return { bookingAvailable: false, vehicles: [], portersAvailable: false, porterPackages: [], packingAvailable: false, storageAvailable: false, storageMaxDays: 0, storageBillingUnit: "pallet_day", warehouseCity: null, maxDistanceKm: 0, minLeadHours: 0 };
   }
 }

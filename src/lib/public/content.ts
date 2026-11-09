@@ -94,3 +94,71 @@ export const FAQS: Faq[] = [
 
 /** Questions also shown on the home page. */
 export const HOME_FAQ_COUNT = 4;
+
+/** Service pages (/servizi/…). Draft texts — the owner reviews them. */
+export type ServiceDetail = {
+  title: string;
+  metaDescription: string;
+  lead: string;
+  includes: string[];
+  /** What the price depends on. */
+  pricing: string[];
+};
+
+export const SERVICE_DETAILS: Record<ServiceCode, ServiceDetail> = {
+  trasporto: {
+    title: "Trasporto",
+    metaDescription: "Trasporto di oggetti, mobili e merci con prezzo online. Scegli il veicolo, prenota e paga in pochi minuti.",
+    lead: "Dal singolo oggetto al carico completo. Inserisci il percorso, scegli il veicolo e conosci subito il prezzo.",
+    includes: [
+      "Ritiro e consegna agli indirizzi indicati, in una fascia oraria di 2 ore",
+      "Il veicolo adatto al carico: lo consigliamo noi in base a peso, misure e pallet",
+      "Trasportatore professionista con partita IVA, verificato da noi",
+      "Conferma di consegna con firma e foto",
+    ],
+    pricing: [
+      "Distanza del percorso e veicolo scelto",
+      "Supplemento per ritiro urgente, nel weekend o nei giorni festivi, calcolato in automatico",
+      "Supplemento per ogni piano senza ascensore, al ritiro e alla consegna",
+    ],
+  },
+  facchinaggio: {
+    title: "Facchinaggio",
+    metaDescription: "Facchini per carico e scarico, anche ai piani senza ascensore. Persone e ore incluse nel prezzo, prenotazione online.",
+    lead: "Facchini che caricano e scaricano per te, anche ai piani senza ascensore. Scegli la dimensione del carico: persone e ore di lavoro sono già nel prezzo.",
+    includes: [
+      "Carico al ritiro e scarico alla consegna",
+      "Numero di facchini adatto al carico, che puoi aumentare fino a 4",
+      "Ore di lavoro incluse nel prezzo, indicate prima del pagamento",
+      "L'autista non è conteggiato tra i facchini",
+    ],
+    pricing: [
+      "Dimensione del carico (persone e ore incluse)",
+      "Facchini aggiuntivi, se li scegli",
+      "Se il lavoro dura più delle ore incluse, ogni ora successiva iniziata è addebitata a persona, dopo una breve tolleranza: la tariffa è indicata nel preventivo",
+    ],
+  },
+  imballaggio: {
+    title: "Imballaggio",
+    metaDescription: "Servizio di imballaggio al ritiro: i tuoi oggetti protetti durante il trasporto. Si aggiunge con un clic alla prenotazione.",
+    lead: "Imballiamo i tuoi oggetti al momento del ritiro, così arrivano a destinazione come sono partiti.",
+    includes: [
+      "Imballaggio eseguito al ritiro, prima del carico",
+      "Si aggiunge con un clic durante la prenotazione",
+      "Prezzo chiaro, indicato nel preventivo",
+    ],
+    pricing: ["Numero di colli da imballare"],
+  },
+  "deposito-merci": {
+    title: "Deposito merci",
+    metaDescription: "Transbordo e deposito a breve termine nel nostro magazzino tra il ritiro e la consegna. Prezzo online, pagamento anticipato.",
+    lead: "Serve una sosta tra ritiro e consegna? Portiamo la merce nel nostro magazzino e la consegniamo nel giorno e nella fascia oraria che scegli tu.",
+    includes: [
+      "Transbordo: sosta breve in magazzino e consegna nello stesso giorno",
+      "Deposito a breve termine tra il ritiro e la consegna", // + max days, added by the page (D117: short term only)
+      "Ritiro, deposito e consegna in un unico ordine",
+      "Deposito pagato in anticipo per il periodo scelto",
+    ],
+    pricing: ["Giorni di deposito", "Trasporto al magazzino e dal magazzino alla consegna"], // + billing unit, added by the page
+  },
+};

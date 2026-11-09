@@ -73,11 +73,11 @@ Uwagi techniczne:
 - **Na czym skończyliśmy (2026-11-09):** demo dla admina gotowe lokalnie; migracja `admin_order_dispatch` **nie jest na stagingu** (dopiero razem ze stroną publiczną i panelem klienta, za zgodą). Nazwę projektu `bacabuzzevwwdxrswbnc` właściciel zmienia sam na „TransiGo staging”.
 - **Etap 2c — strona publiczna (od 2026-11-09, plan zatwierdzony; D124, D125):**
   - [x] Krok 1: layout `(public)` (nagłówek, menu mobilne, stopka z danymi prawnymi z `settings.company_*`), logo tekstowe i kolory `brand-*`/`accent-*` w `globals.css`, strona główna (hero z mini-formularzem → `/prenota`, usługi, „Come funziona”, pojazdy, „Diventa partner”, FAQ). `AddressField` przeniesione do `src/components/`. Treści w `src/lib/public/content.ts` (szkic do przeglądu właściciela).
-  - [ ] Krok 2: `/servizi` + 4 podstrony (deposito bez „lungo termine”, D117).
+  - [x] Krok 2: `/servizi` + `/servizi/trasporto|facchinaggio|imballaggio|deposito-merci` — wspólny szablon `src/components/site/service-page.tsx` (4 osobne foldery: w Next 16 z `cacheComponents` nie ma `dynamicParams`), teksty `SERVICE_DETAILS` w `content.ts`, dane z cennika (pojazdy, kategorie tragarzy, limit dni i jednostka magazynu) bez cen; usługa niedostępna w aktywnym cenniku → „non è prenotabile online” + link do kontaktu (logika `src/lib/public/services.ts` + testy). Magazyn tylko krótko (D117). Na stagingu facchinaggio i deposito są niedostępne (cennik v9 bez kategorii tragarzy, brak aktywnego magazynu).
   - [ ] Krok 3: `/come-funziona`, `/domande-frequenti`, `/diventa-partner`.
   - [ ] Krok 4: migracja `contact_requests` (zgoda właściciela 2026-11-09, z `privacy_accepted_at`, retencją 24 mies. i limitem na IP — D125), `/contatti`, `/admin/richieste`; lokalnie, na staging razem z panelem klienta.
   - [ ] Krok 5: formularz spoza obszaru w kreatorze. Krok 6: `/cookie` + baner „Ok”, metadata, `sitemap.ts`, `robots.ts`, `noindex` na stagingu. Krok 7: przegląd w przeglądarce, `docs/testy-reczne/strona-publiczna.md`.
-  - Linki do stron z kroków 2–6 do tego czasu dają 404.
+  - Linki do stron z kroków 3–6 do tego czasu dają 404.
 - Potem panel klienta (status zlecenia i historia dla klienta).
 
 ## Odłożone: PWA przewoźnika (priorytet: najpierw demo dla klienta, 2026-11-09)
