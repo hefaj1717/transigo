@@ -1,5 +1,6 @@
 import { Suspense } from "react";
-import { Loading, PanelShell } from "@/components/panel-shell";
+import { Loading } from "@/components/panel-shell";
+import { CarrierShell } from "@/components/padroncino/carrier-shell";
 import { requireArea } from "@/lib/auth/session";
 import { carrierPanelView } from "@/lib/auth/routing";
 import { PendingVerification } from "./pending-verification";
@@ -20,14 +21,14 @@ async function Content() {
 
   if (carrierPanelView(ctx) === "pending") {
     return (
-      <PanelShell title={greeting}>
+      <CarrierShell title={greeting}>
         <PendingVerification />
-      </PanelShell>
+      </CarrierShell>
     );
   }
   return (
-    <PanelShell title={greeting}>
+    <CarrierShell title={greeting}>
       <p>Il tuo account è attivo. A breve qui troverai le corse disponibili.</p>
-    </PanelShell>
+    </CarrierShell>
   );
 }
