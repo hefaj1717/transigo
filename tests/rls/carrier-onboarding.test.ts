@@ -1,11 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { CARRIER_DOCUMENT_TYPES } from "@/lib/carriers/document-types";
-import { anon, createUser, deleteCreatedUsers, service, type TestUser } from "./helpers";
+import { anon, createUser, deleteCreatedUsers, localSql, service, type TestUser } from "./helpers";
 
 // Stage 4 / part 1 — carrier onboarding and admin review (D97–D103):
 // document type configuration, type-dependent document rules, isolation between carriers,
-// carrier_onboarding_missing / submit_carrier_for_review / decide_carrier_review.
+// carrier_onboarding_missing / submit_carrier_for_review / decide_carrier_review, company data lock (D105).
 
 const FUTURE = "2099-12-31";
 const PAST = "2020-01-01";
@@ -397,5 +397,143 @@ describe("decide_carrier_review (D101)", () => {
     expect(error?.code).toBe("23514");
     expect(error?.details).toBe("document:driving_license");
     expect((await carrierRow(user.id)).status).toBe("pending_review");
+  });
+});
+
+describe("company data lock (D105)", () => {
+  const COMPANY_FIELDS = ["company_name", "vat_number", "fiscal_code", "pec", "sdi_code", "hq_street", "hq_city", "hq_postal_code", "hq_province"] as const;
+  // A valid new value per field (vat_number is unique, so generated).
+  const newValue = (f: (typeof COMPANY_FIELDS)[number]) =>
+    ({ company_name: "Nuova Ragione Srl", vat_number: vat(), fiscal_code: "VRDLGU80A01F205X", pec: "nuova@pec.it", sdi_code: "ABC1234",
+       hq_street: "Via Nuova 2", hq_city: "Torino", hq_postal_code: "10100", hq_province: "TO" })[f];
+  const updateOwn = (c: TestUser, patch: Record<string, unknown>) => c.client.from("carriers").update(patch).eq("profile_id", c.id).select("profile_id");
+  const adminUpdate = (carrierId: string, changes: unknown, adminId = admin.id) =>
+    service.rpc("admin_update_carrier_company", { p_carrier_id: carrierId, p_admin_id: adminId, p_changes: changes });
+  const auditRows = (carrierId: string) =>
+    check(service.from("audit_log").select("actor_id, actor_email, action, data").eq("entity_id", carrierId).eq("action", "carrier.company_data_updated").order("id"));
+
+  async function expectLocked(c: TestUser) {
+    for (const f of COMPANY_FIELDS) {
+      const { error } = await updateOwn(c, { [f]: newValue(f) });
+      expect(error?.code, f).toBe("42501");
+    }
+    const { error } = await service.from("carriers").update({ company_name: "Diretta Srl" }).eq("profile_id", c.id);
+    expect(error?.code, "service role").toBe("42501");
+  }
+
+  it("before submission the carrier edits its company data", async () => {
+    const c = await newCarrier();
+    for (const f of COMPANY_FIELDS) {
+      const { data, error } = await updateOwn(c, { [f]: newValue(f) });
+      expect(error, f).toBeNull();
+      expect(data, f).toHaveLength(1);
+    }
+  });
+
+  it("locked while waiting for review (submitted_at set)", async () => {
+    const { user } = await completeCarrier();
+    await check(user.client.rpc("submit_carrier_for_review"));
+    await expectLocked(user);
+  });
+
+  it("locked when active and when suspended", async () => {
+    const { user } = await completeCarrier();
+    await check(user.client.rpc("submit_carrier_for_review"));
+    await check(decide(user.id, admin.id, true));
+    await expectLocked(user);
+    await run(service.from("carriers").update({ status: "suspended" }).eq("profile_id", user.id));
+    await expectLocked(user);
+  });
+
+  it("editable again after a rejection; other columns stay untouched by the lock", async () => {
+    const { user } = await completeCarrier();
+    await check(user.client.rpc("submit_carrier_for_review"));
+    await check(decide(user.id, admin.id, false, "P.IVA errata"));
+    const { data, error } = await updateOwn(user, { vat_number: vat(), hq_city: "Bergamo" });
+    expect(error).toBeNull();
+    expect(data).toHaveLength(1);
+    // the service role may change the data directly while it is not locked
+    expect((await service.from("carriers").update({ hq_street: "Via Corretta 3" }).eq("profile_id", user.id)).error).toBeNull();
+  });
+
+  it("admin changes locked data through the function; audit_log has field names only", async () => {
+    const { user } = await completeCarrier();
+    await check(user.client.rpc("submit_carrier_for_review"));
+    await check(decide(user.id, admin.id, true));
+    const newVat = vat();
+
+    const changed = await check(adminUpdate(user.id, { vat_number: newVat, hq_city: "  Genova ", hq_province: "MI" }));
+    expect(changed).toEqual(["vat_number", "hq_city"]); // hq_province was already "MI"
+    const row = await check(service.from("carriers").select("vat_number, hq_city, hq_province").eq("profile_id", user.id).single());
+    expect(row).toEqual({ vat_number: newVat, hq_city: "Genova", hq_province: "MI" });
+
+    const audit = await auditRows(user.id);
+    expect(audit).toEqual([{ actor_id: admin.id, actor_email: admin.email, action: "carrier.company_data_updated", data: { fields: ["vat_number", "hq_city"] } }]);
+    expect(JSON.stringify(audit)).not.toContain(newVat);
+    expect(JSON.stringify(audit)).not.toContain("Genova");
+
+    // blank → null; nothing changed → no write and no audit entry
+    expect(await check(adminUpdate(user.id, { hq_street: "  " }))).toEqual(["hq_street"]);
+    expect((await check(service.from("carriers").select("hq_street").eq("profile_id", user.id).single())).hq_street).toBeNull();
+    expect((await adminUpdate(user.id, { hq_city: "Genova", pec: null, hq_street: "" })).data).toEqual([]);
+    expect(await auditRows(user.id)).toHaveLength(2);
+  });
+
+  it("the function accepts only company fields, text values and an active admin; only the server calls it", async () => {
+    const { user } = await completeCarrier();
+    for (const changes of [{ status: "active" }, { stripe_account_id: "acct_x" }, { submitted_at: null }, { company_name: 5 }, ["company_name"], "x"]) {
+      expect((await adminUpdate(user.id, changes)).error?.code, JSON.stringify(changes)).toBe("22023");
+    }
+    for (const id of [user.id, cliente.id, blockedAdmin.id, randomUUID()]) {
+      expect((await adminUpdate(user.id, { hq_city: "Pisa" }, id)).error?.code).toBe("42501");
+    }
+    for (const c of [admin.client, user.client, cliente.client, anon]) {
+      const { error } = await c.rpc("admin_update_carrier_company", { p_carrier_id: user.id, p_admin_id: admin.id, p_changes: { hq_city: "Pisa" } });
+      expect(error).not.toBeNull();
+    }
+    expect(await auditRows(user.id)).toEqual([]);
+  });
+
+  it("no session flag unlocks the data for the carrier or the service role (SQL level)", async () => {
+    const { user } = await completeCarrier();
+    await check(user.client.rpc("submit_carrier_for_review"));
+    const claims = JSON.stringify({ sub: user.id, role: "authenticated" });
+    const flags = `
+      select set_config('transigo.carrier_company_edit', 'on', true);
+      select set_config('transigo.carrier_company_edit', 'on', false);
+      select set_config('app.admin', 'true', true);`;
+
+    // carrier: the update targets its own visible row, so without the lock it would succeed
+    const asCarrier = localSql(`
+      begin;
+      ${flags}
+      select set_config('request.jwt.claims', '${claims}', true);
+      set local role authenticated;
+      update public.carriers set company_name = 'Flag Srl' where profile_id = '${user.id}';
+      rollback;`);
+    expect(asCarrier.ok).toBe(false);
+    expect(asCarrier.output).toContain("42501");
+
+    const asService = localSql(`
+      begin;
+      ${flags}
+      set local role service_role;
+      update public.carriers set company_name = 'Flag Srl' where profile_id = '${user.id}';
+      rollback;`);
+    expect(asService.ok).toBe(false);
+    expect(asService.output).toContain("42501");
+
+    // control: the same carrier session works on unlocked data (the SQL above is not failing for another reason)
+    await check(decide(user.id, admin.id, false, "controllo"));
+    const control = localSql(`
+      begin;
+      select set_config('request.jwt.claims', '${claims}', true);
+      set local role authenticated;
+      update public.carriers set company_name = 'Controllo Srl' where profile_id = '${user.id}' returning profile_id;
+      rollback;`);
+    expect(control.output).toContain(user.id);
+    expect(control.ok).toBe(true);
+
+    expect((await check(service.from("carriers").select("company_name").eq("profile_id", user.id).single())).company_name).toBe("Trasporti Test Srl");
   });
 });

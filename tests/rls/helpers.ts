@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { inject } from "vitest";
 import { assertLocalTarget } from "./target";
 
@@ -67,4 +68,20 @@ export async function profileRole(id: string) {
   const { data, error } = await service.from("profiles").select("role").eq("id", id).single();
   if (error) throw error;
   return data.role as string;
+}
+
+/**
+ * Runs SQL with psql inside the LOCAL database container (D64: never staging/production — the container
+ * belongs to this repo's local stack, project_id "TransiGo" in supabase/config.toml).
+ * For tests that need what the REST API cannot do (e.g. set_config + SET ROLE in one transaction).
+ * Returns psql's combined output; errors are printed with their SQLSTATE (VERBOSITY verbose).
+ */
+export function localSql(sql: string): { ok: boolean; output: string } {
+  const res = spawnSync(
+    "docker",
+    ["exec", "-i", "supabase_db_TransiGo", "psql", "-U", "postgres", "-d", "postgres", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=verbose"],
+    { input: sql, encoding: "utf8" },
+  );
+  if (res.error) throw res.error;
+  return { ok: res.status === 0, output: `${res.stdout}${res.stderr}` };
 }
