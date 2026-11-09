@@ -26,7 +26,13 @@ async function user(email, meta) {
   return { id: u.user.id, client: c };
 }
 let n = 0;
-const vat = () => `IT${String(10000000000 + Date.now() % 1e9 + ++n).slice(-11)}`;
+// Valid partita IVA (check digit as in src/lib/auth/italian-ids.ts), so the admin's company form saves as is.
+const vat = () => {
+  const d = String(Date.now() % 1e8).padStart(8, "0") + String(++n % 100).padStart(2, "0");
+  let sum = 0;
+  for (let i = 0; i < 10; i++) { let x = Number(d[i]); if (i % 2 === 1) { x *= 2; if (x > 9) x -= 9; } sum += x; }
+  return d + ((10 - (sum % 10)) % 10);
+};
 async function carrier(name, email) {
   const u = await user(email, { role: "padroncino", first_name: "Mario", last_name: name });
   await ok(service.from("carriers").insert({ profile_id: u.id, company_name: `Trasporti ${name} Srl`, vat_number: vat(), fiscal_code: "RSSMRA80A01H501U", hq_street: "Via Roma 1", hq_city: "Milano", hq_postal_code: "20100", hq_province: "MI", sdi_code: "M5UXCR1" }));
