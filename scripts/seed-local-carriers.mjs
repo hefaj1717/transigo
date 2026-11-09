@@ -1,88 +1,95 @@
 // Test carriers for manual checks of /admin/padroncini — LOCAL Supabase only (D64), never staging/production.
-// Usage: npm run db:local:start, then `node scripts/seed-local-carriers.mjs`. Keys come from `supabase status`
-// (no secrets in files). Prints the admin login and one carrier per state. npm run test:rls resets the local
-// database and removes these accounts — run this again afterwards.
-import { createRequire } from "node:module";
-import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
-const require = createRequire(import.meta.url);
-const { createClient } = require("@supabase/supabase-js");
-const status = JSON.parse(execFileSync("npx", ["supabase", "status", "-o", "json"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
-const url = status.API_URL;
-if (url !== "http://127.0.0.1:55321") throw new Error(`Refusing to seed ${url}: local Supabase only`);
-const env = { anon: status.ANON_KEY, service: status.SERVICE_ROLE_KEY };
-const opts = { auth: { persistSession: false, autoRefreshToken: false } };
-const service = createClient(url, env.service, opts);
-const ok = async (p) => { const r = await p; if (r.error) throw new Error(JSON.stringify(r.error)); return r.data; };
-const PW = "Prova-12345!";
-const FUTURE = "2099-12-31";
-const vanId = (await ok(service.from("vehicle_types").select("id").eq("code", "van_medium").single())).id;
-const pdf = new Blob(["%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF"], { type: "application/pdf" });
+// Usage: npm run db:local:start, npm run db:local:reset, then npm run db:local:seed-carriers.
+// Running it again does not add anything: it prints the existing carriers (and sets the seed password again).
+// npm run test:rls resets the local database and removes these accounts — run this again afterwards.
+// Guards, password and helpers: scripts/lib/local-seed.mjs. Manual test: docs/testy-reczne/admin-padroncini.md.
+import {
+  ADMIN_EMAIL, approveCarrier, carrierAccount, companyDocs, doc, existingUserId, FUTURE, ok, order, pay,
+  printPasswordHint, privateCustomer, seedAdmin, service, user, vehicle,
+} from "./lib/local-seed.mjs";
 
-async function user(email, meta) {
-  const u = await ok(service.auth.admin.createUser({ email, password: PW, email_confirm: true, user_metadata: meta }));
-  const c = createClient(url, env.anon, opts);
-  await ok(c.auth.signInWithPassword({ email, password: PW }));
-  return { id: u.user.id, client: c };
+const CARRIERS = [
+  // [label, last name, e-mail]
+  ["In verifica", "Verdi", "verdi@example.com"],
+  ["In verifica", "Viola", "viola@example.com"],
+  ["Attivo", "Bianchi", "bianchi@example.com"],
+  ["Sospeso", "Neri", "neri@example.com"],
+  ["Incompleto", "Gialli", "gialli@example.com"],
+  ["Rifiutato", "Rosa", "rosa@example.com"],
+];
+const CUSTOMER_EMAIL = "cliente-padroncini@example.com";
+const EMAILS = [...CARRIERS.map(([, , e]) => e), CUSTOMER_EMAIL];
+
+async function printSummary() {
+  console.log(`Admin: ${ADMIN_EMAIL}`);
+  for (const [label, name, email] of CARRIERS) {
+    const id = await existingUserId(email);
+    console.log(`${label.padEnd(11)} Trasporti ${name} Srl`.padEnd(36) + `${email.padEnd(22)} /admin/padroncini/${id}`);
+  }
+  console.log("Targhe: VE100AA (Verdi), VI100AA (Viola), BI100AA / BI100BB / BI100CC (Bianchi), NE100AA (Neri), RO100AA (Rosa)");
+  const jobs = await ok(service.from("orders").select("order_number, status, carriers:carrier_id(company_name)").eq("customer_id", await existingUserId(CUSTOMER_EMAIL)).order("order_number"));
+  console.log("Corse assegnate: " + jobs.map((j) => `${j.order_number} → ${j.carriers?.company_name ?? "—"}`).join(", "));
+  printPasswordHint();
 }
-let n = 0;
-// Valid partita IVA (check digit as in src/lib/auth/italian-ids.ts), so the admin's company form saves as is.
-const vat = () => {
-  const d = String(Date.now() % 1e8).padStart(8, "0") + String(++n % 100).padStart(2, "0");
-  let sum = 0;
-  for (let i = 0; i < 10; i++) { let x = Number(d[i]); if (i % 2 === 1) { x *= 2; if (x > 9) x -= 9; } sum += x; }
-  return d + ((10 - (sum % 10)) % 10);
-};
-async function carrier(name, email) {
-  const u = await user(email, { role: "padroncino", first_name: "Mario", last_name: name });
-  await ok(service.from("carriers").insert({ profile_id: u.id, company_name: `Trasporti ${name} ${stamp} Srl` /* tag: tell seed runs apart */, vat_number: vat(), fiscal_code: "RSSMRA80A01H501U", hq_street: "Via Roma 1", hq_city: "Milano", hq_postal_code: "20100", hq_province: "MI", sdi_code: "M5UXCR1" }));
-  return u;
+
+// ---------------------------------------------------------------------------
+// Already seeded? Then only refresh the passwords and print.
+// ---------------------------------------------------------------------------
+const ids = await Promise.all(EMAILS.map(existingUserId));
+if (ids.some(Boolean)) {
+  // Completion marker: Rosa is rejected in the last step.
+  const rosaId = await existingUserId("rosa@example.com");
+  const rosa = rosaId ? (await ok(service.from("carriers").select("status").eq("profile_id", rosaId)))[0] : null;
+  if (ids.some((id) => !id) || rosa?.status !== "rejected") {
+    console.error("Seed padroncini incompleto (un'esecuzione precedente si è interrotta). Ricomincia da zero:\n  npm run db:local:reset && npm run db:local:seed-carriers");
+    process.exit(1);
+  }
+  await seedAdmin();
+  for (const email of EMAILS) await user(email);
+  console.log("Seed padroncini già presente: nessun dato aggiunto.\n");
+  await printSummary();
+  process.exit(0);
 }
-async function doc(c, docType, extra = {}) {
-  const path = `${c.id}/${randomUUID()}.pdf`;
-  await ok(c.client.storage.from("carrier-documents").upload(path, pdf, { contentType: "application/pdf" }));
-  return (await ok(c.client.from("carrier_documents").insert({ carrier_id: c.id, doc_type: docType, storage_path: path, file_name: `${docType}.pdf`, mime_type: "application/pdf", size_bytes: 60, ...extra }).select("id").single())).id;
-}
-async function vehicle(c, plate, docs = true) {
-  const v = await ok(c.client.from("carrier_vehicles").insert({ carrier_id: c.id, vehicle_type_id: vanId, plate, payload_kg: 1200 }).select("id").single());
-  if (docs) { await doc(c, "vehicle_registration", { vehicle_id: v.id, expires_at: FUTURE }); await doc(c, "insurance_rca", { vehicle_id: v.id, expires_at: FUTURE }); }
-  return v.id;
-}
-async function complete(name, email, plate) {
-  const c = await carrier(name, email);
-  await doc(c, "transport_license"); await doc(c, "driving_license", { expires_at: FUTURE });
+
+const admin = await seedAdmin();
+const customer = await privateCustomer({ email: CUSTOMER_EMAIL, firstName: "Elena", lastName: "Ricci", phone: "+393409990011" });
+const account = (name, email, vatIndex) => carrierAccount({ email, firstName: "Mario", lastName: name, company: `Trasporti ${name} Srl`, vatIndex });
+async function complete(name, email, vatIndex, plate) {
+  const c = await account(name, email, vatIndex);
+  await companyDocs(c);
   c.vehicleId = await vehicle(c, plate);
   return c;
 }
-const stamp = Date.now().toString(36).toUpperCase().slice(-4);
-const admin = await user(`admin-${stamp}@example.com`, {});
-await ok(service.from("profiles").update({ role: "admin" }).eq("id", admin.id));
+const assign = (c, vehicleId, o) => ok(service.rpc("admin_assign_job", { p_order_id: o.id, p_carrier_id: c.id, p_vehicle_id: vehicleId, p_admin_id: admin.id }));
 
-const inReview = await complete("Verdi", `verdi-${stamp}@example.com`, `RV${stamp}A`);
-await ok(inReview.client.rpc("submit_carrier_for_review"));
+// Two carriers waiting for review: B2–B3 reject one, B4 approves the other.
+const verdi = await complete("Verdi", "verdi@example.com", 11, "VE100AA");
+await ok(verdi.client.rpc("submit_carrier_for_review"));
+const viola = await complete("Viola", "viola@example.com", 12, "VI100AA");
+await ok(viola.client.rpc("submit_carrier_for_review"));
 
-const active = await complete("Bianchi", `bianchi-${stamp}@example.com`, `BI${stamp}A`);
-await ok(active.client.rpc("submit_carrier_for_review"));
-await ok(service.rpc("decide_carrier_review", { p_carrier_id: active.id, p_admin_id: admin.id, p_approve: true, p_reason: null }));
-await vehicle(active, `BI${stamp}B`);                                   // new vehicle
-await ok(active.client.from("carrier_vehicles").update({ payload_kg: 1500 }).eq("id", active.vehicleId)); // re-verify
-await doc(active, "goods_insurance", { expires_at: FUTURE });            // pending company doc
+// Active: BI100CC approved and on a job (D116 warning at "Sospendi"); BI100AA re-verify; BI100BB new; pending doc.
+const bianchi = await complete("Bianchi", "bianchi@example.com", 13, "BI100AA");
+const bianchiJobVan = await vehicle(bianchi, "BI100CC");
+await approveCarrier(bianchi, admin);
+await assign(bianchi, bianchiJobVan, await pay(await order(customer, { from: "milanoCentro", to: "monza", daysAhead: 3, goods: { description: "Divano e 5 scatoloni", items: 6, weightKg: 120 }, contacts: ["Elena Ricci", "Paolo Ricci"] })));
+await vehicle(bianchi, "BI100BB");                                                                   // new vehicle
+await ok(bianchi.client.from("carrier_vehicles").update({ payload_kg: 1500 }).eq("id", bianchi.vehicleId)); // re-verify
+await doc(bianchi, "goods_insurance", { expires_at: FUTURE });                                       // pending company doc
 
-const suspended = await complete("Neri", `neri-${stamp}@example.com`, `NE${stamp}A`);
-await ok(suspended.client.rpc("submit_carrier_for_review"));
-await ok(service.rpc("decide_carrier_review", { p_carrier_id: suspended.id, p_admin_id: admin.id, p_approve: true, p_reason: null }));
-await ok(service.rpc("set_carrier_suspension", { p_carrier_id: suspended.id, p_admin_id: admin.id, p_suspend: true, p_reason: "RCA scaduta: carica la nuova polizza." }));
-await doc(suspended, "insurance_rca", { vehicle_id: suspended.vehicleId, expires_at: FUTURE });
+// Suspended with a job still assigned (D116: it stays theirs; pickup ≥ 48 h, so they may still release it).
+const neri = await complete("Neri", "neri@example.com", 14, "NE100AA");
+await approveCarrier(neri, admin);
+await assign(neri, neri.vehicleId, await pay(await order(customer, { from: "milanoNavigli", to: "bergamo", daysAhead: 5, window: "14-16", goods: { description: "Cucina smontata", items: 10, weightKg: 350 }, contacts: ["Elena Ricci", "Marta Ricci"] })));
+await ok(service.rpc("set_carrier_suspension", { p_carrier_id: neri.id, p_admin_id: admin.id, p_suspend: true, p_reason: "RCA scaduta: carica la nuova polizza." }));
+await doc(neri, "insurance_rca", { vehicle_id: neri.vehicleId, expires_at: FUTURE });
 
-const incomplete = await carrier("Gialli", `gialli-${stamp}@example.com`);
-await doc(incomplete, "transport_license");
+const gialli = await account("Gialli", "gialli@example.com", 15);
+await doc(gialli, "transport_license");
 
-const rejected = await complete("Rosa", `rosa-${stamp}@example.com`, `RO${stamp}A`);
-await ok(rejected.client.rpc("submit_carrier_for_review"));
-await ok(service.rpc("decide_carrier_review", { p_carrier_id: rejected.id, p_admin_id: admin.id, p_approve: false, p_reason: "Albo non leggibile." }));
+// Last step = completion marker.
+const rosa = await complete("Rosa", "rosa@example.com", 16, "RO100AA");
+await ok(rosa.client.rpc("submit_carrier_for_review"));
+await ok(service.rpc("decide_carrier_review", { p_carrier_id: rosa.id, p_admin_id: admin.id, p_approve: false, p_reason: "Albo non leggibile." }));
 
-console.log(`Admin: admin-${stamp}@example.com / ${PW}`);
-for (const [label, c, name] of [["In verifica", inReview, "Verdi"], ["Attivo", active, "Bianchi"], ["Sospeso", suspended, "Neri"], ["Incompleto", incomplete, "Gialli"], ["Rifiutato", rejected, "Rosa"]]) {
-  console.log(`${label.padEnd(11)} Trasporti ${name} ${stamp} Srl  /admin/padroncini/${c.id}`);
-}
-console.log(`Targhe: ${["RV", "BI", "NE", "RO"].map((p) => `${p}${stamp}A`).join(", ")}, BI${stamp}B`);
+await printSummary();

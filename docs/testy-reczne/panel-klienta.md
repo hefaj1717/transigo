@@ -4,7 +4,7 @@ Spec 7. Dane przewoźnika dla klienta: imię, firma, typ pojazdu, tablica (`cust
 
 ## Przygotowanie
 
-1. Lokalny Supabase, czysta baza i dane demo (klient z 9 zleceniami we wszystkich statusach, admin, przewoźnik):
+1. Lokalny Supabase, czysta baza i dane demo (klient z 15 zleceniami we wszystkich statusach, admin, dwóch przewoźników):
 
    ```sh
    npm run db:local:start
@@ -13,7 +13,7 @@ Spec 7. Dane przewoźnika dla klienta: imię, firma, typ pojazdu, tablica (`cust
    ```
 
 2. `npm run dev` na lokalnej bazie — `.env.development.local` jak w `docs/testy-reczne/admin-ordini.md` (krok 3 przygotowania), restart dev. Po teście usuń plik i zrestartuj dev.
-3. Zaloguj się kontem klienta wypisanym przez skrypt (`cliente-<TAG>@example.com`, hasło `Prova-12345!`).
+3. Zaloguj się jako `cliente@example.com` (hasło: `cat .seed-local/password`, plik poza repo).
 
 Sprawdź na komputerze **i na telefonie** (szerokość ~390 px).
 
@@ -43,7 +43,7 @@ Sprawdź na komputerze **i na telefonie** (szerokość ~390 px).
 | # | Krok | Oczekiwany wynik |
 |---|---|---|
 | C1 | Jako admin: `/admin/ordini` → zlecenie „Pagato — da assegnare” → wybierz przewoźnika → „Assegna” | „Padroncino assegnato”. |
-| C2 | Outbox: `docker exec -i supabase_db_TransiGo psql -U postgres -d postgres -c "select template_code, to_address, subject from email_outbox where template_code in ('order_assigned','order_delivered') order by created_at desc limit 5;"` | `order_assigned` na adres klienta: trasa, okno odbioru, „Marco (Ferri Trasporti … Srl)”, pojazd z tablicą, link do zlecenia; **bez kwot**. |
+| C2 | Outbox: `docker exec -i supabase_db_TransiGo psql -U postgres -d postgres -c "select template_code, to_address, subject from email_outbox where template_code in ('order_assigned','order_delivered') order by created_at desc limit 5;"` | `order_assigned` na adres klienta: trasa, okno odbioru, „Marco (Ferri Trasporti Srl)”, pojazd z tablicą, link do zlecenia; **bez kwot**. |
 | C3 | Jako klient: odśwież zlecenie | Etykieta „Trasportatore assegnato”, ramka przewoźnika z danymi. |
 | C4 | Admin: „Rimuovi padroncino” | U klienta ramka wraca do „Stiamo assegnando…” (dane przewoźnika znikają). |
 | C5 | Admin: przypisz ponownie | Drugi `order_assigned` **nie** jest wysyłany (jeden mail na zlecenie — świadomie, demo). |

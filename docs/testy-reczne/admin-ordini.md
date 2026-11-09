@@ -10,14 +10,14 @@ Decyzje: D117 (bez „stoccaggio lungo termine”), D120, D122, D123. Test na **
    npm run db:local:start
    ```
 
-2. Czysta baza i **jeden** komplet danych demo (admin, klient, jeden przewoźnik, 9 zleceń w różnych statusach). Uruchom **raz** oba polecenia:
+2. Czysta baza i dane demo (admin, klient, dwóch aktywnych przewoźników, 15 zleceń w różnych statusach):
 
    ```sh
    npm run db:local:reset
    npm run db:local:seed-demo
    ```
 
-   Skrypt działa tylko na lokalnej bazie (sprawdza `127.0.0.1:55321` / `:55322`, inaczej przerywa). Na końcu wypisuje numery zleceń i loginy — hasło dla wszystkich `Prova-12345!`. Każde kolejne uruchomienie **dokłada** następny komplet. `npm run test:rls` kasuje dane — po nim uruchom oba polecenia ponownie.
+   Skrypt działa tylko na lokalnej bazie (odmawia, gdy `SUPABASE_URL` wskazuje gdzie indziej albo `supabase status` nie pokazuje `127.0.0.1:55321` / `:55322`). Na końcu wypisuje zlecenia i loginy. Hasło dla wszystkich kont: `cat .seed-local/password` (plik poza repo). Ponowne uruchomienie **niczego nie dokłada**. `npm run test:rls` kasuje dane — po nim uruchom oba polecenia ponownie.
 
 3. Przełącz `npm run dev` na lokalną bazę (`.env.development.local` ma w dev pierwszeństwo przed `.env.local`, ignorowany przez git):
 
@@ -27,7 +27,7 @@ Decyzje: D117 (bez „stoccaggio lungo termine”), D120, D122, D123. Test na **
 
    Potem zrestartuj `npm run dev`.
 
-4. Zaloguj się na `http://localhost:3000/accedi` kontem admina wypisanym przez skrypt (`admin-<TAG>@example.com`). Jeśli strona od razu przekierowuje — najpierw „Esci”.
+4. Zaloguj się na `http://localhost:3000/accedi` jako `admin@example.com`. Jeśli strona od razu przekierowuje — najpierw „Esci”.
 
 5. **Po teście** wróć na staging:
 
@@ -50,10 +50,12 @@ Zlecenia z seeda (numery od `TG-…-000001` na czystej bazie):
 | 000007 | Consegnato 10 dni temu, bez POD | znacznik „senza firma e foto” |
 | 000008 | Consegnato 25 dni temu, bez POD | j.w. |
 | 000009 | Scaduto | brak przycisków obsługi |
+| 000010–000013 | Pagato — da assegnare (kursy dla przewoźników; 000012 camion, 000013 furgone grande) | lista kandydatów zależna od pojazdu |
+| 000014, 000015 | Assegnato (przyjęte przez Ferriego z aplikacji) | jak 000004 |
 
 ## A. Lista `/admin/ordini`
 
-- [ ] Filtry: Tutti (9), **Da assegnare** (2: 000002, 000003 — od najbliższego ritiro), **In corso** (3: 000004–000006), **Consegnati** (2), In attesa di pagamento (1), Scaduti (1).
+- [ ] Filtry: Tutti (15), **Da assegnare** (6: 000002, 000003, 000010–000013 — od najbliższego ritiro), **In corso** (5: 000004–000006, 000014, 000015), **Consegnati** (2), In attesa di pagamento (1), Scaduti (1).
 - [ ] Kolumna „Padroncino”: firma przewoźnika przy przypisanych; przy opłaconych bez przewoźnika link „Da assegnare”.
 - [ ] Numer zlecenia prowadzi do strony zlecenia.
 
@@ -64,7 +66,7 @@ Otwórz 000003.
 
 ## C. Assegna i Rimuovi padroncino (000002)
 
-1. [ ] Sekcja „Assegna padroncino”: lista ma jedną pozycję „Ferri Trasporti <TAG> Srl — FT<TAG>A (Furgone medio, 1200 kg)”.
+1. [ ] Sekcja „Assegna padroncino”: lista ma dwie pozycje: „Ferri Trasporti Srl — FT123AB (Furgone medio, 1200 kg)” i „Galli Logistica Srl — GL456CD (Camion con sponda idraulica, 3000 kg)”. Przy 000012 tylko Galli.
 2. [ ] „Assegna” bez wyboru → przeglądarka nie wysyła (pole wymagane).
 3. [ ] Wybierz przewoźnika → „Assegna”. Strona: status **Assegnato**, sekcja „Padroncino” z firmą, tablicą i linkiem „scheda padroncino”, przyciski „Segna come ritirato” i „Rimuovi padroncino”. W historii „Pagato → Assegnato · admin (…)”.
 4. [ ] „Rimuovi padroncino” bez motywu → przeglądarka nie wysyła. Wybierz „Errore nell'assegnazione” → status wraca do **Pagato**, znowu „Assegna padroncino” z tym samym przewoźnikiem. W historii „Assegnato → Pagato · admin”.

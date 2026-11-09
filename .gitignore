@@ -54,3 +54,6 @@ public/workbox-*.js.map
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# local seed password (scripts/lib/local-seed.mjs)
+/.seed-local/

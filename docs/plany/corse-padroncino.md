@@ -13,6 +13,8 @@ Zatwierdzony przez właściciela 2026-11-09. Po każdym kroku: testy, commit, pu
 
 1. Po „Rinuncia” **bez maila do klienta**. Luka: outbox ma jeden mail na zlecenie i szablon, więc po ponownym przypisaniu klient nie dostaje drugiego `order_assigned` (jak po „Rimuovi padroncino”) — TODO w CLAUDE.md.
 2. **Bez maila do admina przy przyjęciu** kursu (mail tylko przy rezygnacji, D121).
+3. (po kroku 3) „Rinuncia”: `active` i `suspended` (D116) mogą zrezygnować; `pending_review` i `rejected` dostają „Operazione non consentita.” — zatwierdzone.
+4. Kolejność kroków zmieniona: po kroku 3 najpierw **krok 5 (seed)**, potem krok 4 podzielony na **4a** i **4b**.
 
 ## Zasady dla wszystkich kroków
 
@@ -42,18 +44,21 @@ Zatwierdzony przez właściciela 2026-11-09. Po każdym kroku: testy, commit, pu
 - [x] **Krok 3 — Server Actions `src/app/(padroncino)/padroncino/corse/actions.ts`** — zrobione 2026-11-09. Plik eksportuje tylko `acceptJobAction` i `releaseJobAction` (zod i bramki statusu w `src/lib/carriers/job-actions.ts`, `jobNotifyDeps()` w `job-deps.ts`). Kolejność: `requireArea` → status z sesji (przyjęcie: `active`; rezygnacja: `active`/`suspended`, D116) → zod (`z.uuid()`) → `jobs-server.ts` → `revalidatePath`. Przyjęcie zwraca `href` do `/padroncino/le-mie-corse/[id]` (przekierowanie robi UI w kroku 4). `acceptJob` dostał `userId`: id zlecenia do maila `order_assigned` jest odczytywane sesją przewoźnika **po** udanym `accept_job` (`id` + `carrier_id` = sesja), bo RPC nie zwraca `order_id` (bez migracji).
   - `acceptJobAction`, `releaseJobAction`: `requireArea("padroncino")` → zod → logika → `revalidatePath`;
   - test „każdy eksport jako nie-przewoźnik” (niezalogowany, cliente, admin, zablokowany padroncino): nic nie dociera do RPC ani service role; sesja przed service role.
-- [ ] **Krok 4 — ekrany (mobile-first, `CarrierShell`)**
-  - dolna nawigacja: *Corse*, *Le mie corse*, *Profilo*;
+- [x] **Krok 5 — seed i listy testów ręcznych** — zrobione 2026-11-09 (przed krokiem 4).
+  - Wspólny moduł `scripts/lib/local-seed.mjs`: strażniki (`SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_URL`, jeśli ustawione, muszą wskazywać `http://127.0.0.1:55321`; `supabase status` = 55321/55322; SQL tylko w kontenerze z kontrolą gniazda), konta „znajdź albo utwórz” po stałym e-mailu, zlecenia przez silnik cenowy i kod kreatora.
+  - **Bez duplikatów:** każdy skrypt sprawdza znacznik ukończenia (demo: 15 zleceń klienta i dostawy przesunięte w przeszłość; padroncini: Rosa odrzucona). Jest → wypisuje dane i kończy; częściowy stan → każe zacząć od `db:local:reset`. Admin `admin@example.com` wspólny dla obu seedów.
+  - **Hasło poza repo:** `SEED_PASSWORD` albo `.seed-local/password` (git-ignored, losowane przy pierwszym uruchomieniu); każde uruchomienie ustawia je na kontach seeda.
+  - `seed-demo.mjs`: drugi aktywny przewoźnik Galli (camion) do „già accettata”; opłacone kursy 000010 (furgone piccolo), 000011 (test „già accettata”), 000012 (camion, 6 palet) i 000013 (blat 4 m, furgone grande) — dwa ostatnie za duże dla furgonu medio; 000014 przyjęty przez Ferriego (`accept_job` jego sesją) i przesunięty o 2 h wstecz, odbiór jutro → Rinuncia zablokowana; 000015 odbiór za 6 dni → Rinuncia możliwa. Sprawdzone sesjami: Ferri widzi 02, 03, 10, 11; Galli także 12, 13; `release_job` na 000014 → `too_late`.
+  - `seed-local-carriers.mjs`: Bianchi z kursem przypisanym przez admina (pojazd `BI100CC`, ostrzeżenie przy „Sospendi”), Neri z kursem przypisanym przed zawieszeniem (odbiór za 5 dni — może zrezygnować), drugi przewoźnik w weryfikacji (Viola) zamiast ponownego uruchomienia seeda w kroku B4.
+  - `docs/testy-reczne/corse-padroncino.md` (konta demo i co pokazują; kroki testu dojdą w 4a/4b i 6); zaktualizowane `admin-padroncini.md` (D116), `admin-ordini.md`, `panel-klienta.md`.
+- [ ] **Krok 4a — nawigacja i lista kursów (mobile-first, `CarrierShell`)**
+  - dolna nawigacja `CarrierShell`: *Corse*, *Le mie corse*, *Profilo*;
+  - `/padroncino/corse`: karty, „Aggiorna”, przy blokadach wyjaśnienie zamiast listy.
+- [ ] **Krok 4b — szczegóły, „Accetta la Corsa”, „Le mie corse”, „Rinuncia”**
   - `/padroncino` (aktywny): liczniki dostępnych i „Da fare”;
-  - `/padroncino/corse`: karty, „Aggiorna”, przy blokadach wyjaśnienie zamiast listy;
   - `/padroncino/corse/[id]`: szczegóły bez danych osobowych, kwota, wybór pojazdu (gdy > 1), ostrzeżenie o nakładaniu, „Accetta la Corsa” z potwierdzeniem i blokadą przycisku → `/padroncino/le-mie-corse/[id]`; `already_taken` → komunikat + odświeżenie listy;
   - `/padroncino/le-mie-corse` (+ `[id]`): zakładki, pełne adresy, kontakty `tel:`, uwagi, piętra, usługi, kwota; „Rinuncia alla corsa” z potwierdzeniem, terminem (Europe/Rome) i blokadą przycisku; po terminie „Contatta Transigo” („Segnala un problema” D39 — w kroku realizacji);
   - zawieszony (D116): na „Account sospeso” link i licznik „Le mie corse”.
-- [ ] **Krok 5 — seed i listy testów ręcznych**
-  - `seed-demo.mjs`: opłacone nieprzypisane kursy różnej wielkości (część za duża dla furgonu), drugi aktywny przewoźnik („già accettata”), kurs przyjęty > 15 min temu i < 48 h przed odbiorem (Rinuncia zablokowana);
-  - `seed-local-carriers.mjs`: kurs przypisany (ostrzeżenie przy „Sospendi”, D116);
-  - oba skrypty odmawiają działania poza lokalną bazą (`SUPABASE_URL`);
-  - `docs/testy-reczne/corse-padroncino.md` + dopisek w `admin-padroncini.md`.
 - [ ] **Krok 6 — przegląd w przeglądarce i dokumentacja**
   - lokalnie na demo: przyjęcie → mail w outboxie, „già accettata” z drugiego konta, Rinuncia w obu wariantach, zawieszony przewoźnik;
   - CLAUDE.md (odhaczone TODO, nowe TODO niżej), decyzje w `docs/spec.md` sekcja 0;
