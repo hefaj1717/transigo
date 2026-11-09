@@ -203,6 +203,33 @@ function toEndpoint(p: PlaceDetails): Endpoint {
 
 const point = (e: Endpoint): RoutePoint => (e.placeId && !e.warehouseId ? { placeId: e.placeId } : { lat: e.lat, lng: e.lng });
 
+/**
+ * Cities, provinces and route length for an "out of area" contact request (D125, spec 2a). Resolved on the
+ * server from the place IDs (D76: never taken from the browser). Only cities and provinces leave this
+ * function — no street addresses. A maps error leaves the fields empty: the request is still saved.
+ */
+export async function resolveRouteSummary(pickupPlaceId: string, deliveryPlaceId: string): Promise<{
+  pickupCity: string | null; pickupProvince: string | null; deliveryCity: string | null; deliveryProvince: string | null; distanceKm: number | null;
+}> {
+  const maps = getMapsProvider();
+  const place = (id: string) => cached(`place:${id}`, () => maps.placeDetails(id)).catch(() => null);
+  const [a, b] = await Promise.all([place(pickupPlaceId), place(deliveryPlaceId)]);
+  let distanceKm: number | null = null;
+  if (a && b) {
+    const from: RoutePoint = { placeId: a.placeId };
+    const to: RoutePoint = { placeId: b.placeId };
+    const r = await cached<RouteResult>(`route:${JSON.stringify([from, to])}`, () => maps.computeRoute(from, to)).catch(() => null);
+    if (r) distanceKm = Math.round(r.distanceM / 1000); // whole km, display only
+  }
+  return {
+    pickupCity: a?.city ?? null,
+    pickupProvince: a?.provinceCode ?? null,
+    deliveryCity: b?.city ?? null,
+    deliveryProvince: b?.provinceCode ?? null,
+    distanceKm,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Quote
 // ---------------------------------------------------------------------------

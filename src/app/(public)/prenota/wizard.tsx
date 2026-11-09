@@ -3,13 +3,15 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { formatCents } from "@/lib/pricing/money";
-import type { BookingStep } from "@/lib/booking/messages";
+import { isOutOfArea, type BookingStep } from "@/lib/booking/messages";
 import type { BookingOptions } from "@/lib/booking/server";
 import { EMPTY_WIZARD_STATE, parseStoredState, WIZARD_STORAGE_KEY, type PlaceChoice, type WizardState } from "@/lib/booking/state";
 import { addDaysIso, romeToday, TIME_WINDOW_LABEL, TIME_WINDOWS, type TimeWindow } from "@/lib/booking/windows";
 import { loadCheckoutDefaults, submitBooking } from "./actions";
 import { SignOutButton } from "@/components/sign-out-button";
 import { AddressField } from "@/components/address-field";
+import { ContactForm } from "@/components/contact-form";
+import { sendOutOfAreaAction } from "./out-of-area-actions";
 import { Headline, PorterPicker, QuoteBreakdown } from "./quote-view";
 import { STEPS, stepIndex, type QuoteResponse, type WizardSession } from "./types";
 
@@ -55,6 +57,8 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
   const [quote, setQuote] = useState<QuoteResponse | null>(null);
   const [quoting, setQuoting] = useState(false);
   const [stepError, setStepError] = useState<string | null>(null);
+  /** The route is outside the service area (spec 2a): show the "out of area" contact form (D125). */
+  const [outOfArea, setOutOfArea] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [created, setCreated] = useState<{ id: string; number: string; paymentError: string | null } | null>(null);
@@ -90,6 +94,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
   const update = useCallback((patch: Partial<WizardState>) => {
     setState((s) => ({ ...s, ...patch }));
     setStepError(null);
+    if ("pickup" in patch || "delivery" in patch) setOutOfArea(false);
   }, []);
 
   // --- live quote ------------------------------------------------------------------------------------------
@@ -128,12 +133,14 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
     setMaxStep((m) => Math.max(m, stepIndex(to)));
     setStepError(null);
     setNotice(null);
+    setOutOfArea(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   /** Server check for the current step: errors that belong to this step or an earlier one block "Avanti". */
   async function blockingError(probe: boolean): Promise<string | null> {
     const result = probe ? await fetchQuote(state, true) : await runQuote(state);
+    setOutOfArea(!result.ok && isOutOfArea(result.error));
     if (result.ok) return null;
     if (stepIndex(result.step) <= stepIndex(step)) return result.message;
     return null;
@@ -698,6 +705,19 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
           {step === "riepilogo" ? <p className="mt-4 text-xs text-zinc-500">Dopo la conferma verrai indirizzato al pagamento sicuro con carta (Stripe).</p> : null}
           {notice ? <p role="status" className="mt-4 rounded-md bg-amber-50 p-3 text-sm text-amber-900">{notice}</p> : null}
           {stepError ? <p role="alert" className="mt-4 rounded-md bg-red-50 p-3 text-sm text-red-700">{stepError}</p> : null}
+          {step === "percorso" && outOfArea && state.pickup && state.delivery ? (
+            <section aria-labelledby="out-of-area-title" className="mt-4 rounded-md border border-zinc-200 p-4">
+              <h3 id="out-of-area-title" className="font-semibold text-zinc-900">Lasciaci una richiesta</h3>
+              <p className="mt-1 mb-4 text-sm text-zinc-600">Stiamo ampliando le zone servite. Scrivici: valutiamo il tuo trasporto e ti ricontattiamo.</p>
+              <ContactForm
+                key={`${state.pickup.placeId}|${state.delivery.placeId}`}
+                action={sendOutOfAreaAction}
+                idPrefix="out-of-area"
+                hidden={{ pickupPlaceId: state.pickup.placeId, deliveryPlaceId: state.delivery.placeId }}
+                messagePlaceholder="Cosa devi trasportare e quando?"
+              />
+            </section>
+          ) : null}
 
           <div className="mt-6 flex justify-between gap-3">
             <button type="button" disabled={step === "percorso"} onClick={() => go(STEPS[stepIndex(step) - 1].id)} className="rounded-md border border-zinc-300 px-4 py-2 text-sm hover:bg-zinc-50 disabled:invisible">

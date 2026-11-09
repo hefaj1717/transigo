@@ -287,3 +287,14 @@ describe("Italian error messages", () => {
     }
   });
 });
+
+describe("isOutOfArea (D125, spec 2a)", () => {
+  it("pickup province of the first leg or a route too long → out of area form", async () => {
+    const { isOutOfArea } = await import("./messages");
+    expect(isOutOfArea({ code: "pickup_province", legIndex: 0, province: "RM" })).toBe(true);
+    expect(isOutOfArea({ code: "max_distance", legIndex: 0, distanceM: 400_000, maxDistanceM: 300_000 })).toBe(true);
+    expect(isOutOfArea({ code: "pickup_province", legIndex: 1, province: "RM" })).toBe(false); // warehouse leg
+    expect(isOutOfArea({ code: "too_soon", legIndex: 0 })).toBe(false);
+    expect(isOutOfArea({ code: "maps_unavailable" })).toBe(false);
+  });
+});

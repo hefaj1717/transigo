@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { PageHero } from "@/components/site/page-hero";
 import { getCompanyInfo } from "@/lib/public/server";
-import { ContactForm } from "./contact-form";
+import { ContactForm } from "@/components/contact-form";
+import { sendContactAction } from "./actions";
 
 export const metadata: Metadata = {
   title: "Contatti – Transigo",
@@ -19,7 +20,7 @@ export default async function Page() {
       <div className="mx-auto grid max-w-6xl gap-12 px-4 py-16 lg:grid-cols-[2fr_1fr]">
         <section aria-labelledby="form-title">
           <h2 id="form-title" className="mb-6 text-2xl font-bold text-brand-900">Scrivici</h2>
-          <ContactForm />
+          <ContactForm action={sendContactAction} />
         </section>
         <aside className="space-y-6">
           <div className="rounded-xl bg-brand-50 p-6">

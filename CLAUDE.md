@@ -79,7 +79,8 @@ Uwagi techniczne:
     - Nowy sekret **`CONTACT_IP_HASH_SECRET`** (≥ 32 znaki): jest w `.env.local`; **dodać na Vercel** przed wdrożeniem. Bez niego formularz zwraca błąd (nic nie zapisuje).
     - Na stagingu (dev na `localhost:3000`) formularz `/contatti` do czasu migracji kończy się „Invio non riuscito” — działa tylko walidacja.
     - `global-setup.ts` testów RLS czeka po resecie, aż REST API odbuduje cache schematu (wcześniej losowe „Could not query the database for the schema cache”).
-  - [ ] Krok 5: formularz spoza obszaru w kreatorze. Krok 6: `/cookie` + baner „Ok”, metadata, `sitemap.ts`, `robots.ts`, `noindex` na stagingu. Krok 7: przegląd w przeglądarce, `docs/testy-reczne/strona-publiczna.md`.
+  - [x] Krok 5: formularz „Lasciaci una richiesta” w kroku „Percorso”, gdy wycena zwraca `pickup_province` (odcinek 1) albo `max_distance` (`isOutOfArea()`); akcja `src/app/(public)/prenota/out-of-area-actions.ts` — przeglądarka wysyła tylko `placeId`, miasta, prowincje i dystans ustala serwer (`resolveRouteSummary()` w `src/lib/booking/server.ts`, D76) i tylko dla poprawnego, nie-botowego zgłoszenia. Wspólny formularz `src/components/contact-form.tsx` i wspólna obsługa `src/lib/contact/submit-form.ts` (kolejność kontroli w jednym miejscu). Sprawdzone w przeglądarce na lokalnej bazie (Roma → Napoli: zapis RM/NA/231 km, bez ulic; `/contatti` → `/admin/richieste` → „Segna come gestita”).
+  - [ ] Krok 6: `/cookie` + baner „Ok”, metadata, `sitemap.ts`, `robots.ts`, `noindex` na stagingu. Krok 7: przegląd w przeglądarce, `docs/testy-reczne/strona-publiczna.md`.
   - Link do `/cookie` (krok 6) do tego czasu daje 404.
 - Potem panel klienta (status zlecenia i historia dla klienta).
 

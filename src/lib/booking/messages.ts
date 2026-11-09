@@ -91,3 +91,12 @@ export function bookingErrorStep(e: BookingError): BookingStep {
       return "preventivo";
   }
 }
+
+/**
+ * The quote failed because the route is outside the service area (spec 2a): pickup province not served
+ * (first leg — the warehouse leg has its own message) or route too long. The wizard then offers the
+ * "out of area" contact form (D125).
+ */
+export function isOutOfArea(e: BookingError): boolean {
+  return (e.code === "pickup_province" && e.legIndex === 0) || e.code === "max_distance";
+}
