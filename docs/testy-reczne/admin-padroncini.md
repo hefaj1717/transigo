@@ -10,11 +10,14 @@ Decyzje: D101, D105, D113–D116. Test na **lokalnej** bazie (Docker), aplikacja
    npm run db:local:start
    ```
 
-2. Dane testowe (admin + po jednym przewoźniku w każdym stanie, z plikami PDF w Storage). Skrypt działa tylko na lokalnej bazie:
+2. Czysta baza i **jeden** komplet danych testowych (admin + po jednym przewoźniku w każdym stanie, z plikami PDF w Storage). Skrypt działa tylko na lokalnej bazie. Uruchom **raz** oba polecenia:
 
    ```sh
+   npm run db:local:reset
    npm run db:local:seed-carriers
    ```
+
+   Każde kolejne uruchomienie `db:local:seed-carriers` **dokłada** następny komplet (liczniki w sekcji A rosną ×2, ×3…). Seed bez resetu uruchamiamy tylko w kroku B4.
 
    Skrypt wypisuje e-mail admina, hasło, adresy stron przewoźników i tablice. Każde uruchomienie ma inny 4-znakowy znacznik — w tej instrukcji oznaczony `<TAG>` (np. tablice `BI<TAG>A`, `BI<TAG>B`, e-mail `admin-<TAG>@example.com`).
 
@@ -60,7 +63,7 @@ Przewoźnicy z seeda:
 1. [ ] Karta 1, „Rifiuta” z samymi spacjami w motywie → „Indica il motivo (massimo 1000 caratteri).” (puste pole zatrzymuje już przeglądarka).
 2. [ ] Karta 1, „Rifiuta” z motywem „Albo non leggibile” → „Registrazione rifiutata. Il padroncino riceverà un'e-mail con il motivo.” Po odświeżeniu: status Rifiutato i motyw.
 3. [ ] Karta 2 (bez odświeżania), „Approva padroncino” → **odrzucone**: „Questo padroncino non è più in attesa di verifica (forse è già stato deciso). Ricarica la pagina.” Drugiego maila nie ma.
-4. [ ] Udane Approva: uruchom jeszcze raz `npm run db:local:seed-carriers` i otwórz nowego Verdiego (nowy `<TAG>`). „Approva padroncino” → „Padroncino approvato.”, status Attivo, jego dokumenty i pojazd „Approvato”.
+4. [ ] Udane Approva: uruchom jeszcze raz `npm run db:local:seed-carriers` (bez resetu — dokłada drugi komplet; od tej chwili liczniki listy są większe) i otwórz nowego Verdiego z linku wypisanego przez skrypt (nowy `<TAG>`). „Approva padroncino” → „Padroncino approvato.”, status Attivo, jego dokumenty i pojazd „Approvato”.
 
 ## C. Trasporti Bianchi (aktywny)
 
