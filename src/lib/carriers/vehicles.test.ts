@@ -34,6 +34,17 @@ describe("vehicleSchema", () => {
     expect(errors(form({ payloadKg: "12,5" })).payloadKg).toBe(VEHICLE_MSG.payload);
     expect(errors(form({ payloadKg: "60000" })).payloadKg).toBe(VEHICLE_MSG.payloadTooHigh);
   });
+  it("lower bounds catch tonnes and metres typed instead of kg and cm", () => {
+    expect(errors(form({ payloadKg: "3" })).payloadKg).toBe(VEHICLE_MSG.payloadTooLow);
+    expect(errors(form({ payloadKg: "99" })).payloadKg).toBe(VEHICLE_MSG.payloadTooLow);
+    expect(errors(form({ payloadKg: "100" })).payloadKg).toBeUndefined();
+    expect(errors(form({ payloadKg: "50000" })).payloadKg).toBeUndefined();
+    expect(errors(form({ cargoLengthCm: "4" })).cargoLengthCm).toBe(VEHICLE_MSG.dimensionTooLow);
+    expect(errors(form({ cargoWidthCm: "49" })).cargoWidthCm).toBe(VEHICLE_MSG.dimensionTooLow);
+    expect(errors(form({ cargoHeightCm: "50" })).cargoHeightCm).toBeUndefined();
+    expect(errors(form({ cargoHeightCm: "2000" })).cargoHeightCm).toBeUndefined();
+    expect(errors(form({ cargoHeightCm: "2001" })).cargoHeightCm).toBe(VEHICLE_MSG.dimensionTooHigh);
+  });
   it("rejects a bad plate, type or dimension", () => {
     expect(errors(form({ plate: "A-1" })).plate).toBe(VEHICLE_MSG.plate);
     expect(errors(form({ vehicleTypeId: "" })).vehicleTypeId).toBe(VEHICLE_MSG.vehicleType);

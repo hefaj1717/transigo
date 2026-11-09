@@ -6,7 +6,10 @@ export const VEHICLE_MSG = {
   plate: "Targa non valida: da 5 a 10 lettere e numeri (es. AB123CD)",
   payload: "Indica la portata in kg (numero intero maggiore di zero)",
   payloadTooHigh: "Portata troppo alta: controlla il valore in kg",
+  payloadTooLow: "Inserisci la portata in kg (es. 1200), non in tonnellate.",
   dimension: "Valore non valido: centimetri, numero intero maggiore di zero",
+  dimensionTooHigh: "Misura troppo alta: controlla il valore in cm",
+  dimensionTooLow: "Inserisci le misure in cm (es. 240), non in metri.",
   // D111
   plateTaken: "Questa targa è già registrata. Se il veicolo è tuo, contatta l'assistenza Transigo.",
   // D107 (shown with the "Aggiungi nuovo veicolo" button)
@@ -23,12 +26,17 @@ export function isValidPlate(plate: string): boolean {
   return /^[A-Z0-9]{5,10}$/.test(plate);
 }
 
-// Upper bound only catches typos (tonnes typed as kg × 1000); the database requires > 0.
+// Bounds only catch unit typos in the form (tonnes or metres instead of kg / cm, extra zeros);
+// the database requires just > 0.
+export const MIN_PAYLOAD_KG = 100;
 export const MAX_PAYLOAD_KG = 50_000;
-const MAX_DIMENSION_CM = 2_000;
+export const MIN_DIMENSION_CM = 50;
+export const MAX_DIMENSION_CM = 2_000;
 
-/** Form text → positive integer; empty → undefined. */
-const intField = (message: string, max: number, maxMessage = message) =>
+type Bounds = { min: number; max: number; message: string; minMessage: string; maxMessage: string };
+
+/** Form text → positive integer within bounds; empty → undefined. */
+const intField = ({ min, max, message, minMessage, maxMessage }: Bounds) =>
   z
     .string()
     .optional()
@@ -40,6 +48,10 @@ const intField = (message: string, max: number, maxMessage = message) =>
         return z.NEVER;
       }
       const n = Number(t);
+      if (n < min) {
+        ctx.addIssue({ code: "custom", message: minMessage });
+        return z.NEVER;
+      }
       if (n > max) {
         ctx.addIssue({ code: "custom", message: maxMessage });
         return z.NEVER;
@@ -47,18 +59,25 @@ const intField = (message: string, max: number, maxMessage = message) =>
       return n;
     });
 
+const payloadBounds: Bounds = {
+  min: MIN_PAYLOAD_KG, max: MAX_PAYLOAD_KG,
+  message: VEHICLE_MSG.payload, minMessage: VEHICLE_MSG.payloadTooLow, maxMessage: VEHICLE_MSG.payloadTooHigh,
+};
+const dimensionBounds: Bounds = {
+  min: MIN_DIMENSION_CM, max: MAX_DIMENSION_CM,
+  message: VEHICLE_MSG.dimension, minMessage: VEHICLE_MSG.dimensionTooLow, maxMessage: VEHICLE_MSG.dimensionTooHigh,
+};
+
 export const vehicleSchema = z.object({
   vehicleTypeId: z.uuid({ error: VEHICLE_MSG.vehicleType }),
   plate: z
     .string({ error: VEHICLE_MSG.plate })
     .transform(normalizePlate)
     .pipe(z.string().refine(isValidPlate, { error: VEHICLE_MSG.plate })),
-  payloadKg: intField(VEHICLE_MSG.payload, MAX_PAYLOAD_KG, VEHICLE_MSG.payloadTooHigh).pipe(
-    z.number({ error: VEHICLE_MSG.payload }),
-  ),
-  cargoLengthCm: intField(VEHICLE_MSG.dimension, MAX_DIMENSION_CM),
-  cargoWidthCm: intField(VEHICLE_MSG.dimension, MAX_DIMENSION_CM),
-  cargoHeightCm: intField(VEHICLE_MSG.dimension, MAX_DIMENSION_CM),
+  payloadKg: intField(payloadBounds).pipe(z.number({ error: VEHICLE_MSG.payload })),
+  cargoLengthCm: intField(dimensionBounds),
+  cargoWidthCm: intField(dimensionBounds),
+  cargoHeightCm: intField(dimensionBounds),
 });
 export type VehicleInput = z.output<typeof vehicleSchema>;
 
