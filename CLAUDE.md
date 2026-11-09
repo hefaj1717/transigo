@@ -72,7 +72,7 @@ Decyzje właściciela (D117–D121 w spec):
 - **Przed/po przyjęciu** (D119) i **dopasowanie pojazdu** (D120) zaakceptowane; na karcie kursu przed przyjęciem dystans w km i szacowany czas jazdy.
 
 Stan:
-- **Baza gotowa** (migracja `20261110100000_carrier_jobs.sql`, testy `tests/rls/carrier-jobs.test.ts`, w tym wyścig 2 i 5 przewoźników): `carrier_job_eligibility()`, `list_available_jobs()`, `accept_job()`, `release_job()`, blokada pojazdu w kursie (trigger). Funkcje działają w sesji przewoźnika (`auth.uid()`), nie service role.
+- **Baza gotowa** (migracja `20261110100000_carrier_jobs.sql` — na stagingu od 2026-11-09, testy `tests/rls/carrier-jobs.test.ts`, w tym wyścig 2 i 5 przewoźników): `carrier_job_eligibility()`, `list_available_jobs()`, `accept_job()`, `release_job()`, blokada pojazdu w kursie (trigger). Funkcje działają w sesji przewoźnika (`auth.uid()`), nie service role.
 - **Do zrobienia po powrocie:** ekrany `/padroncino/corse` (+ `[id]` z „Accetta la Corsa”), `/padroncino/le-mie-corse` (+ „Rinuncia” z mailem do admina), Server Actions z testem „każdy eksport jako nie-przewoźnik”, seed z kursami (w tym kurs przypisany przewoźnikowi → ostrzeżenie D116 przy „Sospendi”, dopisać do `docs/testy-reczne/admin-padroncini.md`), `docs/testy-reczne/corse-padroncino.md`.
 - **TODO (krok Stripe Connect, D118):** lista i `accept_job()` wymagają `carriers.stripe_payouts_enabled` — migracja + test RLS.
 - Dalej (bez zmian): statusy w PWA, GPS, podpis i zdjęcia (Etap 4/5), „Segnala un problema” (D39), Stripe Connect, SMS.
