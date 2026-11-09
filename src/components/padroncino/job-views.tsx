@@ -197,3 +197,68 @@ export function Notice({ tone, children }: { tone: "info" | "error" | "success";
     </div>
   );
 }
+
+/**
+ * After the "Rinuncia" deadline (or release_job too_late): no button, only how to reach Transigo. Phone and
+ * e-mail come from settings.company_* (public data); without them the public contact page. "Segnala un
+ * problema" (D39) comes with the delivery step.
+ */
+export function ContactTransigo({ text, phone, email }: { text: string; phone: string | null; email: string | null }) {
+  return (
+    <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+      <h2 className="font-semibold text-amber-900">Contatta Transigo</h2>
+      <p className="mt-1 text-sm text-amber-900">{text}</p>
+      <ul className="mt-2 space-y-1 text-sm">
+        {phone ? (
+          <li>
+            <a href={`tel:${phone.replace(/[^\d+]/g, "")}`} className="inline-flex min-h-11 items-center font-semibold text-[#0B3B8C] underline">
+              Chiama {phone}
+            </a>
+          </li>
+        ) : null}
+        {email ? (
+          <li className="break-words">
+            <span className="text-zinc-700">E-mail: </span>
+            <a href={`mailto:${email}`} className="inline-flex min-h-11 items-center font-semibold break-all text-[#0B3B8C] underline">
+              {email}
+            </a>
+          </li>
+        ) : null}
+        {!phone && !email ? (
+          <li>
+            <Link href="/contatti" className="inline-flex min-h-11 items-center font-semibold text-[#0B3B8C] underline">
+              Scrivici dalla pagina Contatti →
+            </Link>
+          </li>
+        ) : null}
+      </ul>
+    </section>
+  );
+}
+
+/** Tab bar of "Le mie corse": links (work without JS), counters, ≥ 44 px, current tab marked. */
+export function MyJobTabs({ tabs }: { tabs: { key: string; label: string; count: number; href: string; current: boolean }[] }) {
+  return (
+    <nav aria-label="Stato delle corse" className="grid grid-cols-3 gap-1 rounded-2xl bg-zinc-200/70 p-1">
+      {tabs.map((t) => (
+        <Link
+          key={t.key}
+          href={t.href}
+          replace
+          aria-current={t.current ? "page" : undefined}
+          className={`flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-1 text-sm font-semibold ${
+            t.current ? "bg-white text-[#0B3B8C] shadow-sm" : "text-zinc-600 active:bg-white/60"
+          }`}
+        >
+          <span className="truncate">{t.label}</span>
+          <span
+            className={`min-w-6 rounded-full px-1.5 text-center text-xs leading-5 ${t.current ? "bg-[#0B3B8C] text-white" : "bg-zinc-300 text-zinc-700"}`}
+            aria-label={`${t.count} ${t.count === 1 ? "corsa" : "corse"}`}
+          >
+            {t.count}
+          </span>
+        </Link>
+      ))}
+    </nav>
+  );
+}

@@ -2,7 +2,7 @@
 
 Plan: `docs/plany/corse-padroncino.md`. Decyzje: D21, D116, D119–D121. Test na **lokalnej** bazie (Docker), aplikacja na `localhost:3000`.
 
-> Kroki A–C (krok 4a planu): nawigacja, lista, szczegóły, „Accetta la Corsa”, „già accettata”. „Le mie corse” z zakładkami i „Rinuncia” dojdą w kroku 4b.
+> Kroki A–D (krok 4a planu): nawigacja, lista, szczegóły, „Accetta la Corsa”, „già accettata”, blokady. Kroki E–G (krok 4b): „Le mie corse” z zakładkami, „Rinuncia”, liczniki, konto zawieszone. **Kroki E–G zrób na świeżych seedach** (albo przed krokiem C) — w C Ferri przyjmuje 000011, co zmienia liczniki.
 
 ## Przygotowanie
 
@@ -85,7 +85,7 @@ Pozostałe zlecenia z `seed-demo` (000001 do zapłaty, 000009 wygasłe) nie są 
 6. **Galli** na starej stronie: „Accetta la Corsa” → „Conferma e accetta” → przejście na listę z komunikatem „Questa corsa è già stata accettata da un altro padroncino. L'elenco è stato aggiornato.”; 000011 zniknęło, pozostałe kursy są (lista nie jest pusta).
 7. Galli otwiera ponownie adres 000011 → „Questa corsa non è più disponibile.” + „Vedi le corse disponibili”.
 8. Ferri otwiera adres `/padroncino/corse/<id 000011>` → przekierowanie do „Le mie corse” (kurs jest jego).
-9. **Le mie corse** (Ferri): 000011 na liście razem z 000004–000008, 000014, 000015 (zakładki w kroku 4b).
+9. **Le mie corse** (Ferri): 000011 w zakładce „Da fare” razem z 000004, 000014, 000015.
 
 ## D. Blokady i błędy
 
@@ -93,3 +93,40 @@ Pozostałe zlecenia z `seed-demo` (000001 do zapłaty, 000009 wygasłe) nie są 
 2. `verdi@example.com` (w weryfikacji): to samo (konto nieaktywne).
 3. Pusta lista: Galli po przyjęciu przez siebie wszystkich kursów (albo na bazie bez kursów) → „Nessuna corsa disponibile al momento” + „Aggiorna”.
 4. Błąd ładowania: zatrzymaj lokalną bazę (`npm run db:local:stop`) i odśwież **Corse** → „Non è stato possibile caricare le corse.” + „Riprova”. Po `npm run db:local:start` „Riprova” ładuje listę.
+
+## E. „Le mie corse” i liczniki (Ferri, świeże seedy)
+
+1. **Profilo** (`/padroncino`): kafelki **4 — Corse disponibili →**, **3 — Da fare →** i szeroki **2 — Corse in corso →**. Każdy kafelek prowadzi do właściwej listy / zakładki.
+2. **Le mie corse:** trzy zakładki z licznikami **Da fare 3 / In corso 2 / Concluse 2**; aktywna podświetlona.
+   - *Da fare:* 000014, 000004, 000015 (najbliższy odbiór pierwszy), etykieta „Da ritirare”.
+   - *In corso:* 000005 („Ritirato”), 000006 („In viaggio”).
+   - *Concluse:* 000007, 000008 (najnowsze pierwsze), „Consegnato”.
+3. Zakładki działają też po odświeżeniu strony i przyciskiem „wstecz” (adres `?tab=in-corso` itd.). Zmyślony `?tab=xyz` → „Da fare”.
+4. Galli (`padroncino2@example.com`): każda zakładka ma swój pusty stan („Nessuna corsa da fare / in corso / conclusa”); w „Da fare” przycisk „Vedi le corse disponibili”.
+5. Szczegóły dowolnego kursu: „Ritiro” (kiedy, pełny adres, piano, kontakt z „Chiama +39…”), „Consegna” (adres, piano, kontakt, dystans), przy każdym „Apri in Google Maps” (otwiera nawigację do adresu), „Merce e servizi”, „Note del cliente”, kwota, „Storico” (godziny w czasie włoskim). „← Le mie corse” wraca do zakładki tego kursu.
+6. 000003-podobne zlecenie z magazynem (np. po przyjęciu 000003): dwie tratte, kontakt klienta tylko przy pierwszym odbiorze i ostatniej dostawie, przy magazynie „Magazzino Transigo”.
+
+## F. „Rinuncia alla corsa” (Ferri)
+
+1. **000014** (przyjęty 2 h temu, odbiór jutro): **brak** przycisku „Rinuncia”; zamiast niego żółty blok **„Contatta Transigo”** z tekstem o minionym terminie i telefonem / e-mailem Transigo (z `settings.company_*`; gdy puste — link „Scrivici dalla pagina Contatti”).
+2. **000015** (odbiór za 6 dni): nad przyciskiem **„Puoi rinunciare fino alle 14:00 di …”** — termin = 48 h przed początkiem okna odbioru, w czasie włoskim.
+3. „Rinuncia alla corsa” → okno: „tornerà disponibile per gli altri padroncini”, „Non vedrai più indirizzi e contatti”, „Il team Transigo riceverà un avviso”. „No, tengo la corsa” / Esc / kliknięcie w tło zamyka okno — nic się nie dzieje.
+4. Ponownie → **„Sì, rinuncio alla corsa”**: przycisk „Rinuncia in corso…”, nieaktywny (podwójne kliknięcie nie wysyła drugi raz).
+5. Powrót na „Le mie corse” z zielonym „Hai rinunciato alla corsa. La corsa torna disponibile…”; *Da fare* = 2, 000015 zniknęło. Stary adres kursu → „nie znaleziono”.
+6. Galli → **Corse**: 000015 jest na liście.
+7. Outbox (Studio albo `docker exec supabase_db_TransiGo psql -U postgres -c "select template_code, subject from email_outbox where template_code='carrier_released_job'"`): mail „Rinuncia alla corsa TG-2026-000015 – Ferri Trasporti Srl”.
+8. `too_late` w trakcie (opcjonalnie): otwórz 000015 w dwóch kartach u Ferriego **przed** krokiem 4, zrezygnuj w jednej, w drugiej kliknij „Sì, rinuncio” → „Questa corsa non è più assegnata a te.” (bez błędu technicznego). Wariant „termin minął w trakcie” (baza zwraca `too_late`) pokazuje ten sam blok „Contatta Transigo” co pkt 1 — sprawdzony testem (`actions.test.ts`, `carrier-job-screens.test.ts`).
+
+## G. Konto zawieszone (Neri, `neri@example.com`)
+
+1. **Profilo:** „Account sospeso” z powodem, pod nim karta **„Le mie corse” — „1 corsa da fare o in corso: restano assegnate a te.”** z licznikiem 1.
+2. Karta → „Le mie corse” → 000017 w „Da fare”; szczegóły z adresami i kontaktami.
+3. „Puoi rinunciare fino alle …” → „Rinuncia alla corsa” → „Sì, rinuncio” → powrót z komunikatem; mail `carrier_released_job` dla 000017 w outboxie.
+4. **Profilo:** „Nessuna corsa da fare o in corso.” **Corse:** nadal blokada (konto zawieszone).
+5. `verdi@example.com` (w weryfikacji): „Le mie corse” puste; rezygnacja niemożliwa (brak kursów; akcja zwraca „Operazione non consentita.” — test).
+
+## Telefon (do sprawdzenia przez właściciela)
+
+- 360–390 px: zakładki z licznikami mieszczą się w jednym wierszu, brak przewijania w poziomie.
+- Okno „Rinuncia” wysuwa się od dołu, przyciski nad paskiem domowym iPhone'a (safe-area).
+- „Chiama +39…” otwiera dzwonienie, „Apri in Google Maps” — aplikację map z nawigacją.

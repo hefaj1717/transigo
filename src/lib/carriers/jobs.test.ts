@@ -9,8 +9,17 @@ import {
   jobDbError,
   jobListNotice,
   jobListNoticeKey,
+  countMyJobs,
+  jobsForTab,
+  MY_JOB_TAB_EMPTY,
+  MY_JOB_TABS,
+  myJobsHref,
+  myJobsNotice,
   myJobTab,
   overlappingJobs,
+  parseMyJobTab,
+  RELEASE_EXPIRED_TEXT,
+  releaseDeadlineLabel,
   releaseDeadline,
   releaseInfo,
   romeDateTime,
@@ -94,7 +103,7 @@ describe("times are always Europe/Rome, whatever the server's time zone", () => 
       { status: "assigned", assigned_at: "2026-11-09T10:00:00Z", pickup_window_start: "2026-11-14T07:00:00Z" },
       new Date("2026-11-09T12:00:00Z"),
     );
-    expect(info.allowed && info.label).toBe("Puoi rinunciare fino al 12 novembre alle 08:00.");
+    expect(info.allowed && info.label).toBe("Puoi rinunciare fino alle 08:00 di giovedì 12 novembre.");
   });
 });
 
@@ -275,6 +284,66 @@ describe("myJobTab", () => {
     expect(myJobTab("delivered")).toBe("concluse");
     expect(myJobTab("completed")).toBe("concluse");
     expect(myJobTab("refunded")).toBeNull();
+  });
+});
+
+describe("Le mie corse — tabs, counters, notices", () => {
+  const j = (orderId: string, tab: "da-fare" | "in-corso" | "concluse", pickupWindowStart: string) => ({ orderId, tab, pickupWindowStart });
+  const jobs = [
+    j("a", "da-fare", "2026-11-12T07:00:00Z"),
+    j("b", "concluse", "2026-11-01T07:00:00Z"),
+    j("c", "da-fare", "2026-11-10T07:00:00Z"),
+    j("d", "in-corso", "2026-11-09T07:00:00Z"),
+    j("e", "concluse", "2026-11-05T07:00:00Z"),
+  ];
+
+  it("counts per tab (zero tabs included)", () => {
+    expect(countMyJobs(jobs)).toEqual({ "da-fare": 2, "in-corso": 1, concluse: 2 });
+    expect(countMyJobs([])).toEqual({ "da-fare": 0, "in-corso": 0, concluse: 0 });
+  });
+
+  it("Da fare / In corso: next pickup first; Concluse: most recent first", () => {
+    expect(jobsForTab(jobs, "da-fare").map((x) => x.orderId)).toEqual(["c", "a"]);
+    expect(jobsForTab(jobs, "in-corso").map((x) => x.orderId)).toEqual(["d"]);
+    expect(jobsForTab(jobs, "concluse").map((x) => x.orderId)).toEqual(["e", "b"]);
+    expect(jobs.map((x) => x.orderId)).toEqual(["a", "b", "c", "d", "e"]); // input untouched
+  });
+
+  it("?tab= accepts only the three keys, default Da fare", () => {
+    expect(parseMyJobTab("in-corso")).toBe("in-corso");
+    expect(parseMyJobTab("concluse")).toBe("concluse");
+    for (const bad of [undefined, "", "tutte", ["in-corso"], "__proto__"]) expect(parseMyJobTab(bad)).toBe("da-fare");
+  });
+
+  it("every tab has an Italian empty state", () => {
+    for (const t of MY_JOB_TABS) {
+      expect(MY_JOB_TAB_EMPTY[t.key].title).toMatch(/^Nessuna corsa/);
+      expect(MY_JOB_TAB_EMPTY[t.key].text.length).toBeGreaterThan(10);
+    }
+  });
+
+  it("links: default tab without query; outcome notice by key only", () => {
+    expect(myJobsHref()).toBe("/padroncino/le-mie-corse");
+    expect(myJobsHref({ tab: "da-fare" })).toBe("/padroncino/le-mie-corse");
+    expect(myJobsHref({ tab: "concluse" })).toBe("/padroncino/le-mie-corse?tab=concluse");
+    expect(myJobsHref({ esito: "rinuncia" })).toBe("/padroncino/le-mie-corse?esito=rinuncia");
+    expect(myJobsNotice("rinuncia")).toMatch(/torna disponibile per gli altri padroncini/);
+    for (const bad of [undefined, "toString", "__proto__", "<script>", ["rinuncia"]]) expect(myJobsNotice(bad)).toBeNull();
+  });
+});
+
+describe("Rinuncia texts", () => {
+  const original = process.env.TZ;
+  afterEach(() => {
+    process.env.TZ = original;
+  });
+  it.each(["UTC", "Asia/Tokyo", "Europe/Rome"])("deadline label in Rome time (server TZ %s)", (tz) => {
+    process.env.TZ = tz;
+    expect(releaseDeadlineLabel("2026-11-10T23:30:00Z")).toBe("Puoi rinunciare fino alle 00:30 di mercoledì 11 novembre.");
+    expect(releaseDeadlineLabel("2026-07-01T06:00:00Z")).toBe("Puoi rinunciare fino alle 08:00 di mercoledì 1 luglio.");
+  });
+  it("after the deadline: contact Transigo, same text as too_late", () => {
+    expect(RELEASE_EXPIRED_TEXT).toMatch(/contatta subito Transigo/);
   });
 });
 

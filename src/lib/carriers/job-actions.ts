@@ -16,7 +16,10 @@ export type AcceptJobActionState =
   | { ok: true; message: string; newlyAssigned: boolean; href: string; at: number }
   | { ok: false; error: string; refreshList: boolean; at: number };
 
-export type ReleaseJobActionState = { ok: true; message: string; at: number } | { ok: false; error: string; at: number };
+/** `tooLate`: the deadline passed (release_job too_late) — shown as "Contatta Transigo", not as an error. */
+export type ReleaseJobActionState =
+  | { ok: true; message: string; href: string; at: number }
+  | { ok: false; error: string; tooLate: boolean; at: number };
 
 /**
  * Accept needs an ACTIVE carrier (D21, D116). Checked from the session before anything else runs; the database

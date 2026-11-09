@@ -180,7 +180,7 @@ describe("carrier job Server Actions", () => {
   it("suspended padroncino may still release its own job (D116) — the database decides", async () => {
     state.ctx = signedIn("padroncino", { carrierStatus: "suspended" });
     state.rpcResult.release_job = { data: null, error: { code: "55000", details: "too_late", message: "release_job: too late" } };
-    expect(await releaseJobAction(null, attackForm())).toMatchObject({ ok: false, error: JOB_MSG.releaseTooLate });
+    expect(await releaseJobAction(null, attackForm())).toMatchObject({ ok: false, error: JOB_MSG.releaseTooLate, tooLate: true });
     expect(state.rpcCalls).toEqual([{ fn: "release_job", args: { p_order_id: ORDER_ID } }]);
   });
 
@@ -272,7 +272,7 @@ describe("carrier job Server Actions", () => {
       state.tableResult.carriers = { data: { company_name: "Rossi Trasporti" }, error: null };
       state.rpcResult.release_job = { data: { released_at: "2026-11-09T10:05:00Z", order_number: "TG-1" }, error: null };
 
-      expect(await releaseJobAction(null, attackForm())).toMatchObject({ ok: true, message: JOB_MSG.released });
+      expect(await releaseJobAction(null, attackForm())).toMatchObject({ ok: true, message: JOB_MSG.released, href: "/padroncino/le-mie-corse?esito=rinuncia" });
       expect(state.rpcCalls).toEqual([{ fn: "release_job", args: { p_order_id: ORDER_ID } }]);
       expect(state.eqCalls.filter(([c]) => c.endsWith("carrier_id") || c.endsWith("profile_id")).every(([, v]) => v === CARRIER_ID)).toBe(true);
       const firstService = state.events.findIndex((e) => e.startsWith("service:"));

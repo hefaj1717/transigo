@@ -364,7 +364,8 @@ export async function acceptJob(db: SupabaseClient, userId: string, orderId: str
   return outcome;
 }
 
-export type ReleaseResult = { ok: true; message: string } | { ok: false; error: string };
+/** `tooLate`: release_job refused with too_late (the deadline passed meanwhile) — the UI shows "Contatta Transigo". */
+export type ReleaseResult = { ok: true; message: string } | { ok: false; error: string; tooLate: boolean };
 
 /**
  * release_job with the carrier's session (D121; the database decides the 15 min / 48 h rule). Then one e-mail
@@ -372,7 +373,7 @@ export type ReleaseResult = { ok: true; message: string } | { ok: false; error: 
  * carrier's session BEFORE the call — afterwards the order is no longer the carrier's (RLS).
  */
 export async function releaseJob(db: SupabaseClient, userId: string, orderId: string, notify: JobNotifyDeps): Promise<ReleaseResult> {
-  if (!isUuid(orderId)) return { ok: false, error: JOB_MSG.notAssigned };
+  if (!isUuid(orderId)) return { ok: false, error: JOB_MSG.notAssigned, tooLate: false };
 
   const { data: before } = await db
     .from("orders")
@@ -384,7 +385,8 @@ export async function releaseJob(db: SupabaseClient, userId: string, orderId: st
   const { data, error } = await db.rpc("release_job", { p_order_id: orderId }).single<{ released_at: string; order_number: string }>();
   if (error || !data) {
     if (error?.code !== "55000" && error?.code !== "22023") logDbError("release_job", error);
-    return { ok: false, error: jobDbError("release", error).message };
+    const tooLate = error?.code === "55000" && error.details === "too_late";
+    return { ok: false, error: jobDbError("release", error).message, tooLate };
   }
 
   try {

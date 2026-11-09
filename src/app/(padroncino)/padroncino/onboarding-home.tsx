@@ -5,6 +5,8 @@ import { canEditOnboarding, CARRIER_PATHS, carrierOnboarding, describeMissing } 
 import { CARRIER_DOCUMENT_TYPES } from "@/lib/carriers/document-types";
 import { loadCarrier, loadVehicles } from "@/lib/carriers/pages";
 import { createClient } from "@/lib/supabase/server";
+import { countMyJobs, JOB_PATHS } from "@/lib/carriers/jobs";
+import { loadMyJobs } from "@/lib/carriers/jobs-server";
 
 // Carrier home while the account is not active (D99–D101, D108, D109, D112). Reads with the carrier's own
 // session; what is missing comes from carrier_onboarding_missing().
@@ -32,9 +34,29 @@ export async function OnboardingHome({ userId }: { userId: string }) {
   });
 
   if (view === "suspended") {
+    // D116: jobs accepted before the suspension stay with the carrier (and may be released) — show them.
+    const myJobs = await loadMyJobs(db, userId).catch(() => null);
+    const counts = myJobs ? countMyJobs(myJobs) : null;
+    const open = counts ? counts["da-fare"] + counts["in-corso"] : null;
     return (
       <div className="space-y-4">
         <Notice tone="red" title="Account sospeso">{onboarding.notice}</Notice>
+        <Link href={JOB_PATHS.mine} className="flex min-h-12 items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white p-4 active:bg-zinc-50">
+          <span>
+            <span className="block font-semibold text-zinc-900">Le mie corse</span>
+            <span className="block text-sm text-zinc-600">
+              {open === null
+                ? "Apri le corse che hai già accettato."
+                : open === 0
+                  ? "Nessuna corsa da fare o in corso."
+                  : `${open === 1 ? "1 corsa" : `${open} corse`} da fare o in corso: restano assegnate a te.`}
+            </span>
+          </span>
+          <span className="flex shrink-0 items-center gap-2">
+            {open !== null ? <span className="min-w-8 rounded-full bg-[#0B3B8C] px-2 text-center text-sm leading-7 font-semibold text-white">{open}</span> : null}
+            <span aria-hidden className="text-[#0B3B8C]">→</span>
+          </span>
+        </Link>
         <p className="text-sm text-zinc-700">
           Se la sospensione riguarda un documento scaduto o mancante, carica la versione aggiornata: il team Transigo la verificherà e deciderà sulla riattivazione.
         </p>

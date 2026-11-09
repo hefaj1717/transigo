@@ -379,8 +379,17 @@ export function releaseInfo(
   if (o.status !== "assigned" || !o.assigned_at) return { allowed: false, reason: "status", deadline: null };
   const deadline = releaseDeadline(o.assigned_at, o.pickup_window_start);
   if (now.getTime() > deadline.getTime()) return { allowed: false, reason: "expired", deadline };
-  return { allowed: true, deadline, label: `Puoi rinunciare fino al ${romeDateTime(deadline)}.` };
+  return { allowed: true, deadline, label: releaseDeadlineLabel(deadline) };
 }
+
+/** "Puoi rinunciare fino alle 08:00 di giovedì 12 novembre." (Europe/Rome). */
+export function releaseDeadlineLabel(deadline: Date | string): string {
+  return `Puoi rinunciare fino alle ${romeTime(deadline)} di ${romeDay(deadline)}.`;
+}
+
+/** After the deadline (or when release_job answered too_late): no button, only "Contatta Transigo". */
+export const RELEASE_EXPIRED_TEXT =
+  "Il termine per rinunciare è scaduto. Se non puoi effettuare la corsa o c'è un problema, contatta subito Transigo.";
 
 // ---------------------------------------------------------------------------
 // Overlapping jobs (D120: allowed, the UI only warns)
@@ -434,6 +443,54 @@ export function myJobTab(status: string): MyJobTab | null {
     default:
       return null;
   }
+}
+
+/** Empty state of each tab (Italian). */
+export const MY_JOB_TAB_EMPTY: Record<MyJobTab, { title: string; text: string }> = {
+  "da-fare": { title: "Nessuna corsa da fare", text: "Le corse che accetti compaiono qui fino al ritiro." },
+  "in-corso": { title: "Nessuna corsa in corso", text: "Qui trovi le corse ritirate e in viaggio verso la consegna." },
+  concluse: { title: "Nessuna corsa conclusa", text: "Le corse consegnate compaiono qui." },
+};
+
+/** ?tab= → a tab; anything else → "Da fare". */
+export function parseMyJobTab(param: unknown): MyJobTab {
+  return MY_JOB_TABS.some((t) => t.key === param) ? (param as MyJobTab) : "da-fare";
+}
+
+/** Jobs per tab for the counters (and the home page). */
+export function countMyJobs(jobs: readonly { tab: MyJobTab }[]): Record<MyJobTab, number> {
+  const out: Record<MyJobTab, number> = { "da-fare": 0, "in-corso": 0, concluse: 0 };
+  for (const j of jobs) out[j.tab] += 1;
+  return out;
+}
+
+/**
+ * The jobs of one tab: "Da fare" and "In corso" by pickup time (next first), "Concluse" the most recent first.
+ * The input is already ordered by pickup time (loadMyJobs); this does not rely on it.
+ */
+export function jobsForTab<T extends { tab: MyJobTab; pickupWindowStart: string }>(jobs: readonly T[], tab: MyJobTab): T[] {
+  const t = (j: T) => new Date(j.pickupWindowStart).getTime();
+  const list = jobs.filter((j) => j.tab === tab);
+  return list.sort((a, b) => (tab === "concluse" ? t(b) - t(a) : t(a) - t(b)));
+}
+
+/** Path of "Le mie corse" with a tab and/or an outcome notice (?esito=). */
+export function myJobsHref(opts: { tab?: MyJobTab; esito?: MyJobsNotice } = {}): string {
+  const q = new URLSearchParams();
+  if (opts.tab && opts.tab !== "da-fare") q.set("tab", opts.tab);
+  if (opts.esito) q.set("esito", opts.esito);
+  const qs = q.toString();
+  return qs ? `${JOB_PATHS.mine}?${qs}` : JOB_PATHS.mine;
+}
+
+/** Notices on "Le mie corse" (?esito=): only these keys, never free text in the URL. */
+export const MY_JOBS_NOTICES = {
+  rinuncia: "Hai rinunciato alla corsa. La corsa torna disponibile per gli altri padroncini e il team Transigo è stato avvisato.",
+} as const;
+export type MyJobsNotice = keyof typeof MY_JOBS_NOTICES;
+
+export function myJobsNotice(param: unknown): string | null {
+  return typeof param === "string" && Object.hasOwn(MY_JOBS_NOTICES, param) ? MY_JOBS_NOTICES[param as MyJobsNotice] : null;
 }
 
 export const CARRIER_JOB_STATUS_LABEL: Record<string, string> = {

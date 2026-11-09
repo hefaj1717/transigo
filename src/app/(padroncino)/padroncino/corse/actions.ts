@@ -13,7 +13,7 @@ import {
   type ReleaseJobActionState,
 } from "@/lib/carriers/job-actions";
 import { jobNotifyDeps } from "@/lib/carriers/job-deps";
-import { JOB_MSG, JOB_PATHS } from "@/lib/carriers/jobs";
+import { JOB_MSG, JOB_PATHS, myJobsHref } from "@/lib/carriers/jobs";
 import { acceptJob, releaseJob } from "@/lib/carriers/jobs-server";
 import { CARRIER_PATHS } from "@/lib/carriers/onboarding";
 import { createClient } from "@/lib/supabase/server";
@@ -58,10 +58,10 @@ export async function acceptJobAction(_prev: AcceptJobActionState | null, fd: Fo
 export async function releaseJobAction(_prev: ReleaseJobActionState | null, fd: FormData): Promise<ReleaseJobActionState> {
   const ctx = await requireArea("padroncino", JOB_PATHS.mine);
   const at = Date.now();
-  if (!canReleaseJobs(ctx.carrierStatus)) return { ok: false, error: JOB_MSG.forbidden, at };
+  if (!canReleaseJobs(ctx.carrierStatus)) return { ok: false, error: JOB_MSG.forbidden, tooLate: false, at };
 
   const parsed = releaseJobForm.safeParse(formDataToObject(fd));
-  if (!parsed.success) return { ok: false, error: JOB_MSG.notAssigned, at };
+  if (!parsed.success) return { ok: false, error: JOB_MSG.notAssigned, tooLate: false, at };
   const { orderId } = parsed.data;
 
   let result: Awaited<ReturnType<typeof releaseJob>>;
@@ -69,13 +69,13 @@ export async function releaseJobAction(_prev: ReleaseJobActionState | null, fd: 
     result = await releaseJob(await createClient(), ctx.userId, orderId, jobNotifyDeps());
   } catch (e) {
     console.error("[jobs] releaseJobAction:", e instanceof Error ? e.message : e);
-    return { ok: false, error: JOB_MSG.generic, at };
+    return { ok: false, error: JOB_MSG.generic, tooLate: false, at };
   }
-  if (!result.ok) return { ok: false, error: result.error, at };
+  if (!result.ok) return { ok: false, error: result.error, tooLate: result.tooLate, at };
 
   revalidatePath(JOB_PATHS.mine);
   revalidatePath(JOB_PATHS.my_job(orderId));
   revalidatePath(JOB_PATHS.available);
   revalidatePath(CARRIER_PATHS.home);
-  return { ok: true, message: result.message, at };
+  return { ok: true, message: result.message, href: myJobsHref({ esito: "rinuncia" }), at };
 }

@@ -258,7 +258,7 @@ describe("Rinuncia → e-mail to the Transigo team (D121)", () => {
     expect((await loadMyJob(c.user.client, c.user.id, orderId))?.release).toMatchObject({ allowed: false, reason: "expired" });
 
     const { deps, calls } = notifyDeps();
-    expect(await releaseJob(c.user.client, c.user.id, orderId, deps)).toEqual({ ok: false, error: JOB_MSG.releaseTooLate });
+    expect(await releaseJob(c.user.client, c.user.id, orderId, deps)).toEqual({ ok: false, error: JOB_MSG.releaseTooLate, tooLate: true });
     expect(calls.serviceDb).toBe(0);
     expect((await orderRow(orderId)).status).toBe("assigned");
     expect(await releaseMails(await orderNumber(orderId))).toEqual([]);
@@ -269,7 +269,7 @@ describe("Rinuncia → e-mail to the Transigo team (D121)", () => {
     const [a, b] = await Promise.all([activeCarrier(), activeCarrier()]);
     await acceptJob(a.user.client, a.user.id, orderId, a.vehicleId, notifyDeps().deps);
     const { deps, calls } = notifyDeps();
-    expect(await releaseJob(b.user.client, b.user.id, orderId, deps)).toEqual({ ok: false, error: JOB_MSG.notAssigned });
+    expect(await releaseJob(b.user.client, b.user.id, orderId, deps)).toEqual({ ok: false, error: JOB_MSG.notAssigned, tooLate: false });
     expect(calls.serviceDb).toBe(0);
     expect(await orderRow(orderId)).toMatchObject({ status: "assigned", carrier_id: a.user.id });
   });
