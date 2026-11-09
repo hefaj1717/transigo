@@ -11,7 +11,7 @@ export function PayNowButton({ orderId, compact = false }: { orderId: string; co
   return (
     <form action={action} className={compact ? "inline" : "space-y-2"}>
       <input type="hidden" name="orderId" value={orderId} />
-      <button type="submit" disabled={pending} className={`rounded-md bg-blue-600 font-medium text-white hover:bg-blue-700 disabled:opacity-60 ${compact ? "px-3 py-1 text-xs" : "px-4 py-2"}`}>
+      <button type="submit" disabled={pending} className={`rounded-md bg-accent-600 font-semibold text-white hover:bg-accent-700 disabled:opacity-60 ${compact ? "px-3 py-1 text-xs" : "px-4 py-2"}`}>
         {pending ? "Attendere…" : "Paga ora"}
       </button>
       {state.error ? <p role="alert" className="text-sm text-red-700">{state.error}</p> : null}
@@ -60,7 +60,7 @@ export function PaymentPending() {
     return () => clearTimeout(t);
   }, [tries, router]);
   return (
-    <div role="status" className="rounded-md bg-blue-50 p-4 text-sm text-blue-900">
+    <div role="status" className="rounded-md bg-brand-50 p-4 text-sm text-brand-900">
       <p className="font-medium">Pagamento in verifica…</p>
       <p className="mt-1">
         {tries < 40

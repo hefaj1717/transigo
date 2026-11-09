@@ -19,7 +19,7 @@ export function ResumeBooking() {
   const draft = useSyncExternalStore(subscribe, hasDraft, () => false);
   if (!draft) return null;
   return (
-    <div className="mb-6 rounded-md border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+    <div className="mb-6 rounded-md border border-brand-200 bg-brand-50 p-4 text-sm text-brand-900">
       Hai una prenotazione in corso.{" "}
       <Link href="/prenota?passo=account" className="font-medium underline">Riprendi la prenotazione</Link>
     </div>
