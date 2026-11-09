@@ -18,7 +18,27 @@ function supabase(args: string[]): string {
   return execFileSync("npx", ["supabase", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
 
-export default function setup(project: TestProject) {
+/**
+ * After `db reset` the database restarts and PostgREST rebuilds its schema cache; requests made before that
+ * fail with "Could not query the database for the schema cache". Waits until a REST query succeeds (max 60 s).
+ */
+async function waitForRest(url: string, serviceKey: string) {
+  const deadline = Date.now() + 60_000;
+  let last = "";
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`${url}/rest/v1/settings?select=id&limit=1`, { headers: { apikey: serviceKey, authorization: `Bearer ${serviceKey}` } });
+      if (res.ok) return;
+      last = `${res.status} ${await res.text()}`;
+    } catch (e) {
+      last = e instanceof Error ? e.message : String(e);
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`Local REST API not ready 60 s after the reset: ${last}`);
+}
+
+export default async function setup(project: TestProject) {
   let status: Record<string, string>;
   try {
     status = JSON.parse(supabase(["status", "-o", "json"]));
@@ -35,6 +55,7 @@ export default function setup(project: TestProject) {
     // No --remote flag: Supabase CLI 3.x resets the local stack by default, never the linked cloud project.
     supabase(["db", "reset", "--no-seed"]);
   }
+  await waitForRest(url, serviceKey);
 
   project.provide("supabase", { url, anonKey, serviceKey });
 }
