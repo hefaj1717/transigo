@@ -51,13 +51,18 @@ Zatwierdzony przez właściciela 2026-11-09. Po każdym kroku: testy, commit, pu
   - `seed-demo.mjs`: drugi aktywny przewoźnik Galli (camion) do „già accettata”; opłacone kursy 000010 (furgone piccolo), 000011 (test „già accettata”), 000012 (camion, 6 palet) i 000013 (blat 4 m, furgone grande) — dwa ostatnie za duże dla furgonu medio; 000014 przyjęty przez Ferriego (`accept_job` jego sesją) i przesunięty o 2 h wstecz, odbiór jutro → Rinuncia zablokowana; 000015 odbiór za 6 dni → Rinuncia możliwa. Sprawdzone sesjami: Ferri widzi 02, 03, 10, 11; Galli także 12, 13; `release_job` na 000014 → `too_late`.
   - `seed-local-carriers.mjs`: Bianchi z kursem przypisanym przez admina (pojazd `BI100CC`, ostrzeżenie przy „Sospendi”), Neri z kursem przypisanym przed zawieszeniem (odbiór za 5 dni — może zrezygnować), drugi przewoźnik w weryfikacji (Viola) zamiast ponownego uruchomienia seeda w kroku B4.
   - `docs/testy-reczne/corse-padroncino.md` (konta demo i co pokazują; kroki testu dojdą w 4a/4b i 6); zaktualizowane `admin-padroncini.md` (D116), `admin-ordini.md`, `panel-klienta.md`.
-- [ ] **Krok 4a — nawigacja i lista kursów (mobile-first, `CarrierShell`)**
-  - dolna nawigacja `CarrierShell`: *Corse*, *Le mie corse*, *Profilo*;
-  - `/padroncino/corse`: karty, „Aggiorna”, przy blokadach wyjaśnienie zamiast listy.
-- [ ] **Krok 4b — szczegóły, „Accetta la Corsa”, „Le mie corse”, „Rinuncia”**
+- [x] **Krok 4a — nawigacja, lista, szczegóły i „Accetta la Corsa” (mobile-first)** — zrobione 2026-11-09.
+  - dolna nawigacja `CarrierShell` (`src/components/padroncino/bottom-nav.tsx`): *Corse*, *Le mie corse*, *Profilo* (= `/padroncino`); stała na dole z safe-area, `main` rezerwuje jej wysokość;
+  - `/padroncino/corse`: karty (`job-views.tsx`, bez danych osobowych), „Aggiorna”, „Nessuna corsa disponibile al momento”, błąd z „Riprova”, przy blokadach wyjaśnienie z „Cosa fare →” zamiast listy;
+  - `/padroncino/corse/[id]`: szczegóły bez danych osobowych (D119), kwota z rozbiciem, wybór pojazdu (gdy > 1), ostrzeżenie o nakładaniu (D120), przycisk „Accetta la Corsa” przyklejony nad nawigacją → okno potwierdzenia (trasa, data, pojazd, kwota; „Annulla”, Esc, kliknięcie tła) → „Conferma e accetta” zablokowany z napisem „Accettazione in corso…” (+ blokada podwójnego kliknięcia); własny kurs → przekierowanie do „Le mie corse”; kurs niedostępny → „Questa corsa non è più disponibile.”;
+  - błąd z `refreshList` (np. `already_taken`) → `/padroncino/corse?avviso=<klucz JOB_MSG>`: komunikat + odświeżona lista (w URL tylko klucz z białej listy `JOB_LIST_NOTICES`, testy w `jobs.test.ts`);
+  - po przyjęciu: `/padroncino/le-mie-corse/[id]?esito=accettata|gia-tua` — potwierdzenie i pełne dane (adresy, kontakty `tel:`, merce, uwagi, pojazd, kwota);
+  - `/padroncino/le-mie-corse`: na razie prosta lista (cel dla nawigacji) — zakładki w 4b.
+- [ ] **Krok 4b — „Le mie corse”, „Rinuncia”, liczniki, konto zawieszone**
+  - `/padroncino/le-mie-corse`: zakładki *Da fare* / *In corso* / *Concluse*;
+  - rozbudowa `/padroncino/le-mie-corse/[id]` (np. nawigacja do adresu, historia statusów);
+  - „Rinuncia alla corsa” z potwierdzeniem, terminem (Europe/Rome) i blokadą przycisku; po terminie „Contatta Transigo” („Segnala un problema” D39 — w kroku realizacji);
   - `/padroncino` (aktywny): liczniki dostępnych i „Da fare”;
-  - `/padroncino/corse/[id]`: szczegóły bez danych osobowych, kwota, wybór pojazdu (gdy > 1), ostrzeżenie o nakładaniu, „Accetta la Corsa” z potwierdzeniem i blokadą przycisku → `/padroncino/le-mie-corse/[id]`; `already_taken` → komunikat + odświeżenie listy;
-  - `/padroncino/le-mie-corse` (+ `[id]`): zakładki, pełne adresy, kontakty `tel:`, uwagi, piętra, usługi, kwota; „Rinuncia alla corsa” z potwierdzeniem, terminem (Europe/Rome) i blokadą przycisku; po terminie „Contatta Transigo” („Segnala un problema” D39 — w kroku realizacji);
   - zawieszony (D116): na „Account sospeso” link i licznik „Le mie corse”.
 - [ ] **Krok 6 — przegląd w przeglądarce i dokumentacja**
   - lokalnie na demo: przyjęcie → mail w outboxie, „già accettata” z drugiego konta, Rinuncia w obu wariantach, zawieszony przewoźnik;

@@ -443,3 +443,25 @@ export const CARRIER_JOB_STATUS_LABEL: Record<string, string> = {
   delivered: "Consegnato",
   completed: "Completato",
 };
+
+// ---------------------------------------------------------------------------
+// Notice on "Corse disponibili" after a failed accept (?avviso=<JOB_MSG key>)
+// ---------------------------------------------------------------------------
+
+/**
+ * The detail page sends the carrier back to the refreshed list with ?avviso=<key> when the job is gone for
+ * them (e.g. already_taken, D120). Only JOB_MSG keys travel in the URL — never free text — and only these
+ * keys are shown on the list.
+ */
+export const JOB_LIST_NOTICES = ["alreadyTaken", "notAvailable", "acceptTooLate", "notEligible", "documents", "notFound"] as const;
+export type JobListNotice = (typeof JOB_LIST_NOTICES)[number];
+
+/** JOB_MSG text → its key for ?avviso=, or null when the message is not a list notice. */
+export function jobListNoticeKey(message: string): JobListNotice | null {
+  return JOB_LIST_NOTICES.find((k) => JOB_MSG[k] === message) ?? null;
+}
+
+/** ?avviso= value → the Italian text to show, or null for anything else. */
+export function jobListNotice(param: unknown): string | null {
+  return typeof param === "string" && (JOB_LIST_NOTICES as readonly string[]).includes(param) ? JOB_MSG[param as JobListNotice] : null;
+}

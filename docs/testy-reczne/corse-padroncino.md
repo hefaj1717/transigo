@@ -2,7 +2,7 @@
 
 Plan: `docs/plany/corse-padroncino.md`. Decyzje: D21, D116, D119–D121. Test na **lokalnej** bazie (Docker), aplikacja na `localhost:3000`.
 
-> Na razie tylko przygotowanie i konta demo. Kroki testu (lista, „Accetta la Corsa”, „Rinuncia”) dojdą razem z ekranami (krok 4a/4b planu) i przeglądem w przeglądarce (krok 6).
+> Kroki A–C (krok 4a planu): nawigacja, lista, szczegóły, „Accetta la Corsa”, „già accettata”. „Le mie corse” z zakładkami i „Rinuncia” dojdą w kroku 4b.
 
 ## Przygotowanie
 
@@ -19,6 +19,7 @@ Plan: `docs/plany/corse-padroncino.md`. Decyzje: D21, D116, D119–D121. Test na
    - **Ponowne uruchomienie niczego nie dokłada** — wypisuje istniejące zlecenia i loginy. Jeśli poprzednie uruchomienie się przerwało, skrypt każe zacząć od `db:local:reset`.
    - Kursy zależą od zegara (np. „Rinuncia bloccata” = przyjęty ponad 15 min temu, odbiór jutro). Na następny dzień testów: `db:local:reset` i oba seedy od nowa.
    - `npm run test:rls` kasuje dane — po nim uruchom seedy ponownie.
+   - Seed zaraz po `db:local:reset` może skończyć się błędem `PGRST002` („schema cache”) — REST API jeszcze się uruchamia. Odczekaj ~30 s, zrób `db:local:reset` jeszcze raz i uruchom seed ponownie.
 
 2. **Hasło** (wspólne dla wszystkich kont seeda) nie jest w repo: przy pierwszym uruchomieniu skrypt losuje je i zapisuje w `.seed-local/password` (ignorowany przez git):
 
@@ -49,3 +50,46 @@ Numery zleceń jak na czystej bazie (`seed-demo` przed `seed-carriers`). Skrypt 
 | `admin@example.com` | Anna Admin (wspólny dla obu seedów) | `/admin/ordini`: przyjęcia i rezygnacje przewoźników w historii; po „Rinuncia” mail `carrier_released_job` do `ADMIN_NOTIFICATION_EMAIL`. |
 
 Pozostałe zlecenia z `seed-demo` (000001 do zapłaty, 000009 wygasłe) nie są widoczne dla przewoźników.
+
+## Telefon w tej samej sieci Wi-Fi
+
+1. Na komputerze `npm run dev` — Next wypisuje adres w sieci, np. `Network: http://192.168.1.8:3000` (albo: `ipconfig getifaddr en0`).
+2. Telefon w tej samej sieci Wi-Fi: otwórz `http://192.168.1.8:3000/accedi`. Baza zostaje na komputerze — z bazą łączy się serwer Next, nie telefon.
+3. Przez adres IP Next blokuje tylko „hot reload” (w konsoli błędy `WebSocket … /_next/hmr`) — strony, logowanie i akcje działają; po zmianie kodu odśwież stronę ręcznie. Sprawdzone 2026-11-09.
+4. Nie łączy się? macOS → Ustawienia → Sieć → Zapora: zezwól na połączenia dla `node`; sieć gościnna / „izolacja klientów” w routerze blokuje ruch między urządzeniami.
+5. Service worker i instalacja PWA działają tylko w buildzie produkcyjnym przez HTTPS albo `localhost` — przez IP to zwykła strona. Do testu ekranów wystarcza.
+
+## A. Nawigacja i układ (telefon albo DevTools 375 px)
+
+1. Zaloguj się jako `padroncino@example.com` (Ferri). Na dole trzy pozycje: **Corse**, **Le mie corse**, **Profilo**; aktywna jest podświetlona.
+2. Na iPhonie z paskiem domowym: nawigacja nad paskiem (safe-area), ostatni element strony i przycisk „Accetta la Corsa” **nie są zasłonięte**.
+3. Żadna strona nie przewija się w poziomie; przyciski i linki wygodne do trafienia kciukiem (≥ 44 px).
+4. **Profilo** → `/padroncino` (konto, „Vedi le corse disponibili”, veicoli, documenti).
+
+## B. Lista i szczegóły (Ferri)
+
+1. **Corse:** karty 000002, 000003 (z magazynem), 000010, 000011 — trasa (miasta i prowincje), okno odbioru w czasie włoskim, km, czas jazdy, typ pojazdu, kwota „per te”. **Nie ma** 000012 ani 000013.
+2. „Aggiorna” → przycisk na chwilę „Aggiornamento…” i nieaktywny, lista ta sama.
+3. Na karcie i w szczegółach **żadnej ulicy, telefonu ani nazwiska klienta** (np. „Via Italia”, „Conti”, „+39 333…”). Sprawdź też źródło strony (widok źródła / DevTools → Network → odpowiedź dokumentu).
+4. Otwórz 000011: kwota (z rozbiciem, jeśli są tragarze/pakowanie), trasa, ritiro, piętra, carico, „Veicolo: Furgone medio · FT123AB”.
+5. Otwórz 000003 (z magazynem): dwie tratte, „Magazzino …” jako przystanek.
+6. Ostrzeżenie o nakładaniu (D120): jeśli kurs pokrywa się czasowo z kursem w toku Ferriego, nad kwotą „Attenzione: si sovrappone con …” z linkiem; przyjęcie nadal możliwe.
+
+## C. „Accetta la Corsa” i „già accettata” (dwie sesje)
+
+1. **Galli** (`padroncino2@example.com`, okno prywatne / druga przeglądarka): otwórz 000011 i **zostaw** stronę otwartą.
+2. **Ferri:** 000011 → „Accetta la Corsa” → okno z trasą, datą, pojazdem i kwotą. „Annulla” (albo Esc, albo kliknięcie w tło) zamyka okno — nic się nie dzieje.
+3. Ponownie „Accetta la Corsa” → „Conferma e accetta”: przycisk zmienia się na „Accettazione in corso…” i jest nieaktywny (szybkie podwójne kliknięcie nie wysyła drugi raz).
+4. Przekierowanie na `/padroncino/le-mie-corse/[id]`: zielone „Corsa accettata. La trovi in «Le mie corse».”, pełne adresy, kontakty (telefon jako link `tel:`), merce, uwagi, pojazd, kwota.
+5. `/admin/ordini` (admin) albo outbox: mail `order_assigned` do klienta dla 000011.
+6. **Galli** na starej stronie: „Accetta la Corsa” → „Conferma e accetta” → przejście na listę z komunikatem „Questa corsa è già stata accettata da un altro padroncino. L'elenco è stato aggiornato.”; 000011 zniknęło, pozostałe kursy są (lista nie jest pusta).
+7. Galli otwiera ponownie adres 000011 → „Questa corsa non è più disponibile.” + „Vedi le corse disponibili”.
+8. Ferri otwiera adres `/padroncino/corse/<id 000011>` → przekierowanie do „Le mie corse” (kurs jest jego).
+9. **Le mie corse** (Ferri): 000011 na liście razem z 000004–000008, 000014, 000015 (zakładki w kroku 4b).
+
+## D. Blokady i błędy
+
+1. `npm run db:local:seed-carriers`, zaloguj się jako `neri@example.com` (zawieszony): **Corse** → zamiast listy „Non puoi ancora vedere le corse disponibili” z wyjaśnieniem i „Cosa fare →”.
+2. `verdi@example.com` (w weryfikacji): to samo (konto nieaktywne).
+3. Pusta lista: Galli po przyjęciu przez siebie wszystkich kursów (albo na bazie bez kursów) → „Nessuna corsa disponibile al momento” + „Aggiorna”.
+4. Błąd ładowania: zatrzymaj lokalną bazę (`npm run db:local:stop`) i odśwież **Corse** → „Non è stato possibile caricare le corse.” + „Riprova”. Po `npm run db:local:start` „Riprova” ładuje listę.

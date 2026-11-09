@@ -7,6 +7,8 @@ import {
   formatKm,
   JOB_MSG,
   jobDbError,
+  jobListNotice,
+  jobListNoticeKey,
   myJobTab,
   overlappingJobs,
   releaseDeadline,
@@ -273,5 +275,39 @@ describe("myJobTab", () => {
     expect(myJobTab("delivered")).toBe("concluse");
     expect(myJobTab("completed")).toBe("concluse");
     expect(myJobTab("refunded")).toBeNull();
+  });
+});
+
+describe("list notice after a failed accept (?avviso=)", () => {
+  it("already_taken goes to the list as a key and comes back as the D120 text", () => {
+    const view = jobDbError("accept", { code: "55000", details: "already_taken" });
+    expect(view.refreshList).toBe(true);
+    const key = jobListNoticeKey(view.message);
+    expect(key).toBe("alreadyTaken");
+    expect(jobListNotice(key)).toBe(JOB_MSG.alreadyTaken);
+  });
+
+  it("every refresh-list error of accept_job has a notice key", () => {
+    const errors = [
+      { code: "55000", details: "already_taken" },
+      { code: "55000", details: "not_available" },
+      { code: "55000", details: "too_late" },
+      { code: "42501", details: "carrier_not_active" },
+      { code: "42501", details: "document:visura" },
+      { code: "22023", details: "order" },
+    ];
+    for (const e of errors) {
+      const view = jobDbError("accept", e);
+      expect(view.refreshList).toBe(true);
+      expect(jobListNoticeKey(view.message)).not.toBeNull();
+    }
+  });
+
+  it("ignores anything that is not a known key (no free text from the URL)", () => {
+    expect(jobListNotice("<script>")).toBeNull();
+    expect(jobListNotice("accepted")).toBeNull();
+    expect(jobListNotice(["alreadyTaken"])).toBeNull();
+    expect(jobListNotice(undefined)).toBeNull();
+    expect(jobListNoticeKey("qualcosa")).toBeNull();
   });
 });
