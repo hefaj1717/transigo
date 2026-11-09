@@ -7,7 +7,7 @@ import { bookingErrorMessage, bookingErrorStep, type BookingError } from "./mess
 import { buildOrderPayload } from "./order-payload";
 import { headlineCents, toPublicQuote } from "./public-quote";
 import { EMPTY_WIZARD_STATE, parseStoredState, priceRelevantKey, wizardStateSchema, type WizardState } from "./state";
-import { daysBetween, isIsoDate, windowRange } from "./windows";
+import { addDaysIso, daysBetween, isIsoDate, windowRange } from "./windows";
 
 const A: Endpoint = { address: "Via Roma 1, Milano", placeId: "place-a", lat: 45.46, lng: 9.19, city: "Milano", postalCode: "20121", province: "MI", warehouseId: null };
 const B: Endpoint = { address: "Via Po 2, Torino", placeId: "place-b", lat: 45.07, lng: 7.69, city: "Torino", postalCode: "10124", province: "TO", warehouseId: null };
@@ -87,6 +87,22 @@ describe("planLegs (D47, D72, D73)", () => {
     expect(planLegs(storage("2026-11-10", "08-10"), A, B, W)).toEqual({ ok: false, error: "return_before_pickup" });
     expect(planLegs(storage("2026-11-11", "08-10"), A, B, W)).toEqual({ ok: false, error: "return_window_too_early" });
     expect(planLegs(storage("2026-11-11", "12-14"), A, B, W)).toMatchObject({ ok: true, storageDays: 0 }); // transshipment
+  });
+
+  it("D117: no long-term storage — more days than the short-term maximum is refused (the limit day is allowed)", () => {
+    const storage = (returnDate: string) => state({ storage: { returnDate, returnWindow: "08-10", pallets: 1 } });
+    expect(planLegs(storage(addDaysIso("2026-11-11", 30)), A, B, W, 30)).toMatchObject({ ok: true, storageDays: 30 });
+    expect(planLegs(storage(addDaysIso("2026-11-11", 31)), A, B, W, 30)).toEqual({ ok: false, error: "storage_too_long" });
+    expect(planLegs(storage(addDaysIso("2026-11-11", 31)), A, B, W)).toMatchObject({ ok: true, storageDays: 31 }); // no limit given
+    const e: BookingError = { code: "storage_too_long" };
+    expect(bookingErrorMessage(e)).toMatch(/periodo breve/);
+    expect(bookingErrorStep(e)).toBe("servizi");
+  });
+
+  it("addDaysIso: calendar days across months and DST", () => {
+    expect(addDaysIso("2026-10-20", 30)).toBe("2026-11-19");
+    expect(addDaysIso("2026-03-28", 2)).toBe("2026-03-30");
+    expect(addDaysIso("2026-12-31", 1)).toBe("2027-01-01");
   });
 });
 

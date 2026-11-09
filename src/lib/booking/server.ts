@@ -33,7 +33,8 @@ export type BookingOptions = {
   vehicles: (VehicleCapacity & { volumeDm3: number | null })[];
   porterPackages: { code: PorterPackageCode; labelIt: string; persons: number; includedHours: number }[];
   packingAvailable: boolean;
-  storage: { available: boolean; billingUnit: StorageBillingUnit; warehouseCity: string | null };
+  /** maxDays: last day for the pickup from the warehouse, counted from the first pickup (D117: short-term only). */
+  storage: { available: boolean; billingUnit: StorageBillingUnit; warehouseCity: string | null; maxDays: number };
   minLeadHours: number;
   maxDistanceKm: number;
   quoteValidMinutes: number;
@@ -79,7 +80,7 @@ export async function loadBookingOptions(db: SupabaseClient): Promise<BookingOpt
       vehicles: [],
       porterPackages: [],
       packingAvailable: false,
-      storage: { available: false, billingUnit: "pallet_day", warehouseCity: null },
+      storage: { available: false, billingUnit: "pallet_day", warehouseCity: null, maxDays: 0 },
       minLeadHours: 3,
       maxDistanceKm: 300,
       quoteValidMinutes: 30,
@@ -99,6 +100,7 @@ export async function loadBookingOptions(db: SupabaseClient): Promise<BookingOpt
       available: !!warehouse && enabled(config, perPallet ? "storage_pallet_day" : "storage_day"),
       billingUnit: config.storageBillingUnit,
       warehouseCity: warehouse?.city ?? null,
+      maxDays: config.storageShortTermMaxDays,
     },
     minLeadHours: config.minBookingLeadHours,
     maxDistanceKm: Math.floor(config.maxRouteDistanceM / 1000),
@@ -285,7 +287,8 @@ export async function quoteBooking(
   if ("error" in pickup && pickup.error) return fail(pickup.error);
   if ("error" in delivery && delivery.error) return fail(delivery.error);
 
-  const plan = planLegs(state, pickup.endpoint!, delivery.endpoint!, warehouse);
+  // D117: "stoccaggio lungo termine" is not offered until each leg is a separate job (model B, before Stage 7).
+  const plan = planLegs(state, pickup.endpoint!, delivery.endpoint!, warehouse, config.storageShortTermMaxDays);
   if (!plan.ok) return fail({ code: plan.error });
 
   let legs: ResolvedLeg[];

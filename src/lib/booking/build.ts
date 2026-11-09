@@ -38,7 +38,8 @@ export type PlanError =
   | "storage_unavailable" // no active warehouse (D72)
   | "invalid_window"
   | "return_before_pickup" // warehouse pickup date before the first pickup
-  | "return_window_too_early"; // transshipment: leg 2 window starts before leg 1 window ends (D73)
+  | "return_window_too_early" // transshipment: leg 2 window starts before leg 1 window ends (D73)
+  | "storage_too_long"; // more days than short-term storage allows — long-term storage is not offered yet (D117)
 
 export type LegsPlan = { ok: true; legs: LegPlan[]; storageDays: number | null } | { ok: false; error: PlanError };
 
@@ -50,6 +51,8 @@ export function planLegs(
   pickup: Endpoint | null,
   delivery: Endpoint | null,
   warehouse: WarehousePoint | null,
+  /** D117: until per-leg jobs exist, only short-term storage (≤ the price list's short-term maximum). null = no limit. */
+  maxStorageDays: number | null = null,
 ): LegsPlan {
   if (!state.pickup || !state.delivery || !pickup || !delivery || !state.pickupDate || !state.pickupWindow) {
     return { ok: false, error: "incomplete" };
@@ -83,6 +86,7 @@ export function planLegs(
   const days = daysBetween(state.pickupDate, state.storage.returnDate);
   if (days < 0) return { ok: false, error: "return_before_pickup" };
   if (second.start.getTime() < first.end.getTime()) return { ok: false, error: "return_window_too_early" };
+  if (maxStorageDays !== null && days > maxStorageDays) return { ok: false, error: "storage_too_long" };
 
   const { id, ...point } = warehouse;
   const warehouseEndpoint: Endpoint = { ...point, warehouseId: id };

@@ -47,6 +47,8 @@ export function bookingErrorMessage(e: BookingError, ctx: BookingErrorContext): 
       return "La data di ritiro dal deposito non può essere precedente al ritiro.";
     case "return_window_too_early":
       return "Nello stesso giorno, la fascia di ritiro dal deposito deve iniziare dopo la fine della fascia di ritiro.";
+    case "storage_too_long":
+      return "Per ora il deposito è disponibile solo per un periodo breve: scegli una data di ritiro dal deposito più vicina.";
     case "place_not_found":
       return `Indirizzo ${which(e.which)} non trovato. Selezionalo di nuovo dall'elenco.`;
     case "not_italy":
@@ -82,6 +84,7 @@ export function bookingErrorStep(e: BookingError): BookingStep {
     case "storage_unavailable":
     case "return_before_pickup":
     case "return_window_too_early":
+    case "storage_too_long":
       return "servizi";
     case "invalid_input":
     case "pricing_unavailable":

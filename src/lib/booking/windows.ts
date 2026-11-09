@@ -39,6 +39,13 @@ export function daysBetween(fromDate: string, toDate: string): number {
 }
 
 /** Today's date in Rome ("YYYY-MM-DD"), e.g. for the min attribute of the date input. */
+/** Calendar date `days` after an ISO date (YYYY-MM-DD), as ISO. Pure date arithmetic (no time zone). */
+export function addDaysIso(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 export function romeToday(now: Date = new Date()): string {
   return romeDate(now).date;
 }

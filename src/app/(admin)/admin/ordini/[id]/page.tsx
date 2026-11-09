@@ -32,6 +32,7 @@ type Leg = {
   distance_m: number; duration_s: number | null; pickup_floor: number; pickup_has_elevator: boolean; delivery_floor: number;
   delivery_has_elevator: boolean; is_urgent: boolean; porters_count: number; porters_included_hours: number | null;
   pickup_warehouse_id: string | null; delivery_warehouse_id: string | null;
+  order_leg_carrier_terms: { carrier_amount_cents: number } | null;
 };
 type OrderDetail = {
   id: string; order_number: string; status: string; created_at: string; payment_due_at: string; paid_at: string | null;
@@ -48,7 +49,6 @@ type OrderDetail = {
   order_legs: Leg[];
   order_charges: { total_cents: number; subtotal_cents: number; vat_cents: number; refunded_cents: number } | null;
   order_lines: { sort_order: number; label_it: string; gross_cents: number }[];
-  order_leg_carrier_terms: { leg_index: number; carrier_amount_cents: number }[];
   order_status_history: { id: number; from_status: string | null; to_status: string; source: string; changed_by: string | null; created_at: string }[];
 };
 
@@ -59,10 +59,9 @@ const SELECT = [
   "carrier_id, assigned_at, picked_up_at, in_transit_at, delivered_at, delivered_without_pod",
   "vehicle_types(name_it), carriers(company_name), carrier_vehicles(plate, vehicle_types(name_it))",
   "customers(customer_type, profiles(first_name, last_name, email, phone))",
-  "order_legs(leg_index, pickup_address, delivery_address, pickup_window_start, pickup_window_end, distance_m, duration_s, pickup_floor, pickup_has_elevator, delivery_floor, delivery_has_elevator, is_urgent, porters_count, porters_included_hours, pickup_warehouse_id, delivery_warehouse_id)",
+  "order_legs(leg_index, pickup_address, delivery_address, pickup_window_start, pickup_window_end, distance_m, duration_s, pickup_floor, pickup_has_elevator, delivery_floor, delivery_has_elevator, is_urgent, porters_count, porters_included_hours, pickup_warehouse_id, delivery_warehouse_id, order_leg_carrier_terms(carrier_amount_cents))",
   "order_charges(total_cents, subtotal_cents, vat_cents, refunded_cents)",
   "order_lines(sort_order, label_it, gross_cents)",
-  "order_leg_carrier_terms(leg_index, carrier_amount_cents)",
   "order_status_history(id, from_status, to_status, source, changed_by, created_at)",
 ].join(", ");
 
@@ -94,7 +93,8 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
   const legs = [...o.order_legs].sort((a, b) => a.leg_index - b.leg_index);
   const lines = [...o.order_lines].sort((a, b) => a.sort_order - b.sort_order);
   const history = [...o.order_status_history].sort((a, b) => a.id - b.id);
-  const carrierAmount = o.order_leg_carrier_terms.reduce((sum, t) => sum + t.carrier_amount_cents, 0);
+  // Carrier terms hang off the legs (foreign key to order_legs, not to orders).
+  const carrierAmount = legs.reduce((sum, l) => sum + (l.order_leg_carrier_terms?.carrier_amount_cents ?? 0), 0);
   const pay = paymentState({ ...o, refunded_cents: o.order_charges?.refunded_cents, total_cents: o.order_charges?.total_cents }, new Date());
   const assignable = o.status === "paid" && !o.carrier_id;
   const candidates = assignable ? await loadCandidates(deps, o.id) : [];

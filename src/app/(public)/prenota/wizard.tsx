@@ -6,7 +6,7 @@ import { formatCents } from "@/lib/pricing/money";
 import type { BookingStep } from "@/lib/booking/messages";
 import type { BookingOptions } from "@/lib/booking/server";
 import { EMPTY_WIZARD_STATE, parseStoredState, WIZARD_STORAGE_KEY, type PlaceChoice, type WizardState } from "@/lib/booking/state";
-import { romeToday, TIME_WINDOW_LABEL, TIME_WINDOWS, type TimeWindow } from "@/lib/booking/windows";
+import { addDaysIso, romeToday, TIME_WINDOW_LABEL, TIME_WINDOWS, type TimeWindow } from "@/lib/booking/windows";
 import { loadCheckoutDefaults, submitBooking } from "./actions";
 import { SignOutButton } from "@/components/sign-out-button";
 import { AddressField } from "./address-field";
@@ -510,11 +510,11 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
                   </label>
                   {state.storage ? (
                     <div className="mt-4 space-y-4">
-                      <p className="text-xs text-zinc-500">L&apos;ordine avrà due tratte: ritiro → deposito e deposito → consegna. Stesso giorno = trasbordo.</p>
+                      <p className="text-xs text-zinc-500">L&apos;ordine avrà due tratte: ritiro → deposito e deposito → consegna. Stesso giorno = trasbordo. Deposito fino a {options.storage.maxDays} giorni.</p>
                       <div className="flex flex-wrap gap-4">
                         <div>
                           <label htmlFor="return-date" className={label}>Ritiro dal deposito il</label>
-                          <input id="return-date" type="date" min={state.pickupDate ?? minDate} value={state.storage.returnDate} onChange={(e) => update({ storage: { ...state.storage!, returnDate: e.target.value || state.storage!.returnDate } })} className={`${input} w-48`} />
+                          <input id="return-date" type="date" min={state.pickupDate ?? minDate} max={addDaysIso(state.pickupDate ?? minDate, options.storage.maxDays)} value={state.storage.returnDate} onChange={(e) => update({ storage: { ...state.storage!, returnDate: e.target.value || state.storage!.returnDate } })} className={`${input} w-48`} />
                         </div>
                         <div>
                           <label htmlFor="return-window" className={label}>Fascia oraria</label>
