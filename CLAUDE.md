@@ -155,6 +155,7 @@ Uwagi techniczne:
     - **TODO (krok 4):** w `/admin/padroncini` osobna lista „Veicoli da verificare” (pojazdy aktywnych przewoźników bez `approved_at`) z zatwierdzaniem pojedynczego pojazdu; rozróżnia „Nuovo veicolo” (`first_approved_at` null) i „Da riverificare” (`first_approved_at` ustawione, `approved_at` puste).
     - **TODO (krok 4, warunek ukończenia):** test, że nie-admin (cliente, padroncino, niezalogowany, zablokowany admin) dostaje błąd z Server Action decyzji (Approva/Rifiuta), zanim cokolwiek trafi do `decide_carrier_review()`.
   - Pojazd przewoźnika musi spełniać wymagania zlecenia (waga, największy przedmiot, palety) przy „Accetta la Corsa”; prawo jazdy kat. C dla camion — do ustalenia (D87).
+    - **TODO (krok z „Accetta la Corsa”):** blokada **w bazie** (nie tylko w UI) dezaktywacji pojazdu i zmiany typu lub ładowności, gdy pojazd jest przypisany do kursu w toku albo zaplanowanego.
   - Czas pracy tragarzy statusami (przyjazd na odbiór → załadowano, przyjazd na dostawę → rozładowano; bez jazdy), potwierdzenie podpisem klienta (D69).
 - [ ] 5. Tracking na żywo i potwierdzenie dostawy dla klienta
 - [ ] 6. E-faktury SDI i automatyczne wypłaty

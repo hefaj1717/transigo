@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isValidPlate, normalizePlate, VEHICLE_MSG, vehicleApprovalState, vehicleDbError, vehicleRow, vehicleSchema } from "./vehicles";
+import { changesApprovalFields, isValidPlate, normalizePlate, VEHICLE_MSG, vehicleApprovalState, vehicleDbError, vehicleRow, vehicleSchema } from "./vehicles";
 
 const TYPE = "22222222-2222-4222-8222-222222222222";
 const form = (extra: Record<string, string> = {}) => ({ vehicleTypeId: TYPE, plate: "ab 123-cd", payloadKg: "1200", ...extra });
@@ -72,5 +72,17 @@ describe("vehicleApprovalState (D107)", () => {
     expect(vehicleApprovalState({ approved_at: "2026-11-09T10:00:00Z", first_approved_at: "2026-11-09T10:00:00Z" })).toBe("approved");
     expect(vehicleApprovalState({ approved_at: null, first_approved_at: null })).toBe("new");
     expect(vehicleApprovalState({ approved_at: null, first_approved_at: "2026-11-09T10:00:00Z" })).toBe("reverify");
+  });
+});
+
+describe("changesApprovalFields (confirmation before re-verification, D107)", () => {
+  const saved = { vehicleTypeId: TYPE, payloadKg: "1200" };
+  it("type or payload changed → ask", () => {
+    expect(changesApprovalFields(saved, { vehicleTypeId: "other", payloadKg: "1200" })).toBe(true);
+    expect(changesApprovalFields(saved, { vehicleTypeId: TYPE, payloadKg: "1300" })).toBe(true);
+  });
+  it("same values written differently → no question", () => {
+    expect(changesApprovalFields(saved, { vehicleTypeId: TYPE, payloadKg: " 1 200 " })).toBe(false);
+    expect(changesApprovalFields(saved, { vehicleTypeId: TYPE, payloadKg: "01200" })).toBe(false);
   });
 });

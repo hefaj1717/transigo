@@ -14,6 +14,8 @@ export const VEHICLE_MSG = {
   plateTaken: "Questa targa è già registrata. Se il veicolo è tuo, contatta l'assistenza Transigo.",
   // D107 (shown with the "Aggiungi nuovo veicolo" button)
   plateLocked: "La targa di un veicolo approvato non si può modificare. Aggiungi un nuovo veicolo e disattiva quello vecchio.",
+  // Asked in the browser before saving a new type or payload of an approved vehicle (D107)
+  reverifyConfirm: "Il veicolo tornerà in verifica e non potrà accettare nuove corse fino all'approvazione. Continuare?",
 } as const;
 
 /** Upper case, without spaces and hyphens (D102). "ab 123-cd" → "AB123CD". */
@@ -116,4 +118,13 @@ export function vehicleDbError(error: DbError): VehicleDbError | null {
 export function vehicleApprovalState(v: { approved_at: string | null; first_approved_at: string | null }): "approved" | "new" | "reverify" {
   if (v.approved_at) return "approved";
   return v.first_approved_at ? "reverify" : "new";
+}
+
+/** The form changes the type or the payload of the saved vehicle (D107 then clears the approval). */
+export function changesApprovalFields(
+  saved: { vehicleTypeId: string; payloadKg: string },
+  submitted: { vehicleTypeId: string; payloadKg: string },
+): boolean {
+  const kg = (v: string) => v.replace(/\s/g, "").replace(/^0+(?=\d)/, "");
+  return submitted.vehicleTypeId !== saved.vehicleTypeId || kg(submitted.payloadKg) !== kg(saved.payloadKg);
 }

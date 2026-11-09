@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useRef, useState } from "react";
 import { createVehicleAction, setVehicleActiveAction, updateVehicleAction } from "@/app/(padroncino)/padroncino/actions";
 import { FormMessage, SelectField, TextField } from "@/components/form-field";
 import { initialCarrierFormState } from "@/lib/carriers/form-state";
 import { CARRIER_PATHS } from "@/lib/carriers/onboarding";
-import { MAX_PAYLOAD_KG, MIN_DIMENSION_CM, MIN_PAYLOAD_KG, VEHICLE_MSG } from "@/lib/carriers/vehicles";
+import { changesApprovalFields, MAX_PAYLOAD_KG, MIN_DIMENSION_CM, MIN_PAYLOAD_KG, VEHICLE_MSG } from "@/lib/carriers/vehicles";
 import { bigButton, bigButtonSecondary } from "./carrier-shell";
 
 export type VehicleValues = {
@@ -27,18 +27,41 @@ type Props = {
   types: { value: string; label: string }[];
   /** D107: the vehicle was approved once — its plate cannot change. */
   plateLocked: boolean;
+  /** Currently approved: a change of type or payload sends it back to verification → ask first. */
+  approved?: boolean;
 };
 
 // Vehicle form (D102, D107, D111). Units are always visible next to the fields; lower/upper bounds catch
 // tonnes or metres typed instead of kg / cm (form only).
-export function VehicleForm({ vehicleId, initial, types, plateLocked }: Props) {
+export function VehicleForm({ vehicleId, initial, types, plateLocked, approved = false }: Props) {
   const action = vehicleId ? updateVehicleAction.bind(null, vehicleId) : createVehicleAction;
   const [state, formAction, pending] = useActionState(action, initialCarrierFormState);
   const e = state.errors ?? {};
   const v = { ...initial, ...state.values };
+  const formRef = useRef<HTMLFormElement>(null);
+  const confirmed = useRef(false);
+  const [asking, setAsking] = useState(false);
+
+  // Confirmation only in the browser (no database change): an approved vehicle whose type or payload changes.
+  function onSubmit(event: React.FormEvent<HTMLFormElement>) {
+    if (!approved || confirmed.current) {
+      confirmed.current = false;
+      return;
+    }
+    const form = new FormData(event.currentTarget);
+    if (changesApprovalFields(initial, { vehicleTypeId: String(form.get("vehicleTypeId") ?? ""), payloadKg: String(form.get("payloadKg") ?? "") })) {
+      event.preventDefault();
+      setAsking(true);
+    }
+  }
+  function confirm() {
+    confirmed.current = true;
+    setAsking(false);
+    formRef.current?.requestSubmit();
+  }
 
   return (
-    <form action={formAction} className="space-y-5" noValidate>
+    <form ref={formRef} action={formAction} onSubmit={onSubmit} className="space-y-5" noValidate>
       <FormMessage error={e._form} success={state.message} />
       <SelectField label="Tipo di veicolo" name="vehicleTypeId" options={types} defaultValue={v.vehicleTypeId} error={e.vehicleTypeId} required placeholder="Scegli il tipo" />
 
@@ -86,9 +109,17 @@ export function VehicleForm({ vehicleId, initial, types, plateLocked }: Props) {
       {vehicleId ? (
         <p className="text-xs text-zinc-500">Se cambi tipo o portata di un veicolo approvato, il team Transigo dovrà verificarlo di nuovo.</p>
       ) : null}
-      <button type="submit" disabled={pending} className={bigButton}>
-        {pending ? "Salvataggio…" : vehicleId ? "Salva modifiche" : "Aggiungi veicolo"}
-      </button>
+      {asking ? (
+        <div role="alertdialog" aria-labelledby="reverify-text" className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4">
+          <p id="reverify-text" className="text-sm text-amber-900">{VEHICLE_MSG.reverifyConfirm}</p>
+          <button type="button" onClick={confirm} className={bigButton}>Sì, salva</button>
+          <button type="button" onClick={() => setAsking(false)} className={bigButtonSecondary}>Annulla</button>
+        </div>
+      ) : (
+        <button type="submit" disabled={pending} className={bigButton}>
+          {pending ? "Salvataggio…" : vehicleId ? "Salva modifiche" : "Aggiungi veicolo"}
+        </button>
+      )}
     </form>
   );
 }

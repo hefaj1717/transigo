@@ -72,6 +72,7 @@ async function Content({ params, searchParams }: Pick<PageProps<"/padroncino/vei
             }}
             types={options}
             plateLocked={!!vehicle.first_approved_at}
+            approved={!!vehicle.approved_at}
           />
           <VehicleActiveToggle vehicleId={vehicle.id} isActive={vehicle.is_active} />
         </div>
