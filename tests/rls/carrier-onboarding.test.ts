@@ -64,6 +64,8 @@ async function completeCarrier(): Promise<{ user: TestUser; vehicleId: string }>
   return { user, vehicleId: await addVehicle(user) };
 }
 
+type SubmitResult = { submitted_at: string; newly_submitted: boolean };
+
 const missing = async (c: TestUser, carrierId = c.id) => c.client.rpc("carrier_onboarding_missing", { p_carrier_id: carrierId });
 const decide = (carrierId: string, adminId: string, approve: boolean, reason?: string) =>
   service.rpc("decide_carrier_review", { p_carrier_id: carrierId, p_admin_id: adminId, p_approve: approve, p_reason: reason ?? null });
@@ -296,11 +298,31 @@ describe("submit_carrier_for_review (D100)", () => {
 
   it("submits a complete account; a repeated call changes nothing", async () => {
     const { user } = await completeCarrier();
-    const first = await check(user.client.rpc("submit_carrier_for_review"));
-    expect(first).not.toBeNull();
-    const second = await check(user.client.rpc("submit_carrier_for_review"));
-    expect(second).toBe(first);
-    expect(await carrierRow(user.id)).toMatchObject({ status: "pending_review", submitted_at: first });
+    const first = await check(user.client.rpc("submit_carrier_for_review").single<SubmitResult>());
+    expect(first.newly_submitted).toBe(true);
+    expect(first.submitted_at).not.toBeNull();
+    const second = await check(user.client.rpc("submit_carrier_for_review").single<SubmitResult>());
+    expect(second).toEqual({ submitted_at: first.submitted_at, newly_submitted: false });
+    expect(await carrierRow(user.id)).toMatchObject({ status: "pending_review", submitted_at: first.submitted_at });
+  });
+
+  it("two parallel submissions: exactly one sets submitted_at (D106)", async () => {
+    const { user } = await completeCarrier();
+    const results = await Promise.all([
+      check(user.client.rpc("submit_carrier_for_review").single<SubmitResult>()),
+      check(user.client.rpc("submit_carrier_for_review").single<SubmitResult>()),
+    ]);
+    expect(results.filter((r) => r.newly_submitted)).toHaveLength(1);
+    expect(results[0].submitted_at).toBe(results[1].submitted_at);
+  });
+
+  it("resubmission after a rejection is a new submission", async () => {
+    const { user } = await completeCarrier();
+    await check(user.client.rpc("submit_carrier_for_review"));
+    await check(decide(user.id, admin.id, false, "Documento illeggibile"));
+    const again = await check(user.client.rpc("submit_carrier_for_review").single<SubmitResult>());
+    expect(again.newly_submitted).toBe(true);
+    expect(await carrierRow(user.id)).toMatchObject({ status: "pending_review", status_reason: null, submitted_at: again.submitted_at });
   });
 
   it("customers and admins cannot call it", async () => {
@@ -535,5 +557,105 @@ describe("company data lock (D105)", () => {
     expect(control.ok).toBe(true);
 
     expect((await check(service.from("carriers").select("company_name").eq("profile_id", user.id).single())).company_name).toBe("Trasporti Test Srl");
+  });
+});
+
+describe("vehicle approval rules (D107)", () => {
+  const PLATE_LOCKED = "the plate of an approved vehicle cannot be changed";
+  const vehicleRow = (id: string) =>
+    check(service.from("carrier_vehicles").select("plate, approved_at, first_approved_at").eq("id", id).single());
+
+  /** An active carrier (approved by the admin) with its approved vehicle. */
+  async function activeCarrier() {
+    const { user, vehicleId } = await completeCarrier();
+    await check(user.client.rpc("submit_carrier_for_review"));
+    await check(decide(user.id, admin.id, true));
+    const v = await vehicleRow(vehicleId);
+    expect(v.approved_at).not.toBeNull();
+    expect(v.first_approved_at).toBe(v.approved_at);
+    return { user, vehicleId, approvedAt: v.approved_at as string };
+  }
+
+  it("the plate of an approved vehicle cannot be changed — by the carrier or the server", async () => {
+    const { user, vehicleId } = await activeCarrier();
+    const before = await vehicleRow(vehicleId);
+
+    const asCarrier = await user.client.from("carrier_vehicles").update({ plate: plate() }).eq("id", vehicleId);
+    expect(asCarrier.error?.code).toBe("23514");
+    expect(asCarrier.error?.message).toContain(PLATE_LOCKED);
+
+    const asService = await service.from("carrier_vehicles").update({ plate: plate() }).eq("id", vehicleId);
+    expect(asService.error?.code).toBe("23514");
+    expect(asService.error?.message).toContain(PLATE_LOCKED);
+
+    const sql = localSql(`
+      begin;
+      set local role service_role;
+      update public.carrier_vehicles set plate = '${plate()}' where id = '${vehicleId}';
+      rollback;`);
+    expect(sql.ok).toBe(false);
+    expect(sql.output).toContain(PLATE_LOCKED);
+
+    expect(await vehicleRow(vehicleId)).toEqual(before);
+  });
+
+  it("the plate can be changed while the vehicle was never approved", async () => {
+    const c = await newCarrier();
+    const v = await check(c.client.from("carrier_vehicles").insert({ carrier_id: c.id, vehicle_type_id: vanId, plate: plate(), payload_kg: 1000 }).select("id").single());
+    const newPlate = plate();
+    await run(c.client.from("carrier_vehicles").update({ plate: newPlate }).eq("id", v.id));
+    expect(await vehicleRow(v.id)).toEqual({ plate: newPlate, approved_at: null, first_approved_at: null });
+  });
+
+  it("a change of type or payload removes the approval; first_approved_at stays and the plate stays locked", async () => {
+    const largeId = (await check(service.from("vehicle_types").select("id").eq("code", "van_large").single())).id;
+    for (const change of [{ vehicle_type_id: largeId }, { payload_kg: 1200 }]) {
+      const { user, vehicleId, approvedAt } = await activeCarrier();
+      await run(user.client.from("carrier_vehicles").update(change).eq("id", vehicleId));
+      const v = await vehicleRow(vehicleId);
+      expect(v.approved_at).toBeNull();
+      expect(v.first_approved_at).toBe(approvedAt);
+
+      const plateChange = await user.client.from("carrier_vehicles").update({ plate: plate() }).eq("id", vehicleId);
+      expect(plateChange.error?.message).toContain(PLATE_LOCKED);
+    }
+  });
+
+  it("the server changing the payload also removes the approval", async () => {
+    const { vehicleId } = await activeCarrier();
+    await run(service.from("carrier_vehicles").update({ payload_kg: 900 }).eq("id", vehicleId));
+    expect((await vehicleRow(vehicleId)).approved_at).toBeNull();
+  });
+
+  it("cargo dimensions, deactivation and reactivation keep the approval", async () => {
+    const { user, vehicleId } = await activeCarrier();
+    const before = await vehicleRow(vehicleId);
+    await run(user.client.from("carrier_vehicles").update({ cargo_length_cm: 300, cargo_width_cm: 170, cargo_height_cm: 180 }).eq("id", vehicleId));
+    await run(user.client.from("carrier_vehicles").update({ is_active: false }).eq("id", vehicleId));
+    await run(user.client.from("carrier_vehicles").update({ is_active: true }).eq("id", vehicleId));
+    expect(await vehicleRow(vehicleId)).toEqual(before);
+  });
+
+  it("first_approved_at cannot be written: the carrier gets 42501, the server's change is ignored", async () => {
+    const { user, vehicleId, approvedAt } = await activeCarrier();
+    const asCarrier = await user.client.from("carrier_vehicles").update({ first_approved_at: null }).eq("id", vehicleId);
+    expect(asCarrier.error?.code).toBe("42501");
+    await run(service.from("carrier_vehicles").update({ first_approved_at: null }).eq("id", vehicleId));
+    expect((await vehicleRow(vehicleId)).first_approved_at).toBe(approvedAt);
+  });
+
+  it("on insert first_approved_at follows approved_at only", async () => {
+    const c = await newCarrier();
+    const plain = await check(service.from("carrier_vehicles")
+      .insert({ carrier_id: c.id, vehicle_type_id: vanId, plate: plate(), payload_kg: 1000, first_approved_at: "2020-01-01T00:00:00Z" })
+      .select("id").single());
+    expect((await vehicleRow(plain.id)).first_approved_at).toBeNull();
+
+    const approved = await check(service.from("carrier_vehicles")
+      .insert({ carrier_id: c.id, vehicle_type_id: vanId, plate: plate(), payload_kg: 1000, approved_at: "2026-11-09T10:00:00Z" })
+      .select("id").single());
+    const v = await vehicleRow(approved.id);
+    expect(v.first_approved_at).toBe(v.approved_at);
+    expect(v.first_approved_at).not.toBeNull();
   });
 });

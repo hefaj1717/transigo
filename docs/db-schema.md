@@ -139,11 +139,12 @@ Indeksy: `(status)`, `unique(vat_number)`.
 | `id` | `uuid` PK | |
 | `carrier_id` | `uuid` FK → `carriers` | |
 | `vehicle_type_id` | `uuid` FK → `vehicle_types` | |
-| `plate` | `text` not null | tablica |
-| `payload_kg` | `integer` | |
+| `plate` | `text` not null | tablica (`^[A-Z0-9]{5,10}$`); po pierwszym zatwierdzeniu niezmienna dla każdej roli (D107) |
+| `payload_kg` | `integer` not null | zmiana czyści `approved_at` (D107) |
 | `cargo_length_cm`, `cargo_width_cm`, `cargo_height_cm` | `integer` | |
 | `is_active` | `boolean` not null default true | |
-| `approved_at` | `timestamptz` | 🔒 zatwierdzenie przez admina |
+| `approved_at` | `timestamptz` | 🔒 zatwierdzenie przez admina; zmiana `vehicle_type_id` lub `payload_kg` czyści je dla każdej roli (D107) |
+| `first_approved_at` | `timestamptz` | 🔒 pierwsze zatwierdzenie; ustawia tylko trigger `reset_vehicle_approval()` (= pierwsze niepuste `approved_at`), potem niezmienne dla każdej roli (D107) |
 | `created_at`, `updated_at` | | |
 
 Indeksy: `(carrier_id)`, `(vehicle_type_id)`, `unique(plate)`.
@@ -794,6 +795,7 @@ Weryfikacja po `db:push`: konto testowe `cliente` i `padroncino` przez rejestrac
 ### Etap 4 — PWA przewoźnika
 - **Część 1 (migracja `20261109120000_carrier_onboarding`, D97–D103):** enumy `carrier_document_scope`, `carrier_document_expiry`; tabela `carrier_document_types` (konfiguracja typów, odczyt dla zalogowanych, zapis tylko migracją); `carrier_documents` + `file_name`, `mime_type`, `size_bytes`, format i unikalność `storage_path`, trigger `validate_carrier_document()` (reguły wg typu); `carrier_vehicles.payload_kg` not null, format `plate`; `carriers` + `submitted_at`, `decided_at`, `decided_by` (🔒); funkcje `carrier_onboarding_missing()`, `submit_carrier_for_review()`, `decide_carrier_review()` (tylko service role). Testy: `tests/rls/carrier-onboarding.test.ts`.
 - **Blokada danych firmy (migracja `20261109130000_carrier_company_lock`, D105):** trigger `carriers_b_lock_company_data` (`lock_carrier_company_data()`): 🔒 zależne od stanu — `company_name`, `vat_number`, `fiscal_code`, `pec`, `sdi_code`, `hq_*` edytowalne tylko przy `status ∈ {pending_review, rejected}` i `submitted_at` null; poza tym zmiana tylko przez `admin_update_carrier_company()` (service role, wpis w `audit_log`, same nazwy pól).
+- **Wysłanie i zatwierdzenie pojazdów (migracja `20261109140000_carrier_submit_vehicle_approval`, D106, D107):** `submit_carrier_for_review()` zwraca `(submitted_at, newly_submitted)` — `true` tylko dla wywołania, które ustawiło `submitted_at` (pod blokadą wiersza); `carrier_vehicles.first_approved_at` (🔒); trigger `carrier_vehicles_b_reset_approval` (`before insert or update`, każda rola, także właściciel bazy): tablica zatwierdzonego kiedykolwiek pojazdu niezmienna (`23514`), zmiana typu lub ładowności czyści `approved_at`, `is_active` i `cargo_*` bez wpływu.
 - **Enumy:** `photo_kind`, `carrier_invoice_status`, `order_issue_reason`, `order_issue_status`.
 - **Tabele:** `order_photos`, `delivery_proofs`, `carrier_invoices`, `order_issues` (D39).
 - **Funkcje (`SECURITY DEFINER`):** `is_active_carrier()` (D21), `available_jobs()` (D22, D29), `accept_job()`, `set_order_status()`, `complete_delivery()` (bez tworzenia wypłaty — dochodzi w Etapie 6).
