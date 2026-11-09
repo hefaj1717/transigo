@@ -1,6 +1,6 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { AUTH_MSG, isVatTakenError } from "@/lib/auth/errors";
+import { isVatTakenError } from "@/lib/auth/errors";
 import { carrierCompanyRow, carrierCompanySchema, toFieldErrors, type FieldErrors } from "@/lib/auth/schemas";
 import { sendEmail } from "@/lib/notifications/email";
 import type { RenderedEmail } from "@/lib/notifications/templates/common";
@@ -189,7 +189,7 @@ export async function updateCarrierCompany(deps: AdminDeps, carrierId: string, i
     p_carrier_id: carrierId, p_admin_id: deps.admin.userId, p_changes: carrierCompanyRow(parsed.data),
   });
   if (error) {
-    if (isVatTakenError(error)) return { ok: false, errors: { vatNumber: AUTH_MSG.vatTaken } };
+    if (isVatTakenError(error)) return { ok: false, errors: { vatNumber: ADMIN_CARRIER_MSG.vatTaken } };
     logDbError("admin_update_carrier_company", error);
     return { ok: false, errors: { _form: error.code === "42501" ? ADMIN_CARRIER_MSG.forbidden : ADMIN_CARRIER_MSG.generic } };
   }

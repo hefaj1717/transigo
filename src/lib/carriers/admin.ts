@@ -112,6 +112,7 @@ export const ADMIN_CARRIER_MSG = {
   notSuspended: "Si può riattivare solo un padroncino sospeso. Ricarica la pagina.",
   pendingDocuments: "Prima di riattivare valuta i documenti in attesa di verifica.",
   notFound: "Elemento non trovato.",
+  vatTaken: "Questa partita IVA è già registrata da un altro padroncino.",
   forbidden: "Operazione non consentita.",
   generic: "Operazione non riuscita. Riprova.",
 } as const;

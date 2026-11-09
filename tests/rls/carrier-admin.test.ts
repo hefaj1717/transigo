@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
-import { AUTH_MSG } from "@/lib/auth/errors";
+import { ADMIN_CARRIER_MSG } from "@/lib/carriers/admin";
 import { anon, createUser, deleteCreatedUsers, service, type TestUser } from "./helpers";
 
 // Stage 4 / part 1, step 4 — admin actions outside the review of a submission (D113–D115):
@@ -435,7 +435,7 @@ describe("admin-server: decisions, e-mails and audit", () => {
 
     const other = await activeCarrier();
     expect((await srv.updateCarrierCompany(deps(), other.user.id, { ...form, vatNumber: "01234567897" })).ok).toBe(true);
-    expect(await srv.updateCarrierCompany(deps(), user.id, { ...form, vatNumber: "01234567897" })).toEqual({ ok: false, errors: { vatNumber: AUTH_MSG.vatTaken } });
+    expect(await srv.updateCarrierCompany(deps(), user.id, { ...form, vatNumber: "01234567897" })).toEqual({ ok: false, errors: { vatNumber: ADMIN_CARRIER_MSG.vatTaken } });
   });
 
   it("a blocked admin's id is refused by the database even if it reached the server code", async () => {
