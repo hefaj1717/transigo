@@ -143,7 +143,7 @@ Uwagi techniczne:
     - Do decyzji przed wdrożeniem: harmonogram zadania okresowego (D91), wartości anulowania (D94), okno płatności (D88).
     - Status `payment_review` (D96): obsługa przez admina (oznacz jako opłacone / zwrot) — Etap 6.
 - [ ] 4. PWA przewoźnika (rejestracja, Stripe Connect, kursy, realizacja, GPS, faktura)
-  - [ ] **4.1 Onboarding i weryfikacja przewoźnika** (D97–D112): migracja `carrier_onboarding` + `tests/rls/carrier-onboarding.test.ts` (na stagingu od 2026-11-09); blokada danych firmy `carrier_company_lock` (na stagingu od 2026-11-09); migracja `carrier_submit_vehicle_approval` (D106, D107; na stagingu od 2026-11-09); PWA (manifest, SW, ikony, `CarrierShell`) — do sprawdzenia na telefonie; **krok 3 (ekrany onboardingu) zrobiony 2026-11-09 — do testu ręcznego na telefonie**; dalej: krok 4 `/admin/padroncini` z decyzją i mailami.
+  - [ ] **4.1 Onboarding i weryfikacja przewoźnika** (D97–D112): migracja `carrier_onboarding` + `tests/rls/carrier-onboarding.test.ts` (na stagingu od 2026-11-09); blokada danych firmy `carrier_company_lock` (na stagingu od 2026-11-09); migracja `carrier_submit_vehicle_approval` (D106, D107; na stagingu od 2026-11-09); PWA (manifest, SW, ikony, `CarrierShell`) — do sprawdzenia na telefonie; **krok 3 (ekrany onboardingu) zrobiony 2026-11-09 — do testu ręcznego na telefonie**; krok 4 `/admin/padroncini` w toku: migracja `carrier_admin_actions` (D113–D115: `review_carrier_document`, `approve_carrier_vehicle`, `set_carrier_suspension`) + `tests/rls/carrier-admin.test.ts` — **tylko lokalnie, na staging jeszcze nie wypchnięta**.
     - Typy dokumentów: tabela `carrier_document_types` = `src/lib/carriers/document-types.ts` — zmieniać razem (nowa migracja + plik).
     - `decide_carrier_review()` tylko service role; Server Action sprawdza admina w sesji, `p_admin_id` z sesji.
     - Dane firmy przewoźnika zablokowane po wysłaniu do weryfikacji, w `active` i `suspended` (D105), także dla service role: zmiana tylko przez `admin_update_carrier_company()` (audit z nazwami pól). SQL Editor omija audyt — tylko awaryjnie.
@@ -157,6 +157,10 @@ Uwagi techniczne:
     - **TODO (krok 4):** w `/admin/padroncini` widać nowe dokumenty czekające na weryfikację (`review_status = pending`) także od aktywnych i zawieszonych przewoźników, nie tylko przy wysłaniu do weryfikacji.
     - **TODO (krok 4):** w `/admin/padroncini` osobna lista „Veicoli da verificare” (pojazdy aktywnych przewoźników bez `approved_at`) z zatwierdzaniem pojedynczego pojazdu; rozróżnia „Nuovo veicolo” (`first_approved_at` null) i „Da riverificare” (`first_approved_at` ustawione, `approved_at` puste).
     - **TODO (krok 4, warunek ukończenia):** test, że nie-admin (cliente, padroncino, niezalogowany, zablokowany admin) dostaje błąd z Server Action decyzji (Approva/Rifiuta), zanim cokolwiek trafi do `decide_carrier_review()`.
+  - Zawieszony przewoźnik (D116): nie widzi i nie przyjmuje nowych kursów, przyjęte zostają u niego, wypłaty za zrealizowane dostawy idą normalnie.
+    - **TODO (krok z listą kursów i „Accetta la Corsa”):** lista dostępnych kursów i przyjęcie wymagają `carriers.status = active` (D21) — w bazie, z testem RLS, że `suspended` (oraz `pending_review`, `rejected`) nie widzi listy i nie przyjmie kursu.
+    - **TODO (krok z realizacją kursu):** zmiana statusów, GPS, zdjęcia i podpis działają dla przypisanego kursu także przy `suspended` (test). Ekran „Account sospeso” pokazuje też kursy w toku.
+    - **TODO (Etap 6):** warunki wypłaty (D4) nie sprawdzają statusu konta — test, że wypłata dla `suspended` idzie normalnie; wstrzymanie tylko ręczne.
   - Pojazd przewoźnika musi spełniać wymagania zlecenia (waga, największy przedmiot, palety) przy „Accetta la Corsa”; prawo jazdy kat. C dla camion — do ustalenia (D87).
     - **TODO (krok z „Accetta la Corsa”):** blokada **w bazie** (nie tylko w UI) dezaktywacji pojazdu i zmiany typu lub ładowności, gdy pojazd jest przypisany do kursu w toku albo zaplanowanego.
   - Czas pracy tragarzy statusami (przyjazd na odbiór → załadowano, przyjazd na dostawę → rozładowano; bez jazdy), potwierdzenie podpisem klienta (D69).
@@ -165,4 +169,5 @@ Uwagi techniczne:
   - Dopłata za nadgodziny tragarzy: link od admina, osobna e-faktura, kwota przewoźnika do wypłaty (D69). Przed etapem rozstrzygnąć otwartą kwestię D69 (wypłata, gdy klient nie zapłaci dopłaty).
 - [ ] 7. Magazyn i dashboard admina
 - [ ] 8. Testy end-to-end, dokumenty prawne, wdrożenie
+  - Na stagingu „Confirm email” w Supabase Auth jest **wyłączone**; na produkcji musi być **włączone**, z własnym SMTP (Resend, D79).
   - **Przed startem** założyć osobny projekt Supabase na produkcję; obecny `bacabuzzevwwdxrswbnc` zostaje stagingiem (testy ręczne). Testy RLS działają lokalnie (D64).

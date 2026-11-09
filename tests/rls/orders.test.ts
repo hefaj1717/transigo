@@ -342,6 +342,21 @@ describe("padroncino", () => {
   it("cannot call create_order", async () => {
     expect((await carrier.client.rpc("create_order", { p: simplePayload(customerA.id) })).error).not.toBeNull();
   });
+
+  // D115: a suspended carrier keeps the jobs already assigned to it and sees no other order.
+  // TODO (step "Accetta la Corsa"): the list of available jobs and accepting refuse a suspended carrier — test there.
+  it("suspended: still reads its assigned order, sees no unassigned or other carriers' orders", async () => {
+    const suspended = await createUser({ role: "padroncino" });
+    await check(service.from("carriers").insert({ profile_id: suspended.id, company_name: "Trasporti Sospesi", vat_number: vat(), status: "suspended", status_reason: "Controllo" }));
+    const order = await createOrder(simplePayload(customerB.id));
+    await check(service.from("orders").update({ carrier_id: suspended.id }).eq("id", order.id));
+
+    expect((await rows(suspended.client, "orders")).map((o) => o.id)).toEqual([order.id]);
+    const terms = await rows(suspended.client, "order_leg_carrier_terms");
+    expect(terms.length).toBeGreaterThan(0);
+    expect(terms.every((t) => t.order_id === order.id)).toBe(true);
+    for (const table of ["order_charges", "order_lines"]) expect(await rows(suspended.client, table)).toEqual([]);
+  });
 });
 
 describe("admin", () => {
