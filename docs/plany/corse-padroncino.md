@@ -34,7 +34,7 @@ Zatwierdzony przez właściciela 2026-11-09. Po każdym kroku: testy, commit, pu
   - `overlappingJobs()` — ostrzeżenie o nakładaniu (D120);
   - zakładki „Le mie corse”: *Da fare* / *In corso* / *Concluse*;
   - formatowanie godzin w Europe/Rome (test przy różnych `TZ`).
-- [ ] **Krok 2 — serwer `src/lib/carriers/jobs-server.ts` (sesja przewoźnika)**
+- [x] **Krok 2 — serwer `src/lib/carriers/jobs-server.ts` (sesja przewoźnika)** — zrobione 2026-11-09. Service role przekazywany jako fabryka (`JobNotifyDeps.serviceDb()`), wołana dopiero po udanym RPC (test liczy wywołania). Mail `carrier_released_job` zapisywany **bez `order_id`** (klucz outboxu: jeden mail na zlecenie i szablon), żeby każda rezygnacja dawała mail (D121); link do zlecenia w treści. Numer, okno odbioru i godzinę przyjęcia `releaseJob` czyta sesją przewoźnika **przed** RPC (potem zlecenie już nie jest jego).
   - `loadEligibility`, `listAvailableJobs`, `loadAvailableJob`, `loadMyJobs`, `loadMyJob` (pełne dane dopiero po przyjęciu);
   - `acceptJob(orderId, vehicleId)`: RPC sesją przewoźnika, po sukcesie (tylko `newly_assigned`) mail `order_assigned` do klienta przez service role (outbox); błąd maila nie cofa przyjęcia;
   - `releaseJob(orderId)`: RPC sesją przewoźnika, potem mail do admina (nowy szablon `carrier_released_job`: numer, firma, data odbioru, link do `/admin/ordini/[id]`, bez danych klienta) przez service role; bez `ADMIN_NOTIFICATION_EMAIL` rezygnacja przechodzi, błąd w logach;
