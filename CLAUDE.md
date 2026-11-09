@@ -46,6 +46,7 @@ Uwagi techniczne:
 - Next.js 16: middleware nazywa się **proxy** (`src/proxy.ts`); odświeża sesję Supabase. Przed pisaniem kodu Next sprawdzaj `node_modules/next/dist/docs/`.
 - Supabase CLI 3.x domyślnie celuje w lokalny stack. Staging (chmura): zawsze `--remote` (skrypty `npm run db:push`, `npm run db:list`). Lokalny stack (Docker) służy **wyłącznie do testów RLS** (D64): `npm run db:local:start` / `db:local:stop` / `db:local:reset`, porty 553xx (`supabase/config.toml`; 543xx zajmuje inny projekt na tym komputerze).
 - **Zmiany w bazie w chmurze:** `npm run db:push` (i potwierdzenie `--yes`, którego CLI wymaga w trybie agenta) uruchamiamy **tylko po wyraźnej zgodzie właściciela w danej rozmowie** — zgoda z wcześniejszej rozmowy lub z planu nie wystarcza. CLI oznacza obecny projekt (`bacabuzzevwwdxrswbnc`, staging) jako „production”; to jedyny projekt w chmurze.
+- **Staging = osobny projekt Supabase, nigdy baza produkcyjna** (dziś `bacabuzzevwwdxrswbnc`; produkcja dostanie własny projekt). Seed danych demo/testowych na stagingu tylko z **jawną flagą** w poleceniu i za zgodą właściciela w danej rozmowie; domyślnie każdy seed działa wyłącznie na lokalnej bazie. Na produkcji żadnego seeda.
 - **Gdy powstanie osobny projekt produkcyjny:** każde polecenie na nim (push, reset, SQL, zmiany w panelu, sekrety) wymaga osobnego potwierdzenia właściciela, w którym pada **nazwa projektu**. Przed takim poleceniem pokazać, na który projekt (nazwa + ref) celuje CLI.
 - Testy bezpieczeństwa RLS: `npm run test:rls` (`tests/rls/`) — **tylko na lokalnym Supabase** (D64): `global-setup.ts` bierze klucze z `supabase status`, odrzuca każdy inny adres niż `http://127.0.0.1:55321` i przed uruchomieniem resetuje lokalną bazę (wszystkie migracje z repo). Wymaga włączonego Dockera i `npm run db:local:start`. Nigdy nie kierować ich na staging/produkcję. Każda migracja z tabelą/polityką dostaje testy w tym folderze.
 
@@ -62,6 +63,11 @@ Uwagi techniczne:
 - **Stripe tylko w trybie testowym**, dopóki właściciel nie powie inaczej. Klucze wyłącznie w `.env*`, nigdy w kodzie ani w commitach.
 - **Małe kroki:** jedno zadanie naraz, po każdym działającym kroku commit, a po commicie `git push` na `origin` (prywatne repo `hefaj1717/transigo`).
 - **Gdy czegoś nie wiesz — pytaj, zamiast zgadywać.**
+
+## W toku: demo dla klienta (od 2026-11-09)
+
+- **Krok 1 — obsługa zleceń przez admina (D122, D123):** migracja `20261110110000_admin_order_dispatch.sql` (`admin_job_candidates`, `admin_assign_job`, `admin_unassign_job` z kodem powodu, `admin_advance_order`, `orders.delivered_without_pod` + trigger) i `tests/rls/admin-dispatch.test.ts` — **lokalnie; na staging dopiero, gdy będą gotowe strona publiczna i panel klienta (za zgodą)**. Wspólne fixtures testów kursów: `tests/rls/job-fixtures.ts`.
+- **Dalej:** ekrany `/admin/ordini` (filtry „Da assegnare”/„In corso”, kolumna Padroncino, szczegóły `/admin/ordini/[id]` z Assegna / Rimuovi padroncino / następny status), ukrycie „stoccaggio lungo termine” w kreatorze (D117), seed demo (`db:local:seed-demo`: admin, klient, jeden przewoźnik, zlecenia w różnych statusach; **zlecenia zakończone mają daty w przeszłości**), `docs/testy-reczne/admin-ordini.md`; potem strona publiczna i panel klienta.
 
 ## Odłożone: PWA przewoźnika (priorytet: najpierw demo dla klienta, 2026-11-09)
 
@@ -183,6 +189,8 @@ Stan:
   - Czas pracy tragarzy statusami (przyjazd na odbiór → załadowano, przyjazd na dostawę → rozładowano; bez jazdy), potwierdzenie podpisem klienta (D69).
 - [ ] 5. Tracking na żywo i potwierdzenie dostawy dla klienta
 - [ ] 6. E-faktury SDI i automatyczne wypłaty
+  - **TODO (D123):** automatyczna wypłata **tylko** gdy `orders.delivered_without_pod = false` (dostawa z POD z PWA); zlecenie z flagą `true` wyłącznie decyzją admina — test.
+  - **TODO (D122):** zlecenie odpięte przez admina („Rimuovi padroncino”) z **minionym oknem odbioru** wraca do `paid`, ale nikt go nie przyjmie (`too_late`) — potrzebna zmiana terminu albo zwrot (audit ma `pickup_window_passed`). Do tego czasu admin obsługuje ręcznie.
   - Dopłata za nadgodziny tragarzy: link od admina, osobna e-faktura, kwota przewoźnika do wypłaty (D69). Przed etapem rozstrzygnąć otwartą kwestię D69 (wypłata, gdy klient nie zapłaci dopłaty).
 - [ ] 7. Magazyn i dashboard admina
   - **TWARDE TODO (przed Etapem 7 i przed startem produkcyjnym, D117):** model B — każdy odcinek zlecenia z magazynem to osobny kurs (osobny przewoźnik, statusy per odcinek) z **osobną wypłatą per odcinek**. Do tego czasu kreator **nie oferuje** „stoccaggio lungo termine” (`long_term`).
