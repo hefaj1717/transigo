@@ -55,45 +55,128 @@ export const HOW_IT_WORKS = [
   },
 ];
 
-export type Faq = { q: string; a: string };
+export type FaqGroup = "prenotazione" | "pagamento" | "servizio" | "trasportatori";
+
+export const FAQ_GROUPS: { code: FaqGroup; title: string }[] = [
+  { code: "prenotazione", title: "Prenotazione e prezzi" },
+  { code: "pagamento", title: "Pagamento e fatture" },
+  { code: "servizio", title: "Il servizio" },
+  { code: "trasportatori", title: "Per i trasportatori" },
+];
+
+/** `home`: also shown on the home page. */
+export type Faq = { q: string; a: string; group: FaqGroup; home?: boolean };
 
 export const FAQS: Faq[] = [
   {
+    group: "prenotazione",
+    home: true,
     q: "Come viene calcolato il prezzo?",
-    a: "In base alla distanza del percorso, al veicolo scelto e ai servizi aggiunti (facchinaggio, imballaggio, deposito). Eventuali supplementi per urgenza, weekend o festivi sono calcolati automaticamente e mostrati prima del pagamento.",
+    a: "In base alla distanza del percorso, al veicolo scelto e ai servizi aggiunti (facchinaggio, imballaggio, deposito). Eventuali supplementi per urgenza, weekend, festivi o piani senza ascensore sono calcolati automaticamente e mostrati prima del pagamento.",
   },
   {
+    group: "prenotazione",
+    home: true,
     q: "Devo registrarmi per vedere il prezzo?",
     a: "No: il preventivo è gratuito e senza registrazione. L'account serve solo per confermare e pagare la prenotazione.",
   },
   {
-    q: "Quando pago?",
-    a: "Al momento della prenotazione, con carta, tramite un pagamento sicuro. La prenotazione è confermata quando il pagamento è andato a buon fine.",
-  },
-  {
-    q: "Ricevo la fattura?",
-    a: "Sì, emettiamo fattura elettronica per ogni ordine, sia ai privati sia alle aziende.",
-  },
-  {
-    q: "Chi esegue il trasporto?",
-    a: "Trasportatori professionisti con partita IVA, verificati da noi: documenti, assicurazione e veicolo.",
-  },
-  {
-    q: "Posso annullare la prenotazione?",
-    a: "Sì, dalla pagina dell'ordine. Le eventuali spese di annullamento dipendono da quanto manca al ritiro e sono indicate prima della conferma.",
-  },
-  {
+    group: "prenotazione",
     q: "In quali zone siete attivi?",
     a: "Il ritiro deve trovarsi in una delle province servite. Inserisci gli indirizzi: se la zona non è ancora coperta, puoi lasciarci una richiesta e ti ricontattiamo.",
   },
   {
+    group: "prenotazione",
+    q: "Con quanto anticipo devo prenotare?",
+    a: "Puoi prenotare anche per lo stesso giorno, rispettando l'anticipo minimo indicato nella prenotazione. Per i ritiri con poco preavviso si applica un supplemento di urgenza, mostrato nel preventivo.",
+  },
+  {
+    group: "prenotazione",
+    q: "Posso annullare la prenotazione?",
+    a: "Sì, dalla pagina dell'ordine. Le eventuali spese di annullamento dipendono da quanto manca al ritiro e sono indicate prima della conferma.",
+  },
+  {
+    group: "pagamento",
+    home: true,
+    q: "Quando pago?",
+    a: "Al momento della prenotazione, con carta, tramite un pagamento sicuro. La prenotazione è confermata quando il pagamento è andato a buon fine.",
+  },
+  {
+    group: "pagamento",
+    home: true,
+    q: "Ricevo la fattura?",
+    a: "Sì, emettiamo fattura elettronica per ogni ordine, sia ai privati sia alle aziende.",
+  },
+  {
+    group: "pagamento",
+    q: "I prezzi includono l'IVA?",
+    a: "Per i privati i prezzi sono mostrati IVA inclusa. Per le aziende vedi l'importo netto, l'IVA e il totale.",
+  },
+  {
+    group: "servizio",
+    q: "Chi esegue il trasporto?",
+    a: "Trasportatori professionisti con partita IVA, verificati da noi: documenti, assicurazione e veicolo.",
+  },
+  {
+    group: "servizio",
+    q: "Posso seguire la consegna?",
+    a: "Sì: nella pagina dell'ordine vedi lo stato aggiornato. Alla consegna il destinatario firma e il trasportatore scatta una foto, che trovi nell'ordine.",
+  },
+  {
+    group: "servizio",
+    q: "Cosa succede se c'è un problema con la consegna?",
+    a: "Puoi aprire un reclamo dalla pagina dell'ordine, con una descrizione e delle foto. Il nostro team lo gestisce direttamente con il trasportatore.",
+  },
+  {
+    group: "trasportatori",
     q: "Sono un trasportatore: come posso lavorare con voi?",
-    a: "Registrati come partner con la tua partita IVA, carica i documenti e il veicolo. Dopo la verifica ricevi le corse disponibili nell'app e vieni pagato dopo ogni consegna.",
+    a: "Registrati come partner con la tua partita IVA, inserisci i dati aziendali, il veicolo e i documenti. Dopo la verifica ricevi le corse disponibili nell'app.",
+  },
+  {
+    group: "trasportatori",
+    q: "Posso scegliere le corse?",
+    a: "Sì. Per ogni corsa vedi le città di ritiro e consegna, la distanza, la data, il carico e il compenso per te, prima di accettarla.",
+  },
+  {
+    group: "trasportatori",
+    q: "Quando vengo pagato?",
+    a: "Dopo ogni consegna confermata con firma e foto, quando hai caricato la tua fattura per Transigo: il pagamento parte in automatico sul tuo conto.",
+  },
+  {
+    group: "trasportatori",
+    q: "Devo installare un'app?",
+    a: "No, l'app si apre dal browser del telefono e si può aggiungere alla schermata home, senza passare dagli store.",
   },
 ];
 
-/** Questions also shown on the home page. */
-export const HOME_FAQ_COUNT = 4;
+export const HOME_FAQS = FAQS.filter((f) => f.home);
+
+/** "Come funziona" — customer side, in detail. */
+export const CUSTOMER_STEPS = [
+  { title: "Inserisci percorso e data", text: "Indirizzi di ritiro e consegna, piano e ascensore, giorno e fascia oraria di 2 ore." },
+  { title: "Descrivi il carico e scegli il veicolo", text: "Peso, misure e pallet: ti consigliamo il veicolo adatto. Aggiungi facchini, imballaggio o deposito se ti servono." },
+  { title: "Controlla il preventivo", text: "Vedi il prezzo completo, con tutti i supplementi, prima di registrarti. Privati IVA inclusa, aziende netto più IVA." },
+  { title: "Crea l'account e paga", text: "Inserisci i contatti per ritiro e consegna e i dati per la fattura, poi paghi con carta in modo sicuro." },
+  { title: "Un trasportatore verificato prende l'incarico", text: "Ricevi la conferma e segui lo stato dell'ordine dalla tua area personale." },
+  { title: "Consegna con firma e foto", text: "Il destinatario firma alla consegna e il trasportatore scatta una foto. Ricevi la fattura elettronica." },
+];
+
+/** "Come funziona" / "Diventa partner" — carrier side. */
+export const CARRIER_STEPS = [
+  { title: "Registrati", text: "Crea l'account partner con la tua partita IVA." },
+  { title: "Completa il profilo", text: "Dati aziendali, veicoli e documenti, caricati direttamente dal telefono." },
+  { title: "Verifica", text: "Il nostro team controlla i documenti e attiva il tuo account." },
+  { title: "Scegli le corse", text: "Vedi le corse disponibili con il compenso per te e accetti quelle che ti convengono." },
+  { title: "Esegui la corsa", text: "Aggiorni lo stato dall'app; alla consegna raccogli firma e foto." },
+  { title: "Vieni pagato", text: "Carichi la tua fattura per Transigo e il pagamento parte in automatico dopo ogni consegna." },
+];
+
+export const PARTNER_BENEFITS = [
+  { title: "Scegli tu le corse", text: "Nessun obbligo: accetti solo le corse adatte al tuo veicolo e ai tuoi orari." },
+  { title: "Compenso chiaro", text: "Vedi quanto guadagni prima di accettare, con il dettaglio per trasporto, facchinaggio e imballaggio." },
+  { title: "Pagamento dopo ogni consegna", text: "Niente attese di fine mese: il pagamento parte dopo ogni consegna confermata." },
+  { title: "Tutto dal telefono", text: "Corse, stati, foto e firma nell'app, senza installazioni dagli store." },
+];
 
 /** Service pages (/servizi/…). Draft texts — the owner reviews them. */
 export type ServiceDetail = {

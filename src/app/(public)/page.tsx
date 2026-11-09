@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { FAQS, HOME_FAQ_COUNT, HOW_IT_WORKS, SERVICES } from "@/lib/public/content";
+import { HOME_FAQS, HOW_IT_WORKS, SERVICES } from "@/lib/public/content";
 import { getPublicCatalog } from "@/lib/public/server";
+import { FaqList } from "@/components/site/faq-list";
 import { Check, SectionTitle, VehicleGrid } from "@/components/site/ui";
 import { HeroForm } from "./hero-form";
 
@@ -96,16 +97,8 @@ export default async function Home() {
       {/* FAQ */}
       <section className="mx-auto max-w-3xl px-4 py-16">
         <SectionTitle eyebrow="FAQ" title="Domande frequenti" center />
-        <div className="mt-8 divide-y divide-zinc-200 rounded-xl border border-zinc-200">
-          {FAQS.slice(0, HOME_FAQ_COUNT).map((f) => (
-            <details key={f.q} className="group p-5">
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-medium text-brand-900">
-                {f.q}
-                <span className="text-brand-500 transition group-open:rotate-45" aria-hidden="true">+</span>
-              </summary>
-              <p className="mt-3 text-sm text-zinc-600">{f.a}</p>
-            </details>
-          ))}
+        <div className="mt-8">
+          <FaqList faqs={HOME_FAQS} />
         </div>
         <div className="mt-6 text-center">
           <Link href="/domande-frequenti" className="text-sm font-medium text-brand-700 hover:text-brand-900">Tutte le domande →</Link>
