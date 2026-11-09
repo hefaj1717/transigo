@@ -329,7 +329,7 @@ export type AcceptResult = { ok: true; newlyAssigned: boolean; message: string }
  * accept_job with the carrier's session. Only a NEW assignment (newly_assigned) queues the customer e-mail
  * order_assigned; the same carrier accepting again (double click, second tab) gets "already yours" and no e-mail.
  */
-export async function acceptJob(db: SupabaseClient, orderId: string, vehicleId: string, notify: JobNotifyDeps): Promise<AcceptResult> {
+export async function acceptJob(db: SupabaseClient, userId: string, orderId: string, vehicleId: string, notify: JobNotifyDeps): Promise<AcceptResult> {
   if (!isUuid(orderId)) return { ok: false, error: JOB_MSG.notFound, refreshList: true };
   if (!isUuid(vehicleId)) return { ok: false, error: JOB_MSG.chooseVehicle, refreshList: false };
 
@@ -347,7 +347,16 @@ export async function acceptJob(db: SupabaseClient, orderId: string, vehicleId: 
 
   if (outcome.newlyAssigned) {
     try {
-      await sendOrderAssignedEmail(notify.serviceDb(), orderId, notify.appUrl);
+      // accept_job returns no order id. The id given to the e-mail is the one read back with the carrier's
+      // session AFTER the successful call — an order this carrier is now assigned to — never the raw form value.
+      const { data: assigned, error: readError } = await db
+        .from("orders")
+        .select("id")
+        .eq("id", orderId)
+        .eq("carrier_id", userId)
+        .maybeSingle<{ id: string }>();
+      if (readError || !assigned) throw new Error("accepted order not readable with the carrier's session");
+      await sendOrderAssignedEmail(notify.serviceDb(), assigned.id, notify.appUrl);
     } catch (e) {
       logMailError("order_assigned", orderId, e);
     }

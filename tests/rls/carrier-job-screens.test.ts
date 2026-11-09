@@ -95,7 +95,7 @@ describe("before accepting: no streets, contacts or notes (D119)", () => {
   it("after accepting: the full job with addresses, contacts and notes", async () => {
     const orderId = await paidOrder();
     const c = await activeCarrier();
-    expect(await acceptJob(c.user.client, orderId, c.vehicleId, notifyDeps().deps)).toEqual({ ok: true, newlyAssigned: true, message: JOB_MSG.accepted });
+    expect(await acceptJob(c.user.client, c.user.id, orderId, c.vehicleId, notifyDeps().deps)).toEqual({ ok: true, newlyAssigned: true, message: JOB_MSG.accepted });
 
     const job = await loadMyJob(c.user.client, c.user.id, orderId);
     expect(job).toMatchObject({
@@ -120,7 +120,7 @@ describe("before accepting: no streets, contacts or notes (D119)", () => {
   it("another carrier's job: not in my jobs, not readable, unavailable", async () => {
     const orderId = await paidOrder();
     const [a, b] = await Promise.all([activeCarrier(), activeCarrier()]);
-    await acceptJob(a.user.client, orderId, a.vehicleId, notifyDeps().deps);
+    await acceptJob(a.user.client, a.user.id, orderId, a.vehicleId, notifyDeps().deps);
     expect(await loadMyJob(b.user.client, b.user.id, orderId)).toBeNull();
     expect(await loadMyJobs(b.user.client, b.user.id)).toEqual([]);
     expect(await loadAvailableJob(b.user.client, b.user.id, orderId)).toEqual({ kind: "unavailable" });
@@ -134,7 +134,7 @@ describe("Accetta la Corsa → order_assigned to the customer", () => {
     const orderId = await paidOrder();
     const c = await activeCarrier();
     const { deps, calls } = notifyDeps();
-    expect(await acceptJob(c.user.client, orderId, c.vehicleId, deps)).toMatchObject({ ok: true, newlyAssigned: true });
+    expect(await acceptJob(c.user.client, c.user.id, orderId, c.vehicleId, deps)).toMatchObject({ ok: true, newlyAssigned: true });
     expect(calls.serviceDb).toBe(1);
     const mails = await assignedMails(orderId);
     expect(mails).toHaveLength(1);
@@ -146,7 +146,7 @@ describe("Accetta la Corsa → order_assigned to the customer", () => {
     const orderId = await paidOrder({ weightKg: 5_000 }); // too heavy for every test vehicle → not listed
     const c = await activeCarrier();
     const { deps, calls } = notifyDeps();
-    const r = await acceptJob(c.user.client, orderId, c.vehicleId, deps);
+    const r = await acceptJob(c.user.client, c.user.id, orderId, c.vehicleId, deps);
     expect(r.ok).toBe(false);
     expect(calls.serviceDb).toBe(0);
     expect(await assignedMails(orderId)).toEqual([]);
@@ -155,10 +155,10 @@ describe("Accetta la Corsa → order_assigned to the customer", () => {
   it("accepting twice (double click): newly_assigned = false, 'già accettata da te', no second e-mail", async () => {
     const orderId = await paidOrder();
     const c = await activeCarrier();
-    await acceptJob(c.user.client, orderId, c.vehicleId, notifyDeps().deps);
+    await acceptJob(c.user.client, c.user.id, orderId, c.vehicleId, notifyDeps().deps);
 
     const { deps, calls } = notifyDeps();
-    const again = await acceptJob(c.user.client, orderId, c.vehicleId, deps);
+    const again = await acceptJob(c.user.client, c.user.id, orderId, c.vehicleId, deps);
     expect(again).toEqual({ ok: true, newlyAssigned: false, message: JOB_MSG.alreadyMine });
     expect(again).not.toMatchObject({ message: JOB_MSG.alreadyTaken });
     expect(calls.serviceDb).toBe(0); // the e-mail is not even attempted (not just deduplicated by the outbox)
@@ -166,7 +166,7 @@ describe("Accetta la Corsa → order_assigned to the customer", () => {
 
     // the same in parallel (two tabs)
     const orderId2 = await paidOrder();
-    const both = await Promise.all([1, 2].map(() => acceptJob(c.user.client, orderId2, c.vehicleId, notifyDeps().deps)));
+    const both = await Promise.all([1, 2].map(() => acceptJob(c.user.client, c.user.id, orderId2, c.vehicleId, notifyDeps().deps)));
     expect(both.map((r) => r.ok && r.newlyAssigned).sort()).toEqual([false, true]);
     expect(await assignedMails(orderId2)).toHaveLength(1);
   });
@@ -174,7 +174,7 @@ describe("Accetta la Corsa → order_assigned to the customer", () => {
   it("two carriers at once: one wins, the other gets already_taken and a list refresh; one e-mail", async () => {
     const orderId = await paidOrder();
     const [a, b] = await Promise.all([activeCarrier(), activeCarrier()]);
-    const results = await Promise.all([a, b].map((c) => acceptJob(c.user.client, orderId, c.vehicleId, notifyDeps().deps)));
+    const results = await Promise.all([a, b].map((c) => acceptJob(c.user.client, c.user.id, orderId, c.vehicleId, notifyDeps().deps)));
     expect(results.filter((r) => r.ok)).toHaveLength(1);
     expect(results.find((r) => !r.ok)).toEqual({ ok: false, error: JOB_MSG.alreadyTaken, refreshList: true });
     expect(await assignedMails(orderId)).toHaveLength(1);
@@ -184,7 +184,7 @@ describe("Accetta la Corsa → order_assigned to the customer", () => {
     const orderId = await paidOrder();
     const c = await activeCarrier();
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const r = await acceptJob(c.user.client, orderId, c.vehicleId, notifyDeps({ serviceDb: brokenServiceDb }).deps);
+    const r = await acceptJob(c.user.client, c.user.id, orderId, c.vehicleId, notifyDeps({ serviceDb: brokenServiceDb }).deps);
     expect(r).toEqual({ ok: true, newlyAssigned: true, message: JOB_MSG.accepted });
     expect(await orderRow(orderId)).toMatchObject({ status: "assigned", carrier_id: c.user.id });
     expect(log).toHaveBeenCalledWith("[jobs] order_assigned e-mail failed", expect.objectContaining({ orderId }));
@@ -193,8 +193,8 @@ describe("Accetta la Corsa → order_assigned to the customer", () => {
   it("invalid ids never reach the database", async () => {
     const c = await activeCarrier();
     const { deps, calls } = notifyDeps();
-    expect(await acceptJob(c.user.client, "x", c.vehicleId, deps)).toEqual({ ok: false, error: JOB_MSG.notFound, refreshList: true });
-    expect(await acceptJob(c.user.client, c.vehicleId, "", deps)).toEqual({ ok: false, error: JOB_MSG.chooseVehicle, refreshList: false });
+    expect(await acceptJob(c.user.client, c.user.id, "x", c.vehicleId, deps)).toEqual({ ok: false, error: JOB_MSG.notFound, refreshList: true });
+    expect(await acceptJob(c.user.client, c.user.id, c.vehicleId, "", deps)).toEqual({ ok: false, error: JOB_MSG.chooseVehicle, refreshList: false });
     expect(calls.serviceDb).toBe(0);
   });
 });
@@ -204,7 +204,7 @@ describe("Rinuncia → e-mail to the Transigo team (D121)", () => {
     const orderId = await paidOrder();
     const number = await orderNumber(orderId);
     const [c, other] = await Promise.all([activeCarrier(), activeCarrier()]);
-    await acceptJob(c.user.client, orderId, c.vehicleId, notifyDeps().deps);
+    await acceptJob(c.user.client, c.user.id, orderId, c.vehicleId, notifyDeps().deps);
 
     const { deps, calls } = notifyDeps();
     expect(await releaseJob(c.user.client, c.user.id, orderId, deps)).toEqual({ ok: true, message: JOB_MSG.released });
@@ -221,7 +221,7 @@ describe("Rinuncia → e-mail to the Transigo team (D121)", () => {
     for (const secret of PERSONAL) expect(`${mails[0].text_body}${mails[0].html}`).not.toContain(secret);
 
     // accepted and released again (within 15 min): a second e-mail
-    await acceptJob(c.user.client, orderId, c.vehicleId, notifyDeps().deps);
+    await acceptJob(c.user.client, c.user.id, orderId, c.vehicleId, notifyDeps().deps);
     await releaseJob(c.user.client, c.user.id, orderId, notifyDeps().deps);
     mails = await releaseMails(number);
     expect(mails).toHaveLength(2);
@@ -230,7 +230,7 @@ describe("Rinuncia → e-mail to the Transigo team (D121)", () => {
   it("without ADMIN_NOTIFICATION_EMAIL the release goes through; the error is logged, no service role", async () => {
     const orderId = await paidOrder();
     const c = await activeCarrier();
-    await acceptJob(c.user.client, orderId, c.vehicleId, notifyDeps().deps);
+    await acceptJob(c.user.client, c.user.id, orderId, c.vehicleId, notifyDeps().deps);
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { deps, calls } = notifyDeps({ adminEmail: null });
     expect(await releaseJob(c.user.client, c.user.id, orderId, deps)).toEqual({ ok: true, message: JOB_MSG.released });
@@ -243,7 +243,7 @@ describe("Rinuncia → e-mail to the Transigo team (D121)", () => {
   it("an outbox failure does not undo the release; the error is logged", async () => {
     const orderId = await paidOrder();
     const c = await activeCarrier();
-    await acceptJob(c.user.client, orderId, c.vehicleId, notifyDeps().deps);
+    await acceptJob(c.user.client, c.user.id, orderId, c.vehicleId, notifyDeps().deps);
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     expect(await releaseJob(c.user.client, c.user.id, orderId, notifyDeps({ serviceDb: brokenServiceDb }).deps)).toEqual({ ok: true, message: JOB_MSG.released });
     expect((await orderRow(orderId)).status).toBe("paid");
@@ -253,7 +253,7 @@ describe("Rinuncia → e-mail to the Transigo team (D121)", () => {
   it("too late (after 15 min and < 48 h before pickup): refused, no e-mail, no service role", async () => {
     const orderId = await paidOrder({ hoursAhead: 30 });
     const c = await activeCarrier();
-    await acceptJob(c.user.client, orderId, c.vehicleId, notifyDeps().deps);
+    await acceptJob(c.user.client, c.user.id, orderId, c.vehicleId, notifyDeps().deps);
     await run(service.from("orders").update({ assigned_at: new Date(Date.now() - 16 * 60_000).toISOString() }).eq("id", orderId));
     expect((await loadMyJob(c.user.client, c.user.id, orderId))?.release).toMatchObject({ allowed: false, reason: "expired" });
 
@@ -267,7 +267,7 @@ describe("Rinuncia → e-mail to the Transigo team (D121)", () => {
   it("someone else's job: not_assigned, nothing changes", async () => {
     const orderId = await paidOrder();
     const [a, b] = await Promise.all([activeCarrier(), activeCarrier()]);
-    await acceptJob(a.user.client, orderId, a.vehicleId, notifyDeps().deps);
+    await acceptJob(a.user.client, a.user.id, orderId, a.vehicleId, notifyDeps().deps);
     const { deps, calls } = notifyDeps();
     expect(await releaseJob(b.user.client, b.user.id, orderId, deps)).toEqual({ ok: false, error: JOB_MSG.notAssigned });
     expect(calls.serviceDb).toBe(0);
@@ -279,8 +279,8 @@ describe("suspended carrier (D116)", () => {
   it("sees its own jobs and may release them, but gets no list of available jobs", async () => {
     const [kept, released] = [await paidOrder(), await paidOrder()];
     const c = await activeCarrier();
-    await acceptJob(c.user.client, kept, c.vehicleId, notifyDeps().deps);
-    await acceptJob(c.user.client, released, c.vehicleId, notifyDeps().deps);
+    await acceptJob(c.user.client, c.user.id, kept, c.vehicleId, notifyDeps().deps);
+    await acceptJob(c.user.client, c.user.id, released, c.vehicleId, notifyDeps().deps);
     await suspend(c.user.id);
 
     expect((await loadMyJobs(c.user.client, c.user.id)).map((j) => j.orderId).sort()).toEqual([kept, released].sort());
@@ -292,7 +292,7 @@ describe("suspended carrier (D116)", () => {
     expect(await loadAvailableJob(c.user.client, c.user.id, await paidOrder())).toMatchObject({ kind: "blocked" });
 
     const fresh = await paidOrder();
-    const refused = await acceptJob(c.user.client, fresh, c.vehicleId, notifyDeps().deps);
+    const refused = await acceptJob(c.user.client, c.user.id, fresh, c.vehicleId, notifyDeps().deps);
     expect(refused).toEqual({ ok: false, error: JOB_MSG.notEligible, refreshList: true });
 
     expect(await releaseJob(c.user.client, c.user.id, released, notifyDeps().deps)).toEqual({ ok: true, message: JOB_MSG.released });

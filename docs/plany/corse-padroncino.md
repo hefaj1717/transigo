@@ -39,7 +39,7 @@ Zatwierdzony przez właściciela 2026-11-09. Po każdym kroku: testy, commit, pu
   - `acceptJob(orderId, vehicleId)`: RPC sesją przewoźnika, po sukcesie (tylko `newly_assigned`) mail `order_assigned` do klienta przez service role (outbox); błąd maila nie cofa przyjęcia;
   - `releaseJob(orderId)`: RPC sesją przewoźnika, potem mail do admina (nowy szablon `carrier_released_job`: numer, firma, data odbioru, link do `/admin/ordini/[id]`, bez danych klienta) przez service role; bez `ADMIN_NOTIFICATION_EMAIL` rezygnacja przechodzi, błąd w logach;
   - testy na lokalnej bazie `tests/rls/carrier-job-screens.test.ts`: bez ulic i kontaktów przed przyjęciem; przyjęcie → `order_assigned` w outboxie; podwójne przyjęcie → bez drugiego maila i bez „già accettata da un altro”; rezygnacja → mail do admina; zawieszony widzi swoje kursy i rezygnuje, nie widzi listy.
-- [ ] **Krok 3 — Server Actions `src/app/(padroncino)/padroncino/corse/actions.ts`**
+- [x] **Krok 3 — Server Actions `src/app/(padroncino)/padroncino/corse/actions.ts`** — zrobione 2026-11-09. Plik eksportuje tylko `acceptJobAction` i `releaseJobAction` (zod i bramki statusu w `src/lib/carriers/job-actions.ts`, `jobNotifyDeps()` w `job-deps.ts`). Kolejność: `requireArea` → status z sesji (przyjęcie: `active`; rezygnacja: `active`/`suspended`, D116) → zod (`z.uuid()`) → `jobs-server.ts` → `revalidatePath`. Przyjęcie zwraca `href` do `/padroncino/le-mie-corse/[id]` (przekierowanie robi UI w kroku 4). `acceptJob` dostał `userId`: id zlecenia do maila `order_assigned` jest odczytywane sesją przewoźnika **po** udanym `accept_job` (`id` + `carrier_id` = sesja), bo RPC nie zwraca `order_id` (bez migracji).
   - `acceptJobAction`, `releaseJobAction`: `requireArea("padroncino")` → zod → logika → `revalidatePath`;
   - test „każdy eksport jako nie-przewoźnik” (niezalogowany, cliente, admin, zablokowany padroncino): nic nie dociera do RPC ani service role; sesja przed service role.
 - [ ] **Krok 4 — ekrany (mobile-first, `CarrierShell`)**
@@ -61,5 +61,5 @@ Zatwierdzony przez właściciela 2026-11-09. Po każdym kroku: testy, commit, pu
 
 ## TODO do przeniesienia do CLAUDE.md (krok 6)
 
-- Brak drugiego `order_assigned` po ponownym przypisaniu (po „Rinuncia” albo „Rimuovi padroncino”) — klucz outboxu jeden mail na zlecenie i szablon.
+- ~~Brak drugiego `order_assigned`…~~ — przeniesione do CLAUDE.md jako jedno TODO „migracja klucza outboxu” (razem z `carrier_released_job` bez `order_id`).
 - Możliwa pętla przyjmij/zrezygnuj w oknie 15 min (blokowanie kursu przez jednego przewoźnika) — później licznik rezygnacji w panelu admina.
