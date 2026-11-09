@@ -4,7 +4,7 @@ import { Loading } from "@/components/panel-shell";
 import { CarrierShell } from "@/components/padroncino/carrier-shell";
 import { VehicleActiveToggle, VehicleForm } from "@/components/padroncino/vehicle-form";
 import { requireArea } from "@/lib/auth/session";
-import { CARRIER_PATHS, vehicleEditBlock } from "@/lib/carriers/onboarding";
+import { CARRIER_PATHS, documentEditBlock, vehicleEditBlock } from "@/lib/carriers/onboarding";
 import { DocumentList } from "@/components/padroncino/document-list";
 import { latestDocuments } from "@/lib/carriers/documents";
 import { loadCarrier, loadDocuments, loadVehicle, loadVehicleTypes, signedDocumentUrls } from "@/lib/carriers/pages";
@@ -88,7 +88,7 @@ async function Content({ params, searchParams }: Pick<PageProps<"/padroncino/vei
         <h2 className="text-lg font-semibold text-zinc-900">Documenti del veicolo</h2>
         {!vehicle.is_active ? <p className="mt-1 text-sm text-zinc-600">Riattiva il veicolo per caricare nuovi documenti.</p> : null}
         <div className="mt-3">
-          <DocumentList scope="vehicle" carrierId={ctx.userId} vehicleId={vehicle.id} latest={latest} urls={urls} editable={!block && vehicle.is_active} />
+          <DocumentList scope="vehicle" carrierId={ctx.userId} vehicleId={vehicle.id} latest={latest} urls={urls} editable={!documentEditBlock(view) && vehicle.is_active} />
         </div>
       </section>
     </CarrierShell>

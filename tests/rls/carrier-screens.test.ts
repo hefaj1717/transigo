@@ -161,7 +161,9 @@ describe("Veicoli (D102, D107, D111, D112)", () => {
 
     await check(service.rpc("decide_carrier_review", { p_carrier_id: user.id, p_admin_id: admin.id, p_approve: true, p_reason: null }));
     await run(service.from("carriers").update({ status: "suspended", status_reason: "test" }).eq("profile_id", user.id));
-    expect(await createCarrierVehicle(user.client, user.id, vehicleForm())).toEqual({ ok: false, errors: { _form: ONBOARDING_MSG.notEditable } });
+    expect(await createCarrierVehicle(user.client, user.id, vehicleForm())).toEqual({ ok: false, errors: { _form: ONBOARDING_MSG.suspendedVehicles } });
+    expect(await setCarrierVehicleActive(user.client, user.id, vehicleId, false)).toEqual({ ok: false, errors: { _form: ONBOARDING_MSG.suspendedVehicles } });
+    expect(await saveCarrierCompany(user.client, user.id, companyForm())).toEqual({ ok: false, errors: { _form: ONBOARDING_MSG.companyLocked } });
     expect((await vehicleRow(vehicleId)).payload_kg).toBe(before.payload_kg);
   });
 
@@ -286,5 +288,17 @@ describe("Documenti — upload and record (D98, D103, D112)", () => {
     const r = await registerCarrierDocument(user.client, user.id, form(await upload(user)));
     expect(r.ok).toBe(true);
     if (r.ok) expect((await docRow(r.data.id)).review_status).toBe("pending");
+  });
+
+  it("suspended: company and vehicle documents can be uploaded, the account stays suspended (D112)", async () => {
+    const { user, vehicleId } = await activeCarrier();
+    await run(service.from("carriers").update({ status: "suspended", status_reason: "RCA scaduta" }).eq("profile_id", user.id));
+    const company = await registerCarrierDocument(user.client, user.id, form(await upload(user)));
+    const rca = await registerCarrierDocument(user.client, user.id, form(await upload(user), { docType: "insurance_rca", vehicleId }));
+    expect(company.ok).toBe(true);
+    expect(rca.ok).toBe(true);
+    if (rca.ok) expect((await docRow(rca.data.id)).review_status).toBe("pending");
+    expect(await check(service.from("carriers").select("status, status_reason").eq("profile_id", user.id).single()))
+      .toEqual({ status: "suspended", status_reason: "RCA scaduta" });
   });
 });

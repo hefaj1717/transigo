@@ -170,6 +170,7 @@ export function carrierOnboarding(input: CarrierOnboardingInput): CarrierOnboard
 export const ONBOARDING_MSG = {
   inReview: "Il tuo account è in verifica: non puoi modificare i dati finché il team Transigo non avrà deciso.",
   notEditable: "In questo stato dell'account non puoi modificare i dati. Contatta l'assistenza Transigo.",
+  suspendedVehicles: "Con l'account sospeso non puoi modificare i veicoli. Puoi caricare documenti aggiornati.",
   companyLocked: "I dati aziendali non si possono più modificare. Per correggerli contatta l'assistenza Transigo.",
   incomplete: "Mancano ancora alcuni dati: completa i passaggi indicati e riprova.",
   generic: "Si è verificato un errore. Riprova più tardi.",
@@ -186,6 +187,21 @@ export function canEditVehicles(view: CarrierOnboardingView): boolean {
 /** Why a vehicle change is refused in this view (null = allowed). */
 export function vehicleEditBlock(view: CarrierOnboardingView): string | null {
   if (canEditVehicles(view)) return null;
+  if (view === "in_review") return ONBOARDING_MSG.inReview;
+  return view === "suspended" ? ONBOARDING_MSG.suspendedVehicles : ONBOARDING_MSG.notEditable;
+}
+
+/**
+ * Documents (D112): as vehicles, plus a suspended account — uploading renewed documents (e.g. an expired RCA)
+ * is its only way back. An upload changes nothing else: the account returns to active only by an admin decision.
+ */
+export function canUploadDocuments(view: CarrierOnboardingView): boolean {
+  return canEditVehicles(view) || view === "suspended";
+}
+
+/** Why a document upload is refused in this view (null = allowed). */
+export function documentEditBlock(view: CarrierOnboardingView): string | null {
+  if (canUploadDocuments(view)) return null;
   return view === "in_review" ? ONBOARDING_MSG.inReview : ONBOARDING_MSG.notEditable;
 }
 

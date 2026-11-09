@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CarrierStatus } from "@/lib/auth/routing";
 import { AUTH_MSG, isVatTakenError } from "@/lib/auth/errors";
 import { carrierCompanyRow, carrierCompanySchema, toFieldErrors, type FieldErrors } from "@/lib/auth/schemas";
-import { canEditOnboarding, carrierOnboardingView, ONBOARDING_MSG, vehicleEditBlock, type CarrierOnboardingView } from "./onboarding";
+import { canEditOnboarding, carrierOnboardingView, documentEditBlock, ONBOARDING_MSG, vehicleEditBlock, type CarrierOnboardingView } from "./onboarding";
 import { vehicleDbError, vehicleRow, vehicleSchema, VEHICLE_MSG } from "./vehicles";
 import {
   checkDocumentExpiry,
@@ -176,7 +176,7 @@ export async function registerCarrierDocument(
   input: Record<string, string>,
   now: Date = new Date(),
 ): Promise<CarrierResult<{ id: string }>> {
-  const block = vehicleEditBlock(await loadCarrierView(db, userId)); // same states as vehicles (D112)
+  const block = documentEditBlock(await loadCarrierView(db, userId)); // D112: also when suspended
   if (block) return fail(block);
 
   const parsed = documentUploadSchema.safeParse(input);

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   canEditOnboarding,
   canEditVehicles,
+  canUploadDocuments,
+  documentEditBlock,
   carrierOnboarding,
   carrierOnboardingView,
   describeMissing,
@@ -35,7 +37,13 @@ describe("carrierOnboardingView (D100, D109)", () => {
     for (const v of ["incomplete", "rejected", "active"] as const) expect(canEditVehicles(v)).toBe(true);
     for (const v of ["in_review", "suspended", "missing"] as const) expect(canEditVehicles(v)).toBe(false);
     expect(vehicleEditBlock("in_review")).toBe(ONBOARDING_MSG.inReview);
-    expect(vehicleEditBlock("suspended")).toBe(ONBOARDING_MSG.notEditable);
+    expect(vehicleEditBlock("suspended")).toBe(ONBOARDING_MSG.suspendedVehicles);
+  });
+  it("documents: as vehicles plus suspended — the way back after e.g. an expired RCA (D112)", () => {
+    for (const v of ["incomplete", "rejected", "active", "suspended"] as const) expect(canUploadDocuments(v)).toBe(true);
+    for (const v of ["in_review", "missing"] as const) expect(canUploadDocuments(v)).toBe(false);
+    expect(documentEditBlock("suspended")).toBeNull();
+    expect(documentEditBlock("in_review")).toBe(ONBOARDING_MSG.inReview);
   });
 });
 
