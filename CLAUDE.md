@@ -88,7 +88,8 @@ Uwagi techniczne:
   - [x] Krok 2: lista `/cliente` (zakładki „In corso” / „Conclusi”, karty) w ramce `src/components/cliente/customer-shell.tsx`; logika `src/lib/orders/customer-view.ts` (+ testy).
   - [x] Krok 3: `/cliente/ordini/[id]` — postęp, przewoźnik, trasa z piętrami i kontaktami, merce/servizi, rozbicie ceny (D3), „contattaci” dla zmian opłaconego zlecenia, historia.
   - [x] Krok 4: maile `order_assigned` / `order_delivered` (`src/lib/notifications/templates/order-customer-updates.ts`, wysyłka `src/lib/orders/customer-emails.ts`, wywołane w `dispatch-server.ts` po udanej zmianie; błąd maila nie cofa zmiany). Jeden mail na zlecenie i szablon — po „Rimuovi padroncino” i ponownym przypisaniu drugi `order_assigned` nie idzie (świadomie, demo).
-  - [ ] Krok 5: przegląd + `docs/testy-reczne/panel-klienta.md`. Krok 6: `db:push` trzech migracji na staging (pokazać `db:list` i projekt przed wysłaniem).
+  - [x] Krok 5: przegląd w przeglądarce na danych demo (lista, zlecenia we wszystkich statusach, z magazynem, „Assegna” w `/admin/ordini` → mail `order_assigned` w outboxie); lista `docs/testy-reczne/panel-klienta.md`. W cenie bez „× ilość” (nazwy pozycji już ją zawierają).
+  - [ ] Krok 6: `db:push` trzech migracji na staging (pokazać `db:list` i projekt przed wysłaniem).
 
 ## Odłożone: PWA przewoźnika (priorytet: najpierw demo dla klienta, 2026-11-09)
 

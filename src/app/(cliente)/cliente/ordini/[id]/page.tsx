@@ -45,7 +45,7 @@ type OrderRow = {
   customer_notes: string | null;
   vehicle_types: { name_it: string } | null;
   order_charges: { total_cents: number; subtotal_cents: number; vat_cents: number; refunded_cents: number; customer_type: "private" | "business" } | null;
-  order_lines: { sort_order: number; label_it: string; quantity: number; net_cents: number; gross_cents: number }[];
+  order_lines: { sort_order: number; label_it: string; net_cents: number; gross_cents: number }[];
   order_legs: Leg[];
   order_status_history: { id: number; to_status: string; created_at: string; note: string | null }[];
 };
@@ -58,7 +58,7 @@ const SELECT = [
   "pickup_contact_name, pickup_contact_phone, delivery_contact_name, delivery_contact_phone, customer_notes",
   "vehicle_types(name_it)",
   "order_charges(total_cents, subtotal_cents, vat_cents, refunded_cents, customer_type)",
-  "order_lines(sort_order, label_it, quantity, net_cents, gross_cents)",
+  "order_lines(sort_order, label_it, net_cents, gross_cents)",
   "order_legs(leg_index, pickup_address, delivery_address, pickup_city, delivery_city, pickup_window_start, pickup_window_end, pickup_floor, pickup_has_elevator, delivery_floor, delivery_has_elevator, distance_m, is_urgent, porter_package_code, porters_count, porters_included_hours, pickup_warehouse_id, delivery_warehouse_id)",
   "order_status_history(id, to_status, created_at, note)",
 ].join(", ");
@@ -236,7 +236,7 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
               <tbody>
                 {lines.map((l) => (
                   <tr key={l.sort_order} className="border-b border-zinc-100">
-                    <td className="py-2 pr-3 text-zinc-700">{l.label_it}{l.quantity > 1 ? <span className="text-zinc-500"> × {l.quantity}</span> : null}</td>
+                    <td className="py-2 pr-3 text-zinc-700">{l.label_it}</td>
                     <td className="py-2 text-right whitespace-nowrap text-zinc-900">{formatCents(business ? l.net_cents : l.gross_cents)}</td>
                   </tr>
                 ))}
