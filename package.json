@@ -16,6 +16,7 @@
     "db:local:start": "supabase start",
     "db:local:stop": "supabase stop",
     "db:local:reset": "supabase db reset --no-seed",
+    "db:local:seed-carriers": "node scripts/seed-local-carriers.mjs",
     "test:rls": "vitest run --config vitest.rls.config.mts"
   },
   "dependencies": {
