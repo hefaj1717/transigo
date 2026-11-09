@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { AUTH_MSG } from "@/lib/auth/errors";
 import { ONBOARDING_MSG } from "@/lib/carriers/onboarding";
-import { createCarrierVehicle, saveCarrierCompany, setCarrierVehicleActive, updateCarrierVehicle } from "@/lib/carriers/server";
+import { DOCUMENT_MSG } from "@/lib/carriers/documents";
+import { createCarrierVehicle, registerCarrierDocument, saveCarrierCompany, setCarrierVehicleActive, updateCarrierVehicle } from "@/lib/carriers/server";
 import { VEHICLE_MSG } from "@/lib/carriers/vehicles";
 import { createUser, deleteCreatedUsers, service, type TestUser } from "./helpers";
 
@@ -202,5 +203,88 @@ describe("Veicoli (D102, D107, D111, D112)", () => {
     expect(await vehicleRow(vehicleId)).toEqual({ ...before, is_active: false });
     expect((await setCarrierVehicleActive(user.client, user.id, vehicleId, true)).ok).toBe(true);
     expect(await vehicleRow(vehicleId)).toEqual(before);
+  });
+});
+
+describe("Documenti — upload and record (D98, D103, D112)", () => {
+  const BUCKET = "carrier-documents";
+  const PDF = new Blob(["%PDF-1.4 test document"], { type: "application/pdf" });
+
+  /** Uploads like the browser does (carrier session, own folder) and returns the path. */
+  async function upload(c: TestUser, ext = "pdf", blob: Blob = PDF, contentType = "application/pdf", folder = c.id) {
+    const path = `${folder}/${randomUUID()}.${ext}`;
+    await run(c.client.storage.from(BUCKET).upload(path, blob, { contentType }));
+    return path;
+  }
+  const form = (path: string, extra: Record<string, string> = {}) => ({ docType: "driving_license", storagePath: path, fileName: "patente.pdf", expiresAt: FUTURE, ...extra });
+  const docRow = (id: string) => check(service.from("carrier_documents").select("doc_type, vehicle_id, expires_at, file_name, mime_type, size_bytes, review_status").eq("id", id).single());
+
+  it("records the uploaded file with size and type from Storage, not from the form", async () => {
+    const c = await newCarrier();
+    const path = await upload(c);
+    const r = await registerCarrierDocument(c.client, c.id, { ...form(path), mimeType: "image/png", sizeBytes: "1" });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(await docRow(r.data.id)).toEqual({
+        doc_type: "driving_license", vehicle_id: null, expires_at: FUTURE, file_name: "patente.pdf",
+        mime_type: "application/pdf", size_bytes: PDF.size, review_status: "pending",
+      });
+    }
+    const missing = await check(c.client.rpc("carrier_onboarding_missing", { p_carrier_id: c.id }));
+    expect(missing).not.toContain("document:driving_license");
+  });
+
+  it("a file that is not in Storage, or in another carrier's folder, is refused", async () => {
+    const [a, b] = await Promise.all([newCarrier(), newCarrier()]);
+    expect(await registerCarrierDocument(a.client, a.id, form(`${a.id}/${randomUUID()}.pdf`))).toEqual({ ok: false, errors: { _form: DOCUMENT_MSG.fileMissing } });
+    const bPath = await upload(b);
+    expect(await registerCarrierDocument(a.client, a.id, form(bPath))).toEqual({ ok: false, errors: { _form: DOCUMENT_MSG.fileMissing } });
+  });
+
+  it("the stored type must match the path extension", async () => {
+    const c = await newCarrier();
+    const path = await upload(c, "pdf", new Blob(["png"], { type: "image/png" }), "image/png");
+    expect(await registerCarrierDocument(c.client, c.id, form(path))).toEqual({ ok: false, errors: { _form: DOCUMENT_MSG.type } });
+  });
+
+  it("date rules per type: expired or missing date refused, Albo without date", async () => {
+    const c = await newCarrier();
+    const path = await upload(c);
+    expect(await registerCarrierDocument(c.client, c.id, form(path, { expiresAt: "2020-01-01" }))).toEqual({ ok: false, errors: { expiresAt: DOCUMENT_MSG.expired } });
+    expect(await registerCarrierDocument(c.client, c.id, form(path, { expiresAt: "" }))).toEqual({ ok: false, errors: { expiresAt: DOCUMENT_MSG.dateRequired("Scadenza") } });
+    expect(await registerCarrierDocument(c.client, c.id, form(path, { docType: "transport_license", expiresAt: "2030-01-01" }))).toEqual({ ok: false, errors: { expiresAt: DOCUMENT_MSG.dateNotAllowed } });
+    expect((await registerCarrierDocument(c.client, c.id, form(path, { docType: "transport_license", expiresAt: "" }))).ok).toBe(true);
+  });
+
+  it("vehicle documents: own active vehicle only", async () => {
+    const [a, b] = await Promise.all([newCarrier(), newCarrier()]);
+    const va = await createCarrierVehicle(a.client, a.id, vehicleForm());
+    const vb = await createCarrierVehicle(b.client, b.id, vehicleForm());
+    if (!va.ok || !vb.ok) throw new Error("vehicles not created");
+    const rca = (path: string, vehicleId: string) => form(path, { docType: "insurance_rca", vehicleId });
+
+    expect((await registerCarrierDocument(a.client, a.id, rca(await upload(a), vb.data.id))).ok).toBe(false);
+    expect(await registerCarrierDocument(a.client, a.id, form(await upload(a), { docType: "insurance_rca" }))).toMatchObject({ ok: false, errors: { vehicleId: DOCUMENT_MSG.vehicle } });
+    const ok = await registerCarrierDocument(a.client, a.id, rca(await upload(a), va.data.id));
+    expect(ok.ok).toBe(true);
+
+    await setCarrierVehicleActive(a.client, a.id, va.data.id, false);
+    expect((await registerCarrierDocument(a.client, a.id, rca(await upload(a), va.data.id))).ok).toBe(false);
+  });
+
+  it("the same file cannot be recorded twice", async () => {
+    const c = await newCarrier();
+    const path = await upload(c);
+    expect((await registerCarrierDocument(c.client, c.id, form(path))).ok).toBe(true);
+    expect(await registerCarrierDocument(c.client, c.id, form(path))).toEqual({ ok: false, errors: { _form: "Questo file è già stato registrato." } });
+  });
+
+  it("in review: refused (D109); active: a renewal can be uploaded (D112)", async () => {
+    const { user } = await submittedCarrier();
+    expect(await registerCarrierDocument(user.client, user.id, form(await upload(user)))).toEqual({ ok: false, errors: { _form: ONBOARDING_MSG.inReview } });
+    await check(service.rpc("decide_carrier_review", { p_carrier_id: user.id, p_admin_id: admin.id, p_approve: true, p_reason: null }));
+    const r = await registerCarrierDocument(user.client, user.id, form(await upload(user)));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect((await docRow(r.data.id)).review_status).toBe("pending");
   });
 });

@@ -2,6 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CarrierStatus } from "@/lib/auth/routing";
 import { carrierOnboardingView, type CarrierOnboardingView } from "./onboarding";
+import type { CarrierDocumentRow } from "./documents";
 
 // Reads for the carrier screens, always with the carrier's own session (RLS).
 
@@ -65,4 +66,29 @@ export async function loadVehicleTypes(db: SupabaseClient): Promise<{ id: string
   const { data, error } = await db.from("vehicle_types").select("id, name_it").eq("is_active", true).order("sort_order");
   if (error) throw new Error(`vehicle types unavailable: ${error.code}`);
   return data ?? [];
+}
+
+const DOCUMENT_COLUMNS = "id, doc_type, vehicle_id, expires_at, review_status, rejection_reason, file_name, mime_type, storage_path, created_at";
+
+export async function loadDocuments(db: SupabaseClient, userId: string, vehicleId?: string): Promise<CarrierDocumentRow[]> {
+  let q = db.from("carrier_documents").select(DOCUMENT_COLUMNS).eq("carrier_id", userId);
+  q = vehicleId ? q.eq("vehicle_id", vehicleId) : q.is("vehicle_id", null);
+  const { data, error } = await q.order("created_at");
+  if (error) throw new Error(`documents unavailable: ${error.code}`);
+  return (data ?? []) as CarrierDocumentRow[];
+}
+
+/**
+ * Short-lived links (5 min) to the carrier's own files, created with the carrier's session (storage policy:
+ * own folder). HEIC is offered as a download — browsers do not display it (D103).
+ */
+export async function signedDocumentUrls(db: SupabaseClient, rows: readonly CarrierDocumentRow[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  await Promise.all(rows.map(async (r) => {
+    const { data } = await db.storage
+      .from("carrier-documents")
+      .createSignedUrl(r.storage_path, 300, r.mime_type === "image/heic" ? { download: r.file_name } : undefined);
+    if (data?.signedUrl) out.set(r.id, data.signedUrl);
+  }));
+  return out;
 }

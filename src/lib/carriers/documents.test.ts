@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   checkDocumentExpiry,
+  documentStatus,
+  latestDocuments,
+  type CarrierDocumentRow,
   DOCUMENT_MSG,
   documentStoragePath,
   documentUploadSchema,
@@ -78,5 +81,29 @@ describe("documentUploadSchema", () => {
   });
   it("types no longer accepted are refused (identity_document, D97)", () => {
     expect(documentUploadSchema.safeParse({ ...base, docType: "identity_document" }).success).toBe(false);
+  });
+});
+
+describe("documents shown to the carrier", () => {
+  const row = (extra: Partial<CarrierDocumentRow>): CarrierDocumentRow => ({
+    id: "1", doc_type: "insurance_rca", vehicle_id: "v1", expires_at: "2027-01-31", review_status: "pending", rejection_reason: null,
+    file_name: "rca.pdf", mime_type: "application/pdf", storage_path: "x", created_at: "2026-11-01T10:00:00Z", ...extra,
+  });
+  it("keeps the newest upload per type and vehicle", () => {
+    const m = latestDocuments([
+      row({ id: "old" }),
+      row({ id: "new", created_at: "2026-11-05T10:00:00Z" }),
+      row({ id: "other-vehicle", vehicle_id: "v2" }),
+      row({ id: "albo", doc_type: "transport_license", vehicle_id: null, expires_at: null }),
+    ]);
+    expect([...m.entries()].map(([k, v]) => [k, v.id])).toEqual([["v1:insurance_rca", "new"], ["v2:insurance_rca", "other-vehicle"], ["carrier:transport_license", "albo"]]);
+  });
+  it("status: in review, approved, rejected with reason, expired", () => {
+    const today = "2026-11-09";
+    expect(documentStatus(row({}), today)).toEqual({ label: "In verifica · valido fino al 31/01/2027", tone: "wait" });
+    expect(documentStatus(row({ review_status: "approved", expires_at: null }), today)).toEqual({ label: "Approvato", tone: "ok" });
+    expect(documentStatus(row({ review_status: "rejected", rejection_reason: "illeggibile" }), today).label).toBe("Rifiutato: illeggibile. Carica un nuovo documento.");
+    expect(documentStatus(row({ review_status: "approved", expires_at: "2026-11-08" }), today)).toEqual({ label: "Scaduto il 08/11/2026. Carica un documento valido.", tone: "bad" });
+    expect(documentStatus(row({ expires_at: today }), today).tone).toBe("wait");
   });
 });

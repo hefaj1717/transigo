@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { canEditVehicles, carrierOnboarding, carrierOnboardingView } from "@/lib/carriers/onboarding";
+import { carrierOnboarding, carrierOnboardingView } from "@/lib/carriers/onboarding";
 import type { CarrierStatus } from "@/lib/auth/routing";
 
 // Shown instead of the carrier panel while carriers.status <> 'active'.
@@ -36,8 +36,7 @@ export async function PendingVerification({ userId }: { userId: string }) {
         {items.map((item) => {
           // If the check failed, show nothing as done (fail closed).
           const done = missingResult.error && item.key !== "approval" ? false : item.done;
-          // The documents screen comes with the next step of Stage 4.1.
-          const href = item.href && item.key !== "documents" && (item.key !== "vehicle" || canEditVehicles(view) || view === "in_review") ? item.href : null;
+          const href = item.href;
           const label = (
             <>
               {item.label}

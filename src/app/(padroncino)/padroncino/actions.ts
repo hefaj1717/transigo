@@ -7,7 +7,7 @@ import { requireArea } from "@/lib/auth/session";
 import { formDataToObject } from "@/lib/auth/schemas";
 import type { CarrierFormState } from "@/lib/carriers/form-state";
 import { CARRIER_PATHS, ONBOARDING_MSG } from "@/lib/carriers/onboarding";
-import { createCarrierVehicle, saveCarrierCompany, setCarrierVehicleActive, updateCarrierVehicle } from "@/lib/carriers/server";
+import { createCarrierVehicle, registerCarrierDocument, saveCarrierCompany, setCarrierVehicleActive, updateCarrierVehicle } from "@/lib/carriers/server";
 import { createClient } from "@/lib/supabase/server";
 
 // Carrier onboarding actions. The user id comes from the verified session (DAL), writes use the carrier's
@@ -64,4 +64,16 @@ export async function setVehicleActiveAction(_prev: CarrierFormState, formData: 
   revalidatePath(CARRIER_PATHS.vehicles);
   revalidatePath(CARRIER_PATHS.vehicle(id.data));
   return { message: active ? "Veicolo riattivato." : "Veicolo disattivato." };
+}
+
+/** Called by the browser after it uploaded the file to Storage (D103). */
+export async function registerDocumentAction(input: Record<string, string>): Promise<CarrierFormState> {
+  const ctx = await requireArea("padroncino", CARRIER_PATHS.documents);
+  const clean = Object.fromEntries(Object.entries(input ?? {}).filter(([, v]) => typeof v === "string")) as Record<string, string>;
+  const result = await run("registerDocument", async () => registerCarrierDocument(await createClient(), ctx.userId, clean));
+  if (!result.ok) return { errors: result.errors };
+  revalidatePath(CARRIER_PATHS.home);
+  revalidatePath(CARRIER_PATHS.documents);
+  if (vehicleId.safeParse(clean.vehicleId).success) revalidatePath(CARRIER_PATHS.vehicle(clean.vehicleId));
+  return { message: "Documento caricato. Il team Transigo lo verificherà." };
 }

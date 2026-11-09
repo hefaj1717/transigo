@@ -5,7 +5,9 @@ import { CarrierShell } from "@/components/padroncino/carrier-shell";
 import { VehicleActiveToggle, VehicleForm } from "@/components/padroncino/vehicle-form";
 import { requireArea } from "@/lib/auth/session";
 import { CARRIER_PATHS, vehicleEditBlock } from "@/lib/carriers/onboarding";
-import { loadCarrier, loadVehicle, loadVehicleTypes } from "@/lib/carriers/pages";
+import { DocumentList } from "@/components/padroncino/document-list";
+import { latestDocuments } from "@/lib/carriers/documents";
+import { loadCarrier, loadDocuments, loadVehicle, loadVehicleTypes, signedDocumentUrls } from "@/lib/carriers/pages";
 import { createClient } from "@/lib/supabase/server";
 import { VehicleBadge } from "../vehicle-badge";
 
@@ -26,8 +28,12 @@ async function Content({ params, searchParams }: Pick<PageProps<"/padroncino/vei
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
 
   const db = await createClient();
-  const [{ view }, vehicle, types] = await Promise.all([loadCarrier(db, ctx.userId), loadVehicle(db, ctx.userId, id), loadVehicleTypes(db)]);
+  const [{ view }, vehicle, types, documents] = await Promise.all([
+    loadCarrier(db, ctx.userId), loadVehicle(db, ctx.userId, id), loadVehicleTypes(db), loadDocuments(db, ctx.userId, id),
+  ]);
   if (!vehicle) notFound();
+  const latest = latestDocuments(documents);
+  const urls = await signedDocumentUrls(db, [...latest.values()]);
 
   const options = types.map((t) => ({ value: t.id, label: t.name_it }));
   if (!options.some((o) => o.value === vehicle.vehicle_type_id)) {
@@ -77,6 +83,14 @@ async function Content({ params, searchParams }: Pick<PageProps<"/padroncino/vei
           <VehicleActiveToggle vehicleId={vehicle.id} isActive={vehicle.is_active} />
         </div>
       )}
+
+      <section className="mt-10">
+        <h2 className="text-lg font-semibold text-zinc-900">Documenti del veicolo</h2>
+        {!vehicle.is_active ? <p className="mt-1 text-sm text-zinc-600">Riattiva il veicolo per caricare nuovi documenti.</p> : null}
+        <div className="mt-3">
+          <DocumentList scope="vehicle" carrierId={ctx.userId} vehicleId={vehicle.id} latest={latest} urls={urls} editable={!block && vehicle.is_active} />
+        </div>
+      </section>
     </CarrierShell>
   );
 }

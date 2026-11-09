@@ -5,6 +5,18 @@ import { AUTH_MSG, isVatTakenError } from "@/lib/auth/errors";
 import { carrierCompanyRow, carrierCompanySchema, toFieldErrors, type FieldErrors } from "@/lib/auth/schemas";
 import { canEditOnboarding, carrierOnboardingView, ONBOARDING_MSG, vehicleEditBlock, type CarrierOnboardingView } from "./onboarding";
 import { vehicleDbError, vehicleRow, vehicleSchema, VEHICLE_MSG } from "./vehicles";
+import {
+  checkDocumentExpiry,
+  DOCUMENT_MSG,
+  documentUploadSchema,
+  EXT_BY_MIME,
+  MAX_DOCUMENT_BYTES,
+  parseDocumentStoragePath,
+  romeToday,
+  type DocumentMime,
+} from "./documents";
+
+export const CARRIER_DOCUMENTS_BUCKET = "carrier-documents";
 
 // Carrier onboarding operations (Stage 4.1). Called by Server Actions with the carrier's OWN session client
 // (RLS, column grants and triggers apply — never the service role) and the user id from the verified session.
@@ -147,4 +159,75 @@ export async function setCarrierVehicleActive(db: SupabaseClient, userId: string
   }
   if (!data?.length) return fail(VEHICLE_NOT_FOUND);
   return { ok: true, data: undefined };
+}
+
+// ---------------------------------------------------------------------------
+// Documenti (D98, D103, D112)
+// ---------------------------------------------------------------------------
+
+/**
+ * Records a file the browser has just uploaded to Storage (own folder, storage policy) as a carrier_documents row.
+ * Size and type come from the Storage metadata, never from the form; the row is written with the carrier's
+ * session (RLS insert policy + validate_carrier_document trigger). A file without a row is cleaned up later (D103).
+ */
+export async function registerCarrierDocument(
+  db: SupabaseClient,
+  userId: string,
+  input: Record<string, string>,
+  now: Date = new Date(),
+): Promise<CarrierResult<{ id: string }>> {
+  const block = vehicleEditBlock(await loadCarrierView(db, userId)); // same states as vehicles (D112)
+  if (block) return fail(block);
+
+  const parsed = documentUploadSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, errors: toFieldErrors(parsed.error) };
+  const d = parsed.data;
+
+  const path = parseDocumentStoragePath(d.storagePath, userId);
+  if (!path) return fail(DOCUMENT_MSG.fileMissing);
+
+  const expiry = checkDocumentExpiry(d.docType, d.expiresAt, romeToday(now));
+  if (!expiry.ok) return fail(expiry.error, "expiresAt");
+
+  if (d.vehicleId) {
+    const { data: vehicle } = await db
+      .from("carrier_vehicles")
+      .select("id")
+      .eq("id", d.vehicleId)
+      .eq("carrier_id", userId)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (!vehicle) return fail("Veicolo non trovato o disattivato.", "vehicleId");
+  }
+
+  // Storage metadata with the carrier's session (select policy: own folder only).
+  const { data: info, error: infoError } = await db.storage.from(CARRIER_DOCUMENTS_BUCKET).info(d.storagePath);
+  if (infoError || !info) return fail(DOCUMENT_MSG.fileMissing);
+  const meta = info as { size?: number; contentType?: string; content_type?: string };
+  const size = Number(meta.size ?? 0);
+  const mime = String(meta.contentType ?? meta.content_type ?? "").toLowerCase();
+  if (!(mime in EXT_BY_MIME) || EXT_BY_MIME[mime as DocumentMime] !== path.ext) return fail(DOCUMENT_MSG.type);
+  if (size <= 0) return fail(DOCUMENT_MSG.empty);
+  if (size > MAX_DOCUMENT_BYTES) return fail(DOCUMENT_MSG.tooLarge);
+
+  const { data, error } = await db
+    .from("carrier_documents")
+    .insert({
+      carrier_id: userId,
+      vehicle_id: d.vehicleId ?? null,
+      doc_type: d.docType,
+      storage_path: d.storagePath,
+      expires_at: expiry.expiresAt,
+      file_name: d.fileName,
+      mime_type: mime,
+      size_bytes: size,
+    })
+    .select("id")
+    .single();
+  if (error || !data) {
+    if (error?.code === "23505") return fail("Questo file è già stato registrato.");
+    logDbError("registerCarrierDocument", error);
+    return fail(ONBOARDING_MSG.generic);
+  }
+  return { ok: true, data: { id: data.id as string } };
 }

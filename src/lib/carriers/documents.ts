@@ -129,3 +129,50 @@ export const documentUploadSchema = z
     if (scope === "carrier" && d.vehicleId) ctx.addIssue({ code: "custom", message: DOCUMENT_MSG.notVehicle, path: ["vehicleId"] });
   });
 export type DocumentUploadInput = z.output<typeof documentUploadSchema>;
+
+// ---------------------------------------------------------------------------
+// Showing documents to the carrier
+// ---------------------------------------------------------------------------
+
+export type CarrierDocumentRow = {
+  id: string;
+  doc_type: CarrierDocumentType;
+  vehicle_id: string | null;
+  expires_at: string | null;
+  review_status: "pending" | "approved" | "rejected";
+  rejection_reason: string | null;
+  file_name: string;
+  mime_type: string;
+  storage_path: string;
+  created_at: string;
+};
+
+/** Newest document per type (and vehicle) — older uploads stay in the database for the admin. */
+export function latestDocuments(rows: readonly CarrierDocumentRow[]): Map<string, CarrierDocumentRow> {
+  const out = new Map<string, CarrierDocumentRow>();
+  for (const r of rows) {
+    const key = documentKey(r.doc_type, r.vehicle_id);
+    const prev = out.get(key);
+    if (!prev || r.created_at > prev.created_at) out.set(key, r);
+  }
+  return out;
+}
+
+export const documentKey = (docType: CarrierDocumentType, vehicleId: string | null) => `${vehicleId ?? "carrier"}:${docType}`;
+
+export type DocumentStatus = { label: string; tone: "ok" | "wait" | "bad" };
+
+const itDate = (iso: string) => {
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
+};
+
+/** Status shown next to a document (expired wins over the review status, D99). */
+export function documentStatus(row: Pick<CarrierDocumentRow, "review_status" | "rejection_reason" | "expires_at">, today: string): DocumentStatus {
+  if (row.review_status === "rejected") {
+    return { label: `Rifiutato${row.rejection_reason ? `: ${row.rejection_reason}` : ""}. Carica un nuovo documento.`, tone: "bad" };
+  }
+  if (row.expires_at && row.expires_at < today) return { label: `Scaduto il ${itDate(row.expires_at)}. Carica un documento valido.`, tone: "bad" };
+  const until = row.expires_at ? ` · valido fino al ${itDate(row.expires_at)}` : "";
+  return row.review_status === "approved" ? { label: `Approvato${until}`, tone: "ok" } : { label: `In verifica${until}`, tone: "wait" };
+}
