@@ -143,7 +143,7 @@ Uwagi techniczne:
     - Do decyzji przed wdrożeniem: harmonogram zadania okresowego (D91), wartości anulowania (D94), okno płatności (D88).
     - Status `payment_review` (D96): obsługa przez admina (oznacz jako opłacone / zwrot) — Etap 6.
 - [ ] 4. PWA przewoźnika (rejestracja, Stripe Connect, kursy, realizacja, GPS, faktura)
-  - [ ] **4.1 Onboarding i weryfikacja przewoźnika** (D97–D104): migracja `carrier_onboarding` + `tests/rls/carrier-onboarding.test.ts` (na stagingu od 2026-11-09); blokada danych firmy `carrier_company_lock` (lokalnie, **staging — jeszcze nie wysłana**); dalej: PWA (manifest, SW, ikony), ekrany onboardingu, `/admin/padroncini` z decyzją i mailami.
+  - [ ] **4.1 Onboarding i weryfikacja przewoźnika** (D97–D104): migracja `carrier_onboarding` + `tests/rls/carrier-onboarding.test.ts` (na stagingu od 2026-11-09); blokada danych firmy `carrier_company_lock` (na stagingu od 2026-11-09); dalej: PWA (manifest, SW, ikony), ekrany onboardingu, `/admin/padroncini` z decyzją i mailami.
     - Typy dokumentów: tabela `carrier_document_types` = `src/lib/carriers/document-types.ts` — zmieniać razem (nowa migracja + plik).
     - `decide_carrier_review()` tylko service role; Server Action sprawdza admina w sesji, `p_admin_id` z sesji.
     - Dane firmy przewoźnika zablokowane po wysłaniu do weryfikacji, w `active` i `suspended` (D105), także dla service role: zmiana tylko przez `admin_update_carrier_company()` (audit z nazwami pól). SQL Editor omija audyt — tylko awaryjnie.
