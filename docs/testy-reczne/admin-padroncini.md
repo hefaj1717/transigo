@@ -19,7 +19,7 @@ Decyzje: D101, D105, D113–D116. Test na **lokalnej** bazie (Docker), aplikacja
 
    Każde kolejne uruchomienie `db:local:seed-carriers` **dokłada** następny komplet (liczniki w sekcji A rosną ×2, ×3…). Seed bez resetu uruchamiamy tylko w kroku B4.
 
-   Skrypt wypisuje e-mail admina, hasło, adresy stron przewoźników i tablice. Każde uruchomienie ma inny 4-znakowy znacznik — w tej instrukcji oznaczony `<TAG>` (np. tablice `BI<TAG>A`, `BI<TAG>B`, e-mail `admin-<TAG>@example.com`).
+   Skrypt wypisuje e-mail admina, hasło, adresy stron przewoźników i tablice. Każde uruchomienie ma inny 4-znakowy znacznik — w tej instrukcji oznaczony `<TAG>`; jest też w nazwie firmy, żeby po kroku B4 nie pomylić dwóch kompletów (np. tablice `BI<TAG>A`, `BI<TAG>B`, e-mail `admin-<TAG>@example.com`).
 
    **Uwaga:** `npm run test:rls` resetuje lokalną bazę i kasuje te konta — po nim uruchom skrypt ponownie.
 
@@ -45,11 +45,11 @@ Przewoźnicy z seeda:
 
 | Stan | Firma | Co ma |
 |---|---|---|
-| In verifica | Trasporti Verdi Srl | kompletna rejestracja wysłana do weryfikacji |
-| Attivo | Trasporti Bianchi Srl | pojazd `BI<TAG>A` „Da riverificare” (zmieniona ładowność), pojazd `BI<TAG>B` „Nuovo veicolo” z dwoma dokumentami w weryfikacji, „Polizza RC vettoriale” w weryfikacji |
-| Sospeso | Trasporti Neri Srl | motyw „RCA scaduta: carica la nuova polizza.”, nowe RCA pojazdu `NE<TAG>A` w weryfikacji |
-| Incompleto | Trasporti Gialli Srl | tylko Albo, bez pojazdu i patente |
-| Rifiutato | Trasporti Rosa Srl | motyw „Albo non leggibile.” |
+| In verifica | Trasporti Verdi <TAG> Srl | kompletna rejestracja wysłana do weryfikacji |
+| Attivo | Trasporti Bianchi <TAG> Srl | pojazd `BI<TAG>A` „Da riverificare” (zmieniona ładowność), pojazd `BI<TAG>B` „Nuovo veicolo” z dwoma dokumentami w weryfikacji, „Polizza RC vettoriale” w weryfikacji |
+| Sospeso | Trasporti Neri <TAG> Srl | motyw „RCA scaduta: carica la nuova polizza.”, nowe RCA pojazdu `NE<TAG>A` w weryfikacji |
+| Incompleto | Trasporti Gialli <TAG> Srl | tylko Albo, bez pojazdu i patente |
+| Rifiutato | Trasporti Rosa <TAG> Srl | motyw „Albo non leggibile.” |
 
 ## A. Lista `/admin/padroncini`
 
@@ -59,6 +59,8 @@ Przewoźnicy z seeda:
 - [ ] „Registrazione incompleta”: Gialli z „Nessun veicolo attivo, Patente del titolare”.
 
 ## B. Trasporti Verdi (w weryfikacji) — otwórz stronę w dwóch kartach
+
+Test „dwóch kart” ma sens tylko na **tym samym** przewoźniku (ten sam `<TAG>` w nazwie). Przycisk w drugiej karcie zawsze da się kliknąć — serwer odrzuca akcję czerwonym komunikatem i nic nie zmienia w bazie.
 
 1. [ ] Karta 1, „Rifiuta” z samymi spacjami w motywie → „Indica il motivo (massimo 1000 caratteri).” (puste pole zatrzymuje już przeglądarka).
 2. [ ] Karta 1, „Rifiuta” z motywem „Albo non leggibile” → „Registrazione rifiutata. Il padroncino riceverà un'e-mail con il motivo.” Po odświeżeniu: status Rifiutato i motyw.

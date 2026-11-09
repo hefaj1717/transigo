@@ -35,7 +35,7 @@ const vat = () => {
 };
 async function carrier(name, email) {
   const u = await user(email, { role: "padroncino", first_name: "Mario", last_name: name });
-  await ok(service.from("carriers").insert({ profile_id: u.id, company_name: `Trasporti ${name} Srl`, vat_number: vat(), fiscal_code: "RSSMRA80A01H501U", hq_street: "Via Roma 1", hq_city: "Milano", hq_postal_code: "20100", hq_province: "MI", sdi_code: "M5UXCR1" }));
+  await ok(service.from("carriers").insert({ profile_id: u.id, company_name: `Trasporti ${name} ${stamp} Srl` /* tag: tell seed runs apart */, vat_number: vat(), fiscal_code: "RSSMRA80A01H501U", hq_street: "Via Roma 1", hq_city: "Milano", hq_postal_code: "20100", hq_province: "MI", sdi_code: "M5UXCR1" }));
   return u;
 }
 async function doc(c, docType, extra = {}) {
@@ -83,6 +83,6 @@ await ok(service.rpc("decide_carrier_review", { p_carrier_id: rejected.id, p_adm
 
 console.log(`Admin: admin-${stamp}@example.com / ${PW}`);
 for (const [label, c, name] of [["In verifica", inReview, "Verdi"], ["Attivo", active, "Bianchi"], ["Sospeso", suspended, "Neri"], ["Incompleto", incomplete, "Gialli"], ["Rifiutato", rejected, "Rosa"]]) {
-  console.log(`${label.padEnd(11)} Trasporti ${name} Srl  /admin/padroncini/${c.id}`);
+  console.log(`${label.padEnd(11)} Trasporti ${name} ${stamp} Srl  /admin/padroncini/${c.id}`);
 }
 console.log(`Targhe: ${["RV", "BI", "NE", "RO"].map((p) => `${p}${stamp}A`).join(", ")}, BI${stamp}B`);
