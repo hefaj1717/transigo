@@ -3,7 +3,14 @@ import { randomUUID } from "node:crypto";
 import { AUTH_MSG } from "@/lib/auth/errors";
 import { ONBOARDING_MSG } from "@/lib/carriers/onboarding";
 import { DOCUMENT_MSG } from "@/lib/carriers/documents";
-import { createCarrierVehicle, registerCarrierDocument, saveCarrierCompany, setCarrierVehicleActive, updateCarrierVehicle } from "@/lib/carriers/server";
+import {
+  createCarrierVehicle,
+  registerCarrierDocument,
+  saveCarrierCompany,
+  setCarrierVehicleActive,
+  submitCarrierForReview,
+  updateCarrierVehicle,
+} from "@/lib/carriers/server";
 import { VEHICLE_MSG } from "@/lib/carriers/vehicles";
 import { createUser, deleteCreatedUsers, service, type TestUser } from "./helpers";
 
@@ -31,6 +38,7 @@ const companyForm = (extra: Record<string, string> = {}) => ({
   hqStreet: "Via Milano 5", hqCity: "Torino", hqPostalCode: "10121", hqProvince: "to", sdiCode: "m5uxcr1", pec: "", ...extra,
 });
 
+const ADMIN_EMAIL = `team-${randomUUID().slice(0, 8)}@example.com`;
 let vanId: string;
 let largeId: string;
 let inactiveTypeId: string;
@@ -52,6 +60,13 @@ const doc = (c: TestUser, docType: string, extra: Record<string, unknown> = {}) 
 
 /** Complete carrier sent for review; returns the vehicle id. */
 async function submittedCarrier(): Promise<{ user: TestUser; vehicleId: string }> {
+  const c = await completeCarrier();
+  await check(c.user.client.rpc("submit_carrier_for_review"));
+  return c;
+}
+
+/** Complete carrier (company, Albo, patente, vehicle with libretto + RCA), not sent yet. */
+async function completeCarrier(): Promise<{ user: TestUser; vehicleId: string }> {
   const user = await newCarrier();
   const v = await check(user.client.from("carrier_vehicles").insert({ carrier_id: user.id, vehicle_type_id: vanId, plate: plate(), payload_kg: 1000 }).select("id").single());
   await run(user.client.from("carrier_documents").insert([
@@ -60,7 +75,6 @@ async function submittedCarrier(): Promise<{ user: TestUser; vehicleId: string }
     doc(user, "vehicle_registration", { vehicle_id: v.id, expires_at: FUTURE }),
     doc(user, "insurance_rca", { vehicle_id: v.id, expires_at: FUTURE }),
   ]));
-  await check(user.client.rpc("submit_carrier_for_review"));
   return { user, vehicleId: v.id };
 }
 
@@ -84,6 +98,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await service.from("email_outbox").delete().eq("to_address", ADMIN_EMAIL);
   await service.from("vehicle_types").delete().eq("id", inactiveTypeId);
   await deleteCreatedUsers();
 });
@@ -300,5 +315,65 @@ describe("Documenti — upload and record (D98, D103, D112)", () => {
     if (rca.ok) expect((await docRow(rca.data.id)).review_status).toBe("pending");
     expect(await check(service.from("carriers").select("status, status_reason").eq("profile_id", user.id).single()))
       .toEqual({ status: "suspended", status_reason: "RCA scaduta" });
+  });
+});
+
+describe("Invia per la verifica (D100, D106, D110)", () => {
+  const deps = (adminEmail: string | null = ADMIN_EMAIL) => ({ serviceDb: service, adminEmail, appUrl: "https://app.test" });
+  const mails = async (carrierId: string) =>
+    check(service.from("email_outbox").select("subject, text_body, html, to_address, status, order_id").eq("template_code", "carrier_submitted").ilike("text_body", `%${carrierId}%`));
+
+  it("incomplete account: the missing items, no e-mail", async () => {
+    const c = await newCarrier();
+    expect(await submitCarrierForReview(c.client, c.id, deps())).toEqual({
+      ok: false, error: ONBOARDING_MSG.incomplete, missing: ["vehicle", "document:transport_license", "document:driving_license"],
+    });
+    expect(await mails(c.id)).toEqual([]);
+  });
+
+  it("complete: sent, one e-mail with company name, id and link only — a repeat sends nothing", async () => {
+    const { user } = await completeCarrier();
+    const first = await submitCarrierForReview(user.client, user.id, deps());
+    expect(first).toMatchObject({ ok: true, newlySubmitted: true });
+    const again = await submitCarrierForReview(user.client, user.id, deps());
+    expect(again).toMatchObject({ ok: true, newlySubmitted: false });
+
+    const sent = await mails(user.id);
+    expect(sent).toHaveLength(1);
+    const carrier = await check(service.from("carriers").select("vat_number, hq_street, hq_city").eq("profile_id", user.id).single());
+    expect(sent[0]).toMatchObject({ to_address: ADMIN_EMAIL, status: "captured_dev", order_id: null, subject: "Nuovo padroncino da verificare – Trasporti Test Srl" });
+    expect(sent[0].text_body).toContain("https://app.test/admin/padroncini");
+    for (const personal of [carrier.vat_number, carrier.hq_street, carrier.hq_city, user.email]) {
+      expect(sent[0].text_body).not.toContain(personal);
+      expect(sent[0].html).not.toContain(personal);
+    }
+  });
+
+  it("two parallel submissions: exactly one e-mail (D106)", async () => {
+    const { user } = await completeCarrier();
+    const results = await Promise.all([submitCarrierForReview(user.client, user.id, deps()), submitCarrierForReview(user.client, user.id, deps())]);
+    expect(results.filter((r) => r.ok && r.newlySubmitted)).toHaveLength(1);
+    expect(await mails(user.id)).toHaveLength(1);
+  });
+
+  it("rejected, corrected and sent again: a second e-mail marked as a new submission", async () => {
+    const { user } = await completeCarrier();
+    await submitCarrierForReview(user.client, user.id, deps());
+    await check(service.rpc("decide_carrier_review", { p_carrier_id: user.id, p_admin_id: admin.id, p_approve: false, p_reason: "Patente illeggibile" }));
+    expect((await saveCarrierCompany(user.client, user.id, companyForm({ vatNumber: "02084280235", fiscalCode: "02084280235" }))).ok).toBe(true);
+    expect(await submitCarrierForReview(user.client, user.id, deps())).toMatchObject({ ok: true, newlySubmitted: true });
+    const sent = await mails(user.id);
+    expect(sent.map((m) => m.subject).sort()).toEqual(["Nuovo invio da verificare – Trasporti Nuovi Srl", "Nuovo padroncino da verificare – Trasporti Test Srl"]);
+  });
+
+  it("without ADMIN_NOTIFICATION_EMAIL the account is still sent", async () => {
+    const { user } = await completeCarrier();
+    expect(await submitCarrierForReview(user.client, user.id, deps(null))).toMatchObject({ ok: true, newlySubmitted: true });
+    expect(await mails(user.id)).toEqual([]);
+  });
+
+  it("an active account cannot be sent again", async () => {
+    const { user } = await activeCarrier();
+    expect(await submitCarrierForReview(user.client, user.id, deps())).toEqual({ ok: false, error: ONBOARDING_MSG.notEditable });
   });
 });

@@ -3,7 +3,18 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CarrierStatus } from "@/lib/auth/routing";
 import { AUTH_MSG, isVatTakenError } from "@/lib/auth/errors";
 import { carrierCompanyRow, carrierCompanySchema, toFieldErrors, type FieldErrors } from "@/lib/auth/schemas";
-import { canEditOnboarding, carrierOnboardingView, documentEditBlock, ONBOARDING_MSG, vehicleEditBlock, type CarrierOnboardingView } from "./onboarding";
+import { sendEmail } from "@/lib/notifications/email";
+import { CARRIER_SUBMITTED_TEMPLATE, renderCarrierSubmittedEmail } from "@/lib/notifications/templates/carrier-submitted";
+import {
+  canEditOnboarding,
+  carrierOnboardingView,
+  documentEditBlock,
+  incompleteCodes,
+  onboardingEditBlock,
+  ONBOARDING_MSG,
+  vehicleEditBlock,
+  type CarrierOnboardingView,
+} from "./onboarding";
 import { vehicleDbError, vehicleRow, vehicleSchema, VEHICLE_MSG } from "./vehicles";
 import {
   checkDocumentExpiry,
@@ -230,4 +241,67 @@ export async function registerCarrierDocument(
     return fail(ONBOARDING_MSG.generic);
   }
   return { ok: true, data: { id: data.id as string } };
+}
+
+// ---------------------------------------------------------------------------
+// Invia per la verifica (D100, D106, D110)
+// ---------------------------------------------------------------------------
+
+export type SubmitResult =
+  | { ok: true; submittedAt: string; newlySubmitted: boolean }
+  | { ok: false; error: string; missing?: string[] };
+
+export type SubmitDeps = {
+  /** Service-role client: email_outbox is written only by the server. */
+  serviceDb: SupabaseClient;
+  /** ADMIN_NOTIFICATION_EMAIL; null = not configured (the submission still succeeds, the error is logged). */
+  adminEmail: string | null;
+  appUrl: string;
+};
+
+/**
+ * Sends the account for review with the carrier's session. The e-mail to the Transigo team goes out only when
+ * this call set submitted_at (newly_submitted, decided under the row lock — D106); the server does not check
+ * the state beforehand. An e-mail failure does not undo the submission.
+ */
+export async function submitCarrierForReview(db: SupabaseClient, userId: string, deps: SubmitDeps): Promise<SubmitResult> {
+  const { data, error } = await db
+    .rpc("submit_carrier_for_review")
+    .single<{ submitted_at: string; newly_submitted: boolean }>();
+  if (error || !data) {
+    const missing = incompleteCodes(error);
+    if (missing) return { ok: false, error: ONBOARDING_MSG.incomplete, missing };
+    if (error?.code === "55000") {
+      const block = onboardingEditBlock(await loadCarrierView(db, userId));
+      return { ok: false, error: block ?? ONBOARDING_MSG.notEditable };
+    }
+    logDbError("submitCarrierForReview", error);
+    return { ok: false, error: ONBOARDING_MSG.generic };
+  }
+
+  if (data.newly_submitted) {
+    try {
+      await notifyAdminOfSubmission(db, userId, data.submitted_at, deps);
+    } catch (e) {
+      console.error("[carriers] carrier_submitted e-mail failed:", e instanceof Error ? e.message : e);
+    }
+  }
+  return { ok: true, submittedAt: data.submitted_at, newlySubmitted: data.newly_submitted };
+}
+
+async function notifyAdminOfSubmission(db: SupabaseClient, userId: string, submittedAt: string, deps: SubmitDeps): Promise<void> {
+  if (!deps.adminEmail) {
+    console.error("[carriers] ADMIN_NOTIFICATION_EMAIL not set — carrier_submitted e-mail not queued", { carrierId: userId });
+    return;
+  }
+  const { data: carrier } = await db.from("carriers").select("company_name, decided_at").eq("profile_id", userId).single();
+  const rendered = renderCarrierSubmittedEmail({
+    companyName: carrier?.company_name ?? "—",
+    carrierId: userId,
+    submittedAt: new Date(submittedAt),
+    // An account sent again after a rejection keeps decided_at of that decision (D101).
+    resubmission: !!carrier?.decided_at,
+    adminUrl: `${deps.appUrl}/admin/padroncini`,
+  });
+  await sendEmail(deps.serviceDb, { ...rendered, templateCode: CARRIER_SUBMITTED_TEMPLATE, to: deps.adminEmail });
 }

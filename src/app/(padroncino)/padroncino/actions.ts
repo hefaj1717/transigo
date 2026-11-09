@@ -7,7 +7,16 @@ import { requireArea } from "@/lib/auth/session";
 import { formDataToObject } from "@/lib/auth/schemas";
 import type { CarrierFormState } from "@/lib/carriers/form-state";
 import { CARRIER_PATHS, ONBOARDING_MSG } from "@/lib/carriers/onboarding";
-import { createCarrierVehicle, registerCarrierDocument, saveCarrierCompany, setCarrierVehicleActive, updateCarrierVehicle } from "@/lib/carriers/server";
+import {
+  createCarrierVehicle,
+  registerCarrierDocument,
+  saveCarrierCompany,
+  setCarrierVehicleActive,
+  submitCarrierForReview,
+  updateCarrierVehicle,
+} from "@/lib/carriers/server";
+import { getAppUrl } from "@/lib/supabase/env";
+import { createServiceClient } from "@/lib/supabase/service";
 import { createClient } from "@/lib/supabase/server";
 
 // Carrier onboarding actions. The user id comes from the verified session (DAL), writes use the carrier's
@@ -76,4 +85,21 @@ export async function registerDocumentAction(input: Record<string, string>): Pro
   revalidatePath(CARRIER_PATHS.documents);
   if (vehicleId.safeParse(clean.vehicleId).success) revalidatePath(CARRIER_PATHS.vehicle(clean.vehicleId));
   return { message: "Documento caricato. Il team Transigo lo verificherà." };
+}
+
+export type SubmitActionState = { error?: string; missing?: string[] };
+
+/** "Invia per la verifica" (D100, D106). On success the home page shows "Account in verifica". */
+export async function submitForReviewAction(): Promise<SubmitActionState> {
+  const ctx = await requireArea("padroncino", CARRIER_PATHS.home);
+  const result = await run("submitForReview", async () =>
+    submitCarrierForReview(await createClient(), ctx.userId, {
+      serviceDb: createServiceClient(), // only for email_outbox
+      adminEmail: process.env.ADMIN_NOTIFICATION_EMAIL?.trim() || null,
+      appUrl: getAppUrl(),
+    }),
+  );
+  if (!result.ok) return "errors" in result ? { error: result.errors._form } : { error: result.error, missing: result.missing };
+  revalidatePath(CARRIER_PATHS.home);
+  return {};
 }

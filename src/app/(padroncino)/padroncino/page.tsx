@@ -1,11 +1,11 @@
 import { Suspense } from "react";
-import { Loading } from "@/components/panel-shell";
 import Link from "next/link";
+import { Loading } from "@/components/panel-shell";
 import { bigButtonSecondary, CarrierShell } from "@/components/padroncino/carrier-shell";
-import { CARRIER_PATHS } from "@/lib/carriers/onboarding";
 import { requireArea } from "@/lib/auth/session";
 import { carrierPanelView } from "@/lib/auth/routing";
-import { PendingVerification } from "./pending-verification";
+import { CARRIER_PATHS } from "@/lib/carriers/onboarding";
+import { OnboardingHome } from "./onboarding-home";
 
 export const metadata = { title: "Area padroncino – Transigo" };
 
@@ -24,14 +24,17 @@ async function Content() {
   if (carrierPanelView(ctx) === "pending") {
     return (
       <CarrierShell title={greeting}>
-        <PendingVerification userId={ctx.userId} />
+        <OnboardingHome userId={ctx.userId} />
       </CarrierShell>
     );
   }
   return (
     <CarrierShell title={greeting}>
       <p>Il tuo account è attivo. A breve qui troverai le corse disponibili.</p>
-      <Link href={CARRIER_PATHS.vehicles} className={`${bigButtonSecondary} mt-6`}>I miei veicoli</Link>
+      <div className="mt-6 space-y-3">
+        <Link href={CARRIER_PATHS.vehicles} className={bigButtonSecondary}>I miei veicoli</Link>
+        <Link href={CARRIER_PATHS.documents} className={bigButtonSecondary}>Documenti aziendali</Link>
+      </div>
     </CarrierShell>
   );
 }
