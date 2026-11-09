@@ -9,7 +9,7 @@ import { EMPTY_WIZARD_STATE, parseStoredState, WIZARD_STORAGE_KEY, type PlaceCho
 import { addDaysIso, romeToday, TIME_WINDOW_LABEL, TIME_WINDOWS, type TimeWindow } from "@/lib/booking/windows";
 import { loadCheckoutDefaults, submitBooking } from "./actions";
 import { SignOutButton } from "@/components/sign-out-button";
-import { AddressField } from "./address-field";
+import { AddressField } from "@/components/address-field";
 import { Headline, PorterPicker, QuoteBreakdown } from "./quote-view";
 import { STEPS, stepIndex, type QuoteResponse, type WizardSession } from "./types";
 

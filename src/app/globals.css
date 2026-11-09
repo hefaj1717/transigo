@@ -14,8 +14,40 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/*
+ * Brand colours (logo: navy "TRANSi" + green "GO"). Change them only here — every component uses the
+ * utilities generated from these tokens (bg-brand-800, text-accent-600, …).
+ *   brand  = navy, the main colour (headings, primary buttons, header/footer)
+ *   accent = green, the accent colour (also the carrier side: "Diventa partner", PWA)
+ */
+@theme {
+  --color-brand-50: #eef3fb;
+  --color-brand-100: #d9e3f5;
+  --color-brand-200: #b6c8ea;
+  --color-brand-300: #87a3d9;
+  --color-brand-400: #5677c2;
+  --color-brand-500: #3557a8;
+  --color-brand-600: #26438c;
+  --color-brand-700: #1e3572;
+  --color-brand-800: #1a2d5c;
+  --color-brand-900: #14234a;
+  --color-brand-950: #0c1630;
+
+  --color-accent-50: #ecfbf1;
+  --color-accent-100: #d0f5dd;
+  --color-accent-200: #a4eabf;
+  --color-accent-300: #6bd898;
+  --color-accent-400: #38c070;
+  --color-accent-500: #1fa557;
+  --color-accent-600: #158646;
+  --color-accent-700: #136a3a;
+  --color-accent-800: #135431;
+  --color-accent-900: #11452a;
+  --color-accent-950: #052714;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }

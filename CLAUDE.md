@@ -71,7 +71,14 @@ Uwagi techniczne:
 - **Krok 3 — seed demo** (zrobione 2026-11-09): `npm run db:local:reset && npm run db:local:seed-demo` (tylko lokalnie: kontrola adresu 127.0.0.1:55321/55322, SQL w kontenerze z kontrolą gniazda; daty zleceń zakończonych w przeszłości; na końcu loginy, hasło `Prova-12345!`).
 - **Krok 4 — przegląd i kreator** (zrobione 2026-11-09): `/admin/ordini` sprawdzone w przeglądarce na danych demo (Assegna, Rimuovi padroncino, statusy do „Consegnato”, znacznik bez POD); poprawione zagnieżdżenie `order_leg_carrier_terms` pod `order_legs` (klucz obcy do odcinków, nie do zleceń). Lista testu ręcznego: `docs/testy-reczne/admin-ordini.md`. **„Stoccaggio lungo termine” ukryte** (D117): `planLegs(..., maxStorageDays)` → `storage_too_long`, serwer podaje `storageShortTermMaxDays` z cennika, pole daty w kreatorze ma `max`.
 - **Na czym skończyliśmy (2026-11-09):** demo dla admina gotowe lokalnie; migracja `admin_order_dispatch` **nie jest na stagingu** (dopiero razem ze stroną publiczną i panelem klienta, za zgodą). Nazwę projektu `bacabuzzevwwdxrswbnc` właściciel zmienia sam na „TransiGo staging”.
-- **Następny krok: strona publiczna (Etap 2c)**, potem panel klienta (status zlecenia i historia dla klienta).
+- **Etap 2c — strona publiczna (od 2026-11-09, plan zatwierdzony; D124, D125):**
+  - [x] Krok 1: layout `(public)` (nagłówek, menu mobilne, stopka z danymi prawnymi z `settings.company_*`), logo tekstowe i kolory `brand-*`/`accent-*` w `globals.css`, strona główna (hero z mini-formularzem → `/prenota`, usługi, „Come funziona”, pojazdy, „Diventa partner”, FAQ). `AddressField` przeniesione do `src/components/`. Treści w `src/lib/public/content.ts` (szkic do przeglądu właściciela).
+  - [ ] Krok 2: `/servizi` + 4 podstrony (deposito bez „lungo termine”, D117).
+  - [ ] Krok 3: `/come-funziona`, `/domande-frequenti`, `/diventa-partner`.
+  - [ ] Krok 4: migracja `contact_requests` (zgoda właściciela 2026-11-09, z `privacy_accepted_at`, retencją 24 mies. i limitem na IP — D125), `/contatti`, `/admin/richieste`; lokalnie, na staging razem z panelem klienta.
+  - [ ] Krok 5: formularz spoza obszaru w kreatorze. Krok 6: `/cookie` + baner „Ok”, metadata, `sitemap.ts`, `robots.ts`, `noindex` na stagingu. Krok 7: przegląd w przeglądarce, `docs/testy-reczne/strona-publiczna.md`.
+  - Linki do stron z kroków 2–6 do tego czasu dają 404.
+- Potem panel klienta (status zlecenia i historia dla klienta).
 
 ## Odłożone: PWA przewoźnika (priorytet: najpierw demo dla klienta, 2026-11-09)
 

@@ -14,11 +14,14 @@ export function AddressField({
   label,
   value,
   onChange,
+  externalError,
 }: {
   id: string;
   label: string;
-  value: PlaceChoice | null;
+  value: Pick<PlaceChoice, "placeId" | "label"> | null;
   onChange: (place: Pick<PlaceChoice, "placeId" | "label"> | null) => void;
+  /** Validation message from the parent form (shown under the field). */
+  externalError?: string | null;
 }) {
   const [text, setText] = useState(value?.label ?? "");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -87,17 +90,19 @@ export function AddressField({
         aria-autocomplete="list"
         aria-expanded={open}
         aria-controls={`${id}-list`}
-        className="mt-1 block w-full rounded-md border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
+        aria-invalid={externalError ? true : undefined}
+        className="mt-1 block w-full rounded-md border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:ring-2 focus:ring-brand-500"
       />
-      {value ? <p className="mt-1 text-xs text-green-700">Indirizzo selezionato</p> : text.length >= 3 ? <p className="mt-1 text-xs text-zinc-500">Seleziona un indirizzo dall&apos;elenco.</p> : null}
+      {value ? <p className="mt-1 text-xs text-accent-700">Indirizzo selezionato</p> : text.length >= 3 ? <p className="mt-1 text-xs text-zinc-500">Seleziona un indirizzo dall&apos;elenco.</p> : null}
       {error ? <p className="mt-1 text-sm text-red-600">{error}</p> : null}
+      {externalError && !error ? <p className="mt-1 text-sm text-red-600">{externalError}</p> : null}
       {open && suggestions.length ? (
         <ul id={`${id}-list`} role="listbox" className="absolute z-10 mt-1 max-h-64 w-full overflow-auto rounded-md border border-zinc-200 bg-white shadow-lg">
           {suggestions.map((s) => (
             <li key={s.placeId} role="option" aria-selected={value?.placeId === s.placeId}>
               <button
                 type="button"
-                className="block w-full px-3 py-2 text-left text-sm hover:bg-blue-50"
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-brand-50"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   onChange({ placeId: s.placeId, label: s.text });

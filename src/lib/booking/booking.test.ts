@@ -95,7 +95,7 @@ describe("planLegs (D47, D72, D73)", () => {
     expect(planLegs(storage(addDaysIso("2026-11-11", 31)), A, B, W, 30)).toEqual({ ok: false, error: "storage_too_long" });
     expect(planLegs(storage(addDaysIso("2026-11-11", 31)), A, B, W)).toMatchObject({ ok: true, storageDays: 31 }); // no limit given
     const e: BookingError = { code: "storage_too_long" };
-    expect(bookingErrorMessage(e)).toMatch(/periodo breve/);
+    expect(bookingErrorMessage(e, { maxDistanceKm: 300, minLeadHours: 3 })).toMatch(/periodo breve/);
     expect(bookingErrorStep(e)).toBe("servizi");
   });
 
