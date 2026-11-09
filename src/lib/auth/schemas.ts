@@ -173,31 +173,55 @@ export const customerRegistrationSchema = z.discriminatedUnion(
 );
 export type CustomerRegistration = z.output<typeof customerRegistrationSchema>;
 
+/** D45: company fields of a carrier (registration and onboarding "Dati aziendali"). */
+const carrierCompanyFields = {
+  companyName: requiredText(160),
+  vatNumber,
+  fiscalCode: businessFiscalCode,
+  hqStreet: requiredText(160),
+  hqCity: requiredText(80),
+  hqPostalCode: z
+    .string({ error: MSG.required })
+    .trim()
+    .min(1, { error: MSG.required })
+    .refine(isValidCap, { error: MSG.cap }),
+  hqProvince: z
+    .string({ error: MSG.required })
+    .transform(compactUpper)
+    .pipe(z.string().min(1, { error: MSG.required }).refine(isValidProvince, { error: MSG.province })),
+  sdiCode: optionalSdi,
+  pec: optionalPec,
+};
+
 /** D45: carrier — personal data, phone (verified by SMS in Stage 4), company data, HQ address, SDI or PEC. */
 export const carrierRegistrationSchema = z
   .object({
     ...accountFields,
     phone: requiredPhone,
-    companyName: requiredText(160),
-    vatNumber,
-    fiscalCode: businessFiscalCode,
-    hqStreet: requiredText(160),
-    hqCity: requiredText(80),
-    hqPostalCode: z
-      .string({ error: MSG.required })
-      .trim()
-      .min(1, { error: MSG.required })
-      .refine(isValidCap, { error: MSG.cap }),
-    hqProvince: z
-      .string({ error: MSG.required })
-      .transform(compactUpper)
-      .pipe(z.string().min(1, { error: MSG.required }).refine(isValidProvince, { error: MSG.province })),
-    sdiCode: optionalSdi,
-    pec: optionalPec,
+    ...carrierCompanyFields,
   })
   .refine(passwordsMatch, passwordsMatchParams)
   .superRefine(checkEinvoiceChannel);
 export type CarrierRegistration = z.output<typeof carrierRegistrationSchema>;
+
+/** Carrier onboarding "Dati aziendali" (D105: editable only until the account is sent for review). */
+export const carrierCompanySchema = z.object(carrierCompanyFields).superRefine(checkEinvoiceChannel);
+export type CarrierCompany = z.output<typeof carrierCompanySchema>;
+
+/** Form values → carriers columns. Empty SDI / PEC become null (the other channel is used). */
+export function carrierCompanyRow(c: CarrierCompany) {
+  return {
+    company_name: c.companyName,
+    vat_number: c.vatNumber,
+    fiscal_code: c.fiscalCode,
+    hq_street: c.hqStreet,
+    hq_city: c.hqCity,
+    hq_postal_code: c.hqPostalCode,
+    hq_province: c.hqProvince,
+    sdi_code: c.sdiCode ?? null,
+    pec: c.pec ?? null,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Sign-in and password reset

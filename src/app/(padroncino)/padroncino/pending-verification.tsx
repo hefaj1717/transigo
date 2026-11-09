@@ -1,27 +1,25 @@
 import { createClient } from "@/lib/supabase/server";
-import { carrierOnboarding } from "@/lib/auth/carrier-onboarding";
+import { carrierOnboarding, carrierOnboardingView } from "@/lib/carriers/onboarding";
 import type { CarrierStatus } from "@/lib/auth/routing";
 
 // Shown instead of the carrier panel while carriers.status <> 'active'.
-// Reads with the user's own session, so RLS limits it to the carrier's own rows.
-export async function PendingVerification() {
+// Reads with the user's own session, so RLS limits it to the carrier's own rows; what is missing comes
+// from carrier_onboarding_missing() (D99). The onboarding screens replace this in the next commits.
+export async function PendingVerification({ userId }: { userId: string }) {
   const supabase = await createClient();
-  const [{ data: carrier }, documents, vehicles] = await Promise.all([
-    supabase
-      .from("carriers")
-      .select("status, status_reason, phone_verified_at, stripe_payouts_enabled, company_name, vat_number, fiscal_code, hq_street, hq_city, hq_postal_code, hq_province, pec, sdi_code")
-      .maybeSingle(),
-    supabase.from("carrier_documents").select("id", { count: "exact", head: true }),
-    supabase.from("carrier_vehicles").select("id", { count: "exact", head: true }).eq("is_active", true),
+  const [{ data: carrier }, missingResult] = await Promise.all([
+    supabase.from("carriers").select("status, status_reason, submitted_at, phone_verified_at, stripe_payouts_enabled").maybeSingle(),
+    supabase.rpc("carrier_onboarding_missing", { p_carrier_id: userId }),
   ]);
+  if (missingResult.error) console.error("carrier_onboarding_missing failed", { code: missingResult.error.code });
 
+  const view = carrierOnboardingView((carrier?.status as CarrierStatus | undefined) ?? null, carrier?.submitted_at ?? null);
   const { notice, items } = carrierOnboarding({
-    status: (carrier?.status as CarrierStatus | undefined) ?? null,
+    view,
+    missing: (missingResult.data as string[] | null) ?? [],
     statusReason: carrier?.status_reason ?? null,
-    company: carrier ?? null,
+    submittedAt: carrier?.submitted_at ?? null,
     phoneVerified: !!carrier?.phone_verified_at,
-    documentsCount: documents.count ?? 0,
-    activeVehiclesCount: vehicles.count ?? 0,
     stripePayoutsEnabled: !!carrier?.stripe_payouts_enabled,
   });
 
@@ -34,16 +32,20 @@ export async function PendingVerification() {
         </p>
       )}
       <ul className="mt-4 space-y-2">
-        {items.map((item) => (
-          <li key={item.key} className="flex items-start gap-2 text-sm">
-            <span aria-hidden className={item.done ? "text-green-700" : "text-zinc-400"}>{item.done ? "✓" : "○"}</span>
-            <span className={item.done ? "text-zinc-700" : "text-zinc-900"}>
-              {item.label}
-              <span className="sr-only">{item.done ? " (completato)" : " (da completare)"}</span>
-              {!item.done && item.comingSoon ? <span className="ml-2 text-xs text-zinc-500">disponibile a breve</span> : null}
-            </span>
-          </li>
-        ))}
+        {items.map((item) => {
+          // If the check failed, show nothing as done (fail closed).
+          const done = missingResult.error && item.key !== "approval" ? false : item.done;
+          return (
+            <li key={item.key} className="flex items-start gap-2 text-sm">
+              <span aria-hidden className={done ? "text-green-700" : "text-zinc-400"}>{done ? "✓" : "○"}</span>
+              <span className={done ? "text-zinc-700" : "text-zinc-900"}>
+                {item.label}
+                <span className="sr-only">{done ? " (completato)" : " (da completare)"}</span>
+                {!done && item.comingSoon ? <span className="ml-2 text-xs text-zinc-500">disponibile a breve</span> : null}
+              </span>
+            </li>
+          );
+        })}
       </ul>
     </section>
   );

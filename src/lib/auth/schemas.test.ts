@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  carrierCompanyRow,
+  carrierCompanySchema,
   carrierRegistrationSchema,
   customerRegistrationSchema,
   formDataToObject,
@@ -186,5 +188,25 @@ describe("helpers", () => {
     fd.set("acceptTerms", "on");
     fd.set("file", new Blob(["x"]), "x.txt");
     expect(formDataToObject(fd)).toEqual({ email: "a@b.it", acceptTerms: "on" });
+  });
+});
+
+describe("carrier company data (onboarding, D45, D105)", () => {
+  const { companyName, vatNumber, fiscalCode, hqStreet, hqCity, hqPostalCode, hqProvince, pec } = carrierInput;
+  const company = { companyName, vatNumber, fiscalCode, hqStreet, hqCity, hqPostalCode, hqProvince, pec };
+
+  it("same rules as registration, without account fields; maps to columns with empty SDI as null", () => {
+    expect(carrierCompanyRow(carrierCompanySchema.parse(company))).toEqual({
+      company_name: "Trasporti Rossi", vat_number: "00743110157", fiscal_code: "RSSMRA85T10A562S",
+      hq_street: "Via Roma 1", hq_city: "Milano", hq_postal_code: "20121", hq_province: "MI",
+      sdi_code: null, pec: "trasporti@pec.it",
+    });
+  });
+  it("requires SDI or PEC and a valid VAT number", () => {
+    const r = carrierCompanySchema.safeParse({ ...company, pec: "", vatNumber: "123" });
+    expect(r.success).toBe(false);
+    const messages = r.success ? [] : r.error.issues.map((i) => i.message);
+    expect(messages).toContain(MSG.einvoiceChannel);
+    expect(messages).toContain(MSG.vat);
   });
 });

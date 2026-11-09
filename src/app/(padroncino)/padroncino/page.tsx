@@ -22,7 +22,7 @@ async function Content() {
   if (carrierPanelView(ctx) === "pending") {
     return (
       <CarrierShell title={greeting}>
-        <PendingVerification />
+        <PendingVerification userId={ctx.userId} />
       </CarrierShell>
     );
   }
