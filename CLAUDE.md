@@ -81,8 +81,9 @@ Uwagi techniczne:
     - `global-setup.ts` testów RLS czeka po resecie, aż REST API odbuduje cache schematu (wcześniej losowe „Could not query the database for the schema cache”).
   - [x] Krok 5: formularz „Lasciaci una richiesta” w kroku „Percorso”, gdy wycena zwraca `pickup_province` (odcinek 1) albo `max_distance` (`isOutOfArea()`); akcja `src/app/(public)/prenota/out-of-area-actions.ts` — przeglądarka wysyła tylko `placeId`, miasta, prowincje i dystans ustala serwer (`resolveRouteSummary()` w `src/lib/booking/server.ts`, D76) i tylko dla poprawnego, nie-botowego zgłoszenia. Wspólny formularz `src/components/contact-form.tsx` i wspólna obsługa `src/lib/contact/submit-form.ts` (kolejność kontroli w jednym miejscu). Sprawdzone w przeglądarce na lokalnej bazie (Roma → Napoli: zapis RM/NA/231 km, bez ulic; `/contatti` → `/admin/richieste` → „Segna come gestita”).
   - [x] Krok 6 (D126): `/cookie` (lista z `src/lib/public/cookies.ts`), baner „Ok” (`src/components/site/cookie-notice.tsx`), `src/app/robots.ts`, `src/app/sitemap.ts`, `metadataBase`/Open Graph w głównym layoucie. **`SITE_INDEXING=on` tylko na produkcji na Vercel** — wszędzie indziej `noindex` i `Disallow: /`. Nowe zewnętrzne skrypty (analityka, mapa w przeglądarce) = baner z kategoriami (D126).
-  - [ ] Krok 7: przegląd w przeglądarce, `docs/testy-reczne/strona-publiczna.md`.
-- Potem panel klienta (status zlecenia i historia dla klienta).
+  - [x] Krok 7: `npm run build` przechodzi (strony publiczne statyczne, odświeżanie co 1 h); wszystkie strony 200, konsola bez błędów; lista testu ręcznego `docs/testy-reczne/strona-publiczna.md` (A–F). **Widok na telefonie do sprawdzenia przez właściciela** (okna przeglądarki nie dało się zmniejszyć).
+- **Na czym skończyliśmy (2026-11-09):** strona publiczna (Etap 2c) gotowa; na stagingu brakuje migracji `admin_order_dispatch` i `contact_requests` (obie lokalnie, na staging razem z panelem klienta, za zgodą). Przed wdrożeniem na Vercel: `CONTACT_IP_HASH_SECRET`, `ADMIN_NOTIFICATION_EMAIL`, `SITE_INDEXING=on` tylko na produkcji, harmonogram `/api/cron/purge-contact-requests`. Właściciel przegląda teksty (`src/lib/public/content.ts`), dane firmy w `settings.company_*` i pojazdy.
+- **Następny krok: panel klienta** (status zlecenia i historia dla klienta).
 
 ## Odłożone: PWA przewoźnika (priorytet: najpierw demo dla klienta, 2026-11-09)
 
@@ -161,7 +162,7 @@ Stan:
       - Mapa z trasą w kroku „Percorso” jeszcze nie zrobiona (jest tylko dystans); formularz kontaktowy spoza obszaru → 2c.
       - Status `pending_payment` w 2b oznacza zapisane zlecenie bez płatności; w Etapie 3 — sesję Checkout (wygaszanie nieopłaconych do zrobienia).
       - `/api/booking/quote` i `/api/maps/*` publiczne — przed produkcją rate limiting.
-  - [ ] **2c. Strona publiczna**
+  - [x] **2c. Strona publiczna** (2026-11-09, D124–D126) — szczegóły w sekcji „W toku: demo dla klienta”.
   - **TODO przed Etapem 3** (maile z potwierdzeniem zamówienia): Resend + SMTP dla Supabase Auth, instrukcja w D79 (kupić domenę, DNS SPF/DKIM, klucz API, SMTP w Supabase, Rate Limits).
 - [x] 3. Płatność klienta (Stripe Checkout + webhook) — **ukończony 2026-11-09** (D88–D96): migracje na stagingu; test E2E na stagingu: 4242, 0002 (odrzucona), 3155 (3D Secure), „Paga ora” po wyjściu z Checkout, „Annulla ordine” (zlecenie `expired`, sesja wygaszona w Stripe), `stripe events resend` → `[200]` bez zmian w bazie.
   - Powstało: migracje `payments_enum`, `payments` (`payments`, `refunds` — model, `stripe_events`, `email_outbox`, `orders.payment_due_at`, kolumny anulowania, funkcje `start_order_payment` / `confirm_order_payment` / `expire_*`); `src/lib/stripe/` (klucze tylko testowe), `src/lib/payments/` (parametry sesji, webhook, serwer, cron), `src/lib/notifications/` (adapter maili + szablon `order_paid`); `/api/webhooks/stripe`, `/api/cron/expire-orders`; `/cliente/ordini/[id]` („Paga ora”, „Annulla ordine”, „Pagamento in verifica”); `/admin/ordini`; testy jednostkowe + `tests/rls/payments.test.ts`.
