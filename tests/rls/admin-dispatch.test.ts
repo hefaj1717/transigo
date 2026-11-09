@@ -238,6 +238,29 @@ describe("dispatch-server: messages and the admin from deps", () => {
     expect(done).toEqual({ ok: true, message: `Stato aggiornato: Consegnato. ${msg.deliveredWithoutPod}` });
   });
 
+  it("customer e-mails: order_assigned after Assegna, order_delivered after Consegnato, once each", async () => {
+    const orderId = await paidOrder();
+    const c = await activeCarrier();
+    await run(service.from("profiles").update({ first_name: "Mario" }).eq("id", c.user.id));
+    const mails = async () =>
+      check(service.from("email_outbox").select("template_code, to_address, subject, text_body").eq("order_id", orderId).in("template_code", ["order_assigned", "order_delivered"]).order("created_at"));
+
+    await srv.assignJob(deps(), { orderId, candidate: `${c.user.id}:${c.vehicleId}` });
+    let m = await mails();
+    expect(m.map((x) => x.template_code)).toEqual(["order_assigned"]);
+    expect(m[0].to_address).toBe(customer.email);
+    expect(m[0].text_body).toContain("Mario (Trasporti Corse Srl)");
+    expect(m[0].text_body).toContain(`https://transigo.example/cliente/ordini/${orderId}`);
+    expect(m[0].text_body).not.toMatch(/€|carrier_amount/); // no amounts at all
+
+    // reassignment: no second e-mail (outbox unique key)
+    await srv.unassignJob(deps(), { orderId, reason: "altro" });
+    await srv.assignJob(deps(), { orderId, candidate: `${c.user.id}:${c.vehicleId}` });
+    for (const to of ["picked_up", "in_transit", "delivered"]) await srv.advanceOrder(deps(), { orderId, to });
+    m = await mails();
+    expect(m.map((x) => x.template_code)).toEqual(["order_assigned", "order_delivered"]);
+  });
+
   it("clear messages for refused assignments and unassign", async () => {
     const orderId = await paidOrder({ vehicle: "van_medium" });
     const [ok, other] = await Promise.all([activeCarrier(), activeCarrier()]);

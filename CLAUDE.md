@@ -85,7 +85,10 @@ Uwagi techniczne:
 - **Na czym skończyliśmy (2026-11-09):** strona publiczna (Etap 2c) gotowa; na stagingu brakuje migracji `admin_order_dispatch` i `contact_requests` (obie lokalnie, na staging razem z panelem klienta, za zgodą). Przed wdrożeniem na Vercel: `CONTACT_IP_HASH_SECRET`, `ADMIN_NOTIFICATION_EMAIL`, `SITE_INDEXING=on` tylko na produkcji, harmonogram `/api/cron/purge-contact-requests`. Właściciel przegląda teksty (`src/lib/public/content.ts`), dane firmy w `settings.company_*` i pojazdy.
 - **Panel klienta (od 2026-11-09, plan zatwierdzony):** dane przewoźnika dla klienta tylko imię + firma + typ pojazdu + tablica (bez telefonu); anulowanie opłaconego zlecenia na razie przez kontakt (pełne D33 ze zwrotem — Etap 6); maile `order_assigned` i `order_delivered` (outbox, bez SMS).
   - [x] Krok 1: migracja `20261110130000_customer_order_carrier.sql` (lokalnie) — `customer_order_carrier(order_id)` dla właściciela zlecenia w statusach `assigned`…`completed`, testy `tests/rls/customer-panel.test.ts`.
-  - [ ] Krok 2: lista `/cliente` (zakładki „In corso” / „Conclusi”, karty). Krok 3: szczegóły (postęp, przewoźnik, rozbicie ceny, trasa, kontakty, usługi, historia). Krok 4: maile. Krok 5: przegląd + `docs/testy-reczne/panel-klienta.md`. Krok 6: `db:push` trzech migracji na staging (pokazać `db:list` i projekt przed wysłaniem).
+  - [x] Krok 2: lista `/cliente` (zakładki „In corso” / „Conclusi”, karty) w ramce `src/components/cliente/customer-shell.tsx`; logika `src/lib/orders/customer-view.ts` (+ testy).
+  - [x] Krok 3: `/cliente/ordini/[id]` — postęp, przewoźnik, trasa z piętrami i kontaktami, merce/servizi, rozbicie ceny (D3), „contattaci” dla zmian opłaconego zlecenia, historia.
+  - [x] Krok 4: maile `order_assigned` / `order_delivered` (`src/lib/notifications/templates/order-customer-updates.ts`, wysyłka `src/lib/orders/customer-emails.ts`, wywołane w `dispatch-server.ts` po udanej zmianie; błąd maila nie cofa zmiany). Jeden mail na zlecenie i szablon — po „Rimuovi padroncino” i ponownym przypisaniu drugi `order_assigned` nie idzie (świadomie, demo).
+  - [ ] Krok 5: przegląd + `docs/testy-reczne/panel-klienta.md`. Krok 6: `db:push` trzech migracji na staging (pokazać `db:list` i projekt przed wysłaniem).
 
 ## Odłożone: PWA przewoźnika (priorytet: najpierw demo dla klienta, 2026-11-09)
 

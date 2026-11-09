@@ -1,5 +1,6 @@
 import "server-only";
 import type { AdminDeps } from "@/lib/admin/deps";
+import { sendOrderAssignedEmail, sendOrderDeliveredEmail } from "./customer-emails";
 import { ORDER_STATUS_LABEL } from "./status";
 import { advanceSchema, assignSchema, DISPATCH_MSG, dispatchDbError, unassignSchema } from "./dispatch";
 
@@ -13,6 +14,15 @@ export type DispatchResult = { ok: true; message: string } | { ok: false; error:
 type DbError = { code?: string | null; message?: string | null; details?: string | null } | null;
 const log = (where: string, error: DbError) => console.error(`[dispatch] ${where}:`, error?.code ?? "", error?.message ?? ""); // ids only
 const expected = (e: DbError) => e?.code === "55000" || e?.code === "22023";
+
+/** Customer e-mail after a successful change; a failure is logged and never undoes the change. */
+async function notifyCustomer(where: string, send: () => Promise<void>) {
+  try {
+    await send();
+  } catch (e) {
+    console.error(`[dispatch] ${where} e-mail failed:`, e instanceof Error ? e.message : e);
+  }
+}
 
 export type Candidate = { carrier_id: string; company_name: string; vehicle_id: string; plate: string; vehicle_type_name: string; payload_kg: number | null };
 
@@ -37,6 +47,7 @@ export async function assignJob(deps: AdminDeps, input: Record<string, string>):
     if (!expected(error)) log("admin_assign_job", error);
     return { ok: false, error: dispatchDbError(error) };
   }
+  await notifyCustomer("order_assigned", () => sendOrderAssignedEmail(deps.serviceDb, orderId, deps.appUrl));
   return { ok: true, message: DISPATCH_MSG.assigned };
 }
 
@@ -62,6 +73,9 @@ export async function advanceOrder(deps: AdminDeps, input: Record<string, string
   if (error) {
     if (!expected(error)) log("admin_advance_order", error);
     return { ok: false, error: dispatchDbError(error) };
+  }
+  if (parsed.data.to === "delivered") {
+    await notifyCustomer("order_delivered", () => sendOrderDeliveredEmail(deps.serviceDb, parsed.data.orderId, deps.appUrl));
   }
   const label = ORDER_STATUS_LABEL[parsed.data.to] ?? parsed.data.to;
   return {
