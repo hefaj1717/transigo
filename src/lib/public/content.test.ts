@@ -42,3 +42,26 @@ describe("partnerDocuments", () => {
     expect(docs.find((d) => d.label === "Polizza RC vettoriale")).toMatchObject({ required: false });
   });
 });
+
+describe("indexing and robots (D126)", async () => {
+  const { isIndexable, robotsRules, SITEMAP_PATHS, ROBOTS_DISALLOW } = await import("./seo");
+
+  it("only SITE_INDEXING=on makes the site indexable", () => {
+    expect(isIndexable({ SITE_INDEXING: "on" })).toBe(true);
+    for (const v of [undefined, "", "true", "1", "ON", "off"]) expect(isIndexable({ SITE_INDEXING: v })).toBe(false);
+  });
+
+  it("not indexable: everything disallowed, no sitemap", () => {
+    expect(robotsRules(false, "https://transigo.example")).toEqual({ rules: [{ userAgent: "*", disallow: "/" }] });
+  });
+
+  it("indexable: panels and APIs disallowed, sitemap listed", () => {
+    const r = robotsRules(true, "https://transigo.example");
+    expect(r).toMatchObject({ sitemap: "https://transigo.example/sitemap.xml" });
+    expect(r.rules[0].disallow).toEqual(expect.arrayContaining(["/admin", "/cliente", "/padroncino", "/api/"]));
+  });
+
+  it("the sitemap lists no private area", () => {
+    for (const p of SITEMAP_PATHS) for (const d of ROBOTS_DISALLOW) expect(p.startsWith(d)).toBe(false);
+  });
+});

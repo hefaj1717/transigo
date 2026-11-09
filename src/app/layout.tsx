@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { isIndexable } from "@/lib/public/seo";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -12,9 +13,15 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, "");
+
 export const metadata: Metadata = {
+  ...(appUrl ? { metadataBase: new URL(appUrl) } : {}),
   title: "Transigo",
   description: "Trasporti, facchinaggio, imballaggio e deposito merci",
+  openGraph: { siteName: "Transigo", locale: "it_IT", type: "website" },
+  // D126: only production (SITE_INDEXING=on) is indexed.
+  robots: isIndexable() ? { index: true, follow: true } : { index: false, follow: false },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

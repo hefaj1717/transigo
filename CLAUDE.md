@@ -80,8 +80,8 @@ Uwagi techniczne:
     - Na stagingu (dev na `localhost:3000`) formularz `/contatti` do czasu migracji kończy się „Invio non riuscito” — działa tylko walidacja.
     - `global-setup.ts` testów RLS czeka po resecie, aż REST API odbuduje cache schematu (wcześniej losowe „Could not query the database for the schema cache”).
   - [x] Krok 5: formularz „Lasciaci una richiesta” w kroku „Percorso”, gdy wycena zwraca `pickup_province` (odcinek 1) albo `max_distance` (`isOutOfArea()`); akcja `src/app/(public)/prenota/out-of-area-actions.ts` — przeglądarka wysyła tylko `placeId`, miasta, prowincje i dystans ustala serwer (`resolveRouteSummary()` w `src/lib/booking/server.ts`, D76) i tylko dla poprawnego, nie-botowego zgłoszenia. Wspólny formularz `src/components/contact-form.tsx` i wspólna obsługa `src/lib/contact/submit-form.ts` (kolejność kontroli w jednym miejscu). Sprawdzone w przeglądarce na lokalnej bazie (Roma → Napoli: zapis RM/NA/231 km, bez ulic; `/contatti` → `/admin/richieste` → „Segna come gestita”).
-  - [ ] Krok 6: `/cookie` + baner „Ok”, metadata, `sitemap.ts`, `robots.ts`, `noindex` na stagingu. Krok 7: przegląd w przeglądarce, `docs/testy-reczne/strona-publiczna.md`.
-  - Link do `/cookie` (krok 6) do tego czasu daje 404.
+  - [x] Krok 6 (D126): `/cookie` (lista z `src/lib/public/cookies.ts`), baner „Ok” (`src/components/site/cookie-notice.tsx`), `src/app/robots.ts`, `src/app/sitemap.ts`, `metadataBase`/Open Graph w głównym layoucie. **`SITE_INDEXING=on` tylko na produkcji na Vercel** — wszędzie indziej `noindex` i `Disallow: /`. Nowe zewnętrzne skrypty (analityka, mapa w przeglądarce) = baner z kategoriami (D126).
+  - [ ] Krok 7: przegląd w przeglądarce, `docs/testy-reczne/strona-publiczna.md`.
 - Potem panel klienta (status zlecenia i historia dla klienta).
 
 ## Odłożone: PWA przewoźnika (priorytet: najpierw demo dla klienta, 2026-11-09)
