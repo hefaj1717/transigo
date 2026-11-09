@@ -128,12 +128,17 @@ Uwagi techniczne:
       - `/api/booking/quote` i `/api/maps/*` publiczne — przed produkcją rate limiting.
   - [ ] **2c. Strona publiczna**
   - **TODO przed Etapem 3** (maile z potwierdzeniem zamówienia): Resend + SMTP dla Supabase Auth, instrukcja w D79 (kupić domenę, DNS SPF/DKIM, klucz API, SMTP w Supabase, Rate Limits).
-- [ ] 3. Płatność klienta (Stripe Checkout + webhook) — **kod gotowy (D88–D96); czeka na `db:push` na staging i ręczny test E2E z kartami testowymi**
+- [ ] 3. Płatność klienta (Stripe Checkout + webhook) — **migracje na stagingu (2026-11-09); test E2E przeszedł (4242, 0002, 3155/3DS, „Paga ora”, ponowne wysłanie zdarzenia ignorowane); do ponownego sprawdzenia w bazie: „Annulla ordine” (brak śladu po pierwszym teście)**
   - Powstało: migracje `payments_enum`, `payments` (`payments`, `refunds` — model, `stripe_events`, `email_outbox`, `orders.payment_due_at`, kolumny anulowania, funkcje `start_order_payment` / `confirm_order_payment` / `expire_*`); `src/lib/stripe/` (klucze tylko testowe), `src/lib/payments/` (parametry sesji, webhook, serwer, cron), `src/lib/notifications/` (adapter maili + szablon `order_paid`); `/api/webhooks/stripe`, `/api/cron/expire-orders`; `/cliente/ordini/[id]` („Paga ora”, „Annulla ordine”, „Pagamento in verifica”); `/admin/ordini`; testy jednostkowe + `tests/rls/payments.test.ts`.
   - Pamiętać:
     - `paid` ustawia **tylko** `confirm_order_payment()` z webhooka; powrót z Checkout niczego nie zmienia. `payments` zapisują wyłącznie funkcje w bazie (nawet service role nie ma `INSERT/UPDATE`).
     - Jedna otwarta sesja na zlecenie; wygasa z terminem płatności (D88). Nowe metody płatności włącza się w Stripe Dashboard (API nie ma `payment_method_types`); Adaptive Pricing wyłączone.
-    - Lokalnie webhooki przez `stripe listen --forward-to localhost:3000/api/webhooks/stripe`; bez tego zlecenia nie przejdą w `paid` (zadanie `/api/cron/expire-orders` dogania opłacone sesje).
+    - Lokalnie webhooki przez Stripe CLI (osobny terminal, cały czas włączony):
+      `stripe listen --events checkout.session.completed,checkout.session.async_payment_succeeded,checkout.session.async_payment_failed,checkout.session.expired --forward-to localhost:3000/api/webhooks/stripe`
+      Wypisany `whsec_…` → `STRIPE_WEBHOOK_SECRET` w `.env.local` (stały dla konta CLI; po zmianie restart `npm run dev`). Bez `--events` przychodzą wszystkie zdarzenia — też działa (zapisywane jako zignorowane), tylko zaśmieca `stripe_events`. Bez działającego `stripe listen` zlecenia nie przejdą w `paid` od razu (zadanie `/api/cron/expire-orders` dogania opłacone sesje po terminie).
+    - Test idempotencji: `stripe events resend <evt_id>` — stan w bazie ma się nie zmienić (w terminalu `stripe listen` odpowiedź `[200]`).
+    - Zadanie okresowe ręcznie: `curl -H "Authorization: Bearer $CRON_SECRET" localhost:3000/api/cron/expire-orders` (zwraca raport `checked/paid/review/expired/stillOpen/errors`).
+    - Konto Stripe wysyła zdarzenia w swojej domyślnej wersji API (sandbox: `2026-10-28.endive`), SDK `stripe@23.0.1` ma typy dla `2026-09-30.endive`; używane pola sesji i PaymentIntent są w obu takie same. Przy aktualizacji SDK sprawdzić zgodność.
     - Maile: `EMAIL_TRANSPORT=outbox` — trafiają do `email_outbox` (`captured_dev`), nie są wysyłane. Transport `resend` do podłączenia po weryfikacji domeny (D79).
     - Do decyzji przed wdrożeniem: harmonogram zadania okresowego (D91), wartości anulowania (D94), okno płatności (D88).
     - Status `payment_review` (D96): obsługa przez admina (oznacz jako opłacone / zwrot) — Etap 6.
