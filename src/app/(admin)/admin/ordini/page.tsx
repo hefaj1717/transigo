@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Loading } from "@/components/panel-shell";
 import { AdminShell } from "@/components/admin/admin-nav";
 import { requireArea } from "@/lib/auth/session";
+import { ADMIN_ORDER_PATHS, ORDER_FILTERS } from "@/lib/orders/dispatch";
 import { ORDER_STATUS_LABEL, PAYMENT_STATE_LABEL, paymentState } from "@/lib/orders/status";
 import { formatCents } from "@/lib/pricing/money";
 import { stripeDashboardPaymentUrl } from "@/lib/stripe/keys";
@@ -10,8 +11,8 @@ import { createClient } from "@/lib/supabase/server";
 
 export const metadata = { title: "Ordini – Transigo" };
 
-// Admin order list (Stage 3 scope): order and payment status, link to the payment in the Stripe Dashboard.
-// Read-only: actions on payments under review (mark paid / refund) come in Stage 6.
+// Admin order list: order and payment status, carrier, link to the payment in the Stripe Dashboard and to the
+// order page (assignment and status changes, D122). Actions on payments under review come in Stage 6.
 export default function Page({ searchParams }: PageProps<"/admin/ordini">) {
   return (
     <Suspense fallback={<Loading />}>
@@ -31,15 +32,10 @@ type Row = {
   order_charges: { total_cents: number; refunded_cents: number } | null;
   customers: { profiles: { first_name: string | null; last_name: string | null; email: string } | null } | null;
   payments: { status: string; stripe_payment_intent_id: string | null; review_reason: string | null; created_at: string }[];
+  carriers: { company_name: string } | null;
 };
 
-const FILTERS: { key: string; label: string; statuses: string[] | null }[] = [
-  { key: "tutti", label: "Tutti", statuses: null },
-  { key: "da-verificare", label: "Pagamento da verificare", statuses: ["payment_review"] },
-  { key: "in-attesa", label: "In attesa di pagamento", statuses: ["pending_payment"] },
-  { key: "pagati", label: "Pagati", statuses: ["paid", "assigned", "picked_up", "in_transit", "delivered", "completed"] },
-  { key: "scaduti", label: "Scaduti", statuses: ["expired"] },
-];
+const FILTERS = ORDER_FILTERS;
 
 const REVIEW_REASON: Record<string, string> = {
   amount_mismatch: "importo diverso",
@@ -60,11 +56,12 @@ async function Content({ searchParams }: Pick<PageProps<"/admin/ordini">, "searc
   let q = db
     .from("orders")
     .select(
-      "id, order_number, status, created_at, pickup_window_start, payment_due_at, paid_at, order_charges(total_cents, refunded_cents), customers(profiles(first_name, last_name, email)), payments(status, stripe_payment_intent_id, review_reason, created_at)",
+      "id, order_number, status, created_at, pickup_window_start, payment_due_at, paid_at, order_charges(total_cents, refunded_cents), customers(profiles(first_name, last_name, email)), payments(status, stripe_payment_intent_id, review_reason, created_at), carriers(company_name)",
     )
-    .order("created_at", { ascending: false })
+    .order(filter.unassigned ? "pickup_window_start" : "created_at", { ascending: !!filter.unassigned })
     .limit(100);
   if (filter.statuses) q = q.in("status", filter.statuses);
+  if (filter.unassigned) q = q.is("carrier_id", null);
   const { data: orders, error } = await q.returns<Row[]>();
   const now = new Date();
 
@@ -86,6 +83,7 @@ async function Content({ searchParams }: Pick<PageProps<"/admin/ordini">, "searc
               <th className="py-2 pr-3 font-medium">Cliente</th>
               <th className="py-2 pr-3 font-medium">Ritiro</th>
               <th className="py-2 pr-3 font-medium">Stato</th>
+              <th className="py-2 pr-3 font-medium">Padroncino</th>
               <th className="py-2 pr-3 font-medium">Pagamento</th>
               <th className="py-2 pr-3 text-right font-medium">Totale</th>
               <th className="py-2 font-medium">Stripe</th>
@@ -101,7 +99,7 @@ async function Content({ searchParams }: Pick<PageProps<"/admin/ordini">, "searc
               return (
                 <tr key={o.id} className="border-t border-zinc-100 align-top">
                   <td className="py-2 pr-3 font-medium text-zinc-900">
-                    {o.order_number}
+                    <Link href={ADMIN_ORDER_PATHS.detail(o.id)} className="text-blue-700 hover:underline">{o.order_number}</Link>
                     <div className="text-xs font-normal text-zinc-500">{rome(o.created_at)}</div>
                   </td>
                   <td className="py-2 pr-3">
@@ -110,6 +108,9 @@ async function Content({ searchParams }: Pick<PageProps<"/admin/ordini">, "searc
                   </td>
                   <td className="py-2 pr-3 whitespace-nowrap">{rome(o.pickup_window_start)}</td>
                   <td className="py-2 pr-3">{ORDER_STATUS_LABEL[o.status] ?? o.status}</td>
+                  <td className="py-2 pr-3">
+                    {o.carriers?.company_name ?? (o.status === "paid" ? <Link href={ADMIN_ORDER_PATHS.detail(o.id)} className="text-amber-800 underline">Da assegnare</Link> : <span className="text-zinc-400">—</span>)}
+                  </td>
                   <td className="py-2 pr-3">
                     {PAYMENT_STATE_LABEL[pay]}
                     {pay === "to_pay" ? <div className="text-xs text-zinc-500">entro {rome(o.payment_due_at)}</div> : null}

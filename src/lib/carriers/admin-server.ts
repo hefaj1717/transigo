@@ -1,5 +1,5 @@
 import "server-only";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { AdminDeps } from "@/lib/admin/deps";
 import { isVatTakenError } from "@/lib/auth/errors";
 import { carrierCompanyRow, carrierCompanySchema, toFieldErrors, type FieldErrors } from "@/lib/auth/schemas";
 import { sendEmail } from "@/lib/notifications/email";
@@ -25,12 +25,7 @@ import { CARRIER_PATHS } from "./onboarding";
 // from that session, never from the form. The database functions are service-role only and check the admin
 // again. Kept apart from the actions so tests/rls can run them against the local database.
 
-export type AdminDeps = {
-  admin: { userId: string; email: string };
-  /** Service-role client: the database functions, audit_log and email_outbox. */
-  serviceDb: SupabaseClient;
-  appUrl: string;
-};
+export type { AdminDeps } from "@/lib/admin/deps";
 
 export type AdminResult = { ok: true; message: string } | { ok: false; error: string };
 export type CompanyResult = { ok: true; message: string; changed: string[] } | { ok: false; errors: FieldErrors };

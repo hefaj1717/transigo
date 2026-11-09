@@ -67,7 +67,8 @@ Uwagi techniczne:
 ## W toku: demo dla klienta (od 2026-11-09)
 
 - **Krok 1 — obsługa zleceń przez admina (D122, D123):** migracja `20261110110000_admin_order_dispatch.sql` (`admin_job_candidates`, `admin_assign_job`, `admin_unassign_job` z kodem powodu, `admin_advance_order`, `orders.delivered_without_pod` + trigger) i `tests/rls/admin-dispatch.test.ts` — **lokalnie; na staging dopiero, gdy będą gotowe strona publiczna i panel klienta (za zgodą)**. Wspólne fixtures testów kursów: `tests/rls/job-fixtures.ts`.
-- **Dalej:** ekrany `/admin/ordini` (filtry „Da assegnare”/„In corso”, kolumna Padroncino, szczegóły `/admin/ordini/[id]` z Assegna / Rimuovi padroncino / następny status), ukrycie „stoccaggio lungo termine” w kreatorze (D117), seed demo (`db:local:seed-demo`: admin, klient, jeden przewoźnik, zlecenia w różnych statusach; **zlecenia zakończone mają daty w przeszłości**), `docs/testy-reczne/admin-ordini.md`; potem strona publiczna i panel klienta.
+- **Krok 2 — ekrany `/admin/ordini`** (zrobione 2026-11-09): filtry „Da assegnare”/„In corso”/„Consegnati”, kolumna Padroncino, szczegóły `/admin/ordini/[id]` (Assegna z listy kandydatów, Rimuovi padroncino z kodem powodu, następny status, znacznik „senza firma e foto”). Logika `src/lib/orders/dispatch.ts` (czysta) i `dispatch-server.ts`; akcje `src/app/(admin)/admin/ordini/actions.ts` z testem „każdy eksport jako nie-admin”. Wspólne `adminDeps()` w `src/lib/admin/deps.ts` (sesja → dopiero potem service role) — używają go też akcje `/admin/padroncini`.
+- **Dalej:** ukrycie „stoccaggio lungo termine” w kreatorze (D117), seed demo (`db:local:seed-demo`: admin, klient, jeden przewoźnik, zlecenia w różnych statusach; **zlecenia zakończone mają daty w przeszłości**), `docs/testy-reczne/admin-ordini.md`; potem strona publiczna i panel klienta.
 
 ## Odłożone: PWA przewoźnika (priorytet: najpierw demo dla klienta, 2026-11-09)
 

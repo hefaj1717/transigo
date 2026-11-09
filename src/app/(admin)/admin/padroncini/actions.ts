@@ -2,7 +2,7 @@
 
 import { refresh } from "next/cache";
 import type { ActionResult } from "@/lib/admin/action-result";
-import { requireArea } from "@/lib/auth/session";
+import { adminDeps as sessionAdminDeps } from "@/lib/admin/deps";
 import { ADMIN_CARRIER_MSG, ADMIN_CARRIER_PATHS, formValues } from "@/lib/carriers/admin";
 import {
   approveVehicle,
@@ -10,12 +10,9 @@ import {
   reviewDocument,
   setSuspension,
   updateCarrierCompany,
-  type AdminDeps,
   type AdminResult,
 } from "@/lib/carriers/admin-server";
 import type { CarrierFormState } from "@/lib/carriers/form-state";
-import { getAppUrl } from "@/lib/supabase/env";
-import { createServiceClient } from "@/lib/supabase/service";
 
 // Admin actions on carriers (D101, D105, D113–D115). EVERY action starts with adminDeps(): the DAL checks the
 // session (anonymous, other roles and blocked accounts are redirected before anything else runs) and the admin
@@ -23,10 +20,8 @@ import { createServiceClient } from "@/lib/supabase/service";
 // service-role only and check the admin once more. src/app/(admin)/admin/padroncini/actions.test.ts calls every
 // export of this file as a non-admin.
 
-async function adminDeps(path: string = ADMIN_CARRIER_PATHS.list): Promise<AdminDeps> {
-  const ctx = await requireArea("admin", path);
-  return { admin: { userId: ctx.userId, email: ctx.email }, serviceDb: createServiceClient(), appUrl: getAppUrl() };
-}
+const adminDeps = () => sessionAdminDeps(ADMIN_CARRIER_PATHS.list);
+
 
 async function respond(where: string, fn: () => Promise<AdminResult>): Promise<ActionResult> {
   let result: AdminResult;

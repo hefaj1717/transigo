@@ -210,3 +210,51 @@ describe("delivered_without_pod never goes back to false (D123)", () => {
     expect((await fullOrder(orderId)).delivered_without_pod).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Server code behind the /admin/ordini actions (src/lib/orders/dispatch-server.ts)
+// ---------------------------------------------------------------------------
+
+describe("dispatch-server: messages and the admin from deps", () => {
+  let srv: typeof import("@/lib/orders/dispatch-server");
+  let msg: typeof import("@/lib/orders/dispatch").DISPATCH_MSG;
+  const deps = (adminId = admin.id, email = admin.email) => ({ admin: { userId: adminId, email }, serviceDb: service, appUrl: "https://transigo.example" });
+
+  beforeAll(async () => {
+    srv = await import("@/lib/orders/dispatch-server");
+    msg = (await import("@/lib/orders/dispatch")).DISPATCH_MSG;
+  });
+
+  it("candidates → assign → next statuses → delivered without POD message", async () => {
+    const orderId = await paidOrder();
+    const c = await activeCarrier();
+    const list = await srv.loadCandidates(deps(), orderId);
+    expect(list.map((x) => x.vehicle_id)).toContain(c.vehicleId);
+    expect(await srv.assignJob(deps(), { orderId, candidate: `${c.user.id}:${c.vehicleId}` })).toEqual({ ok: true, message: msg.assigned });
+    expect(await srv.advanceOrder(deps(), { orderId, to: "picked_up" })).toEqual({ ok: true, message: "Stato aggiornato: Ritirato." });
+    expect(await srv.advanceOrder(deps(), { orderId, to: "picked_up" })).toEqual({ ok: false, error: msg.notNextStatus });
+    await srv.advanceOrder(deps(), { orderId, to: "in_transit" });
+    const done = await srv.advanceOrder(deps(), { orderId, to: "delivered" });
+    expect(done).toEqual({ ok: true, message: `Stato aggiornato: Consegnato. ${msg.deliveredWithoutPod}` });
+  });
+
+  it("clear messages for refused assignments and unassign", async () => {
+    const orderId = await paidOrder({ vehicle: "van_medium" });
+    const [ok, other] = await Promise.all([activeCarrier(), activeCarrier()]);
+    const small = await addVehicle(ok.user, "car", { payload_kg: 400 });
+    await run(service.rpc("approve_carrier_vehicle", { p_vehicle_id: small, p_admin_id: admin.id }));
+    expect(await srv.assignJob(deps(), { orderId, candidate: "" })).toEqual({ ok: false, error: msg.chooseCandidate });
+    expect(await srv.assignJob(deps(), { orderId, candidate: `${ok.user.id}:${small}` })).toEqual({ ok: false, error: msg.vehicleNotSuitable });
+    await srv.assignJob(deps(), { orderId, candidate: `${ok.user.id}:${ok.vehicleId}` });
+    expect(await srv.assignJob(deps(), { orderId, candidate: `${other.user.id}:${other.vehicleId}` })).toEqual({ ok: false, error: msg.alreadyTaken });
+    expect(await srv.unassignJob(deps(), { orderId, reason: "nope" })).toEqual({ ok: false, error: msg.chooseReason });
+    expect(await srv.unassignJob(deps(), { orderId, reason: "problema_veicolo" })).toEqual({ ok: true, message: msg.unassigned });
+  });
+
+  it("a blocked admin's id is refused by the database even if it reached the server code", async () => {
+    const orderId = await paidOrder();
+    const c = await activeCarrier();
+    expect(await srv.assignJob(deps(blockedAdmin.id, blockedAdmin.email), { orderId, candidate: `${c.user.id}:${c.vehicleId}` })).toEqual({ ok: false, error: msg.forbidden });
+    expect((await orderRow(orderId)).status).toBe("paid");
+  });
+});
