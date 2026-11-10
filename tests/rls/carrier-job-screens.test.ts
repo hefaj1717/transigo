@@ -39,7 +39,7 @@ const brokenServiceDb = new Proxy({} as SupabaseClient, {
 });
 
 const assignedMails = (orderId: string) =>
-  check(service.from("email_outbox").select("to_address, text_body").eq("template_code", "order_assigned").eq("order_id", orderId));
+  check(service.from("email_outbox").select("to_address, text_body").eq("template_code", "order_assigned").eq("order_id", orderId).order("created_at"));
 const releaseMails = (orderNumber: string) =>
   check(service.from("email_outbox").select("to_address, subject, text_body, html, order_id, status").eq("template_code", "carrier_released_job").ilike("subject", `%${orderNumber}%`).order("created_at"));
 const orderNumber = async (id: string) => (await check(service.from("orders").select("order_number").eq("id", id).single())).order_number as string;
@@ -215,7 +215,7 @@ describe("Rinuncia → e-mail to the Transigo team (D121)", () => {
 
     let mails = await releaseMails(number);
     expect(mails).toHaveLength(1);
-    expect(mails[0]).toMatchObject({ to_address: ADMIN_EMAIL, status: "captured_dev", order_id: null, subject: `Rinuncia alla corsa ${number} – Trasporti Corse Srl` });
+    expect(mails[0]).toMatchObject({ to_address: ADMIN_EMAIL, status: "captured_dev", order_id: orderId, subject: `Rinuncia alla corsa ${number} – Trasporti Corse Srl` });
     expect(mails[0].text_body).toContain(`${APP_URL}/admin/ordini/${orderId}`);
     expect(mails[0].text_body).toContain("Ritiro previsto:");
     for (const secret of PERSONAL) expect(`${mails[0].text_body}${mails[0].html}`).not.toContain(secret);
@@ -225,6 +225,7 @@ describe("Rinuncia → e-mail to the Transigo team (D121)", () => {
     await releaseJob(c.user.client, c.user.id, orderId, notifyDeps().deps);
     mails = await releaseMails(number);
     expect(mails).toHaveLength(2);
+    expect(mails.map((m) => m.order_id)).toEqual([orderId, orderId]); // linked to the order (D129)
   });
 
   it("without ADMIN_NOTIFICATION_EMAIL the release goes through; the error is logged, no service role", async () => {
@@ -298,5 +299,53 @@ describe("suspended carrier (D116)", () => {
     expect(await releaseJob(c.user.client, c.user.id, released, notifyDeps().deps)).toEqual({ ok: true, message: JOB_MSG.released });
     expect(await releaseMails(await orderNumber(released))).toHaveLength(1);
     expect((await loadMyJobs(c.user.client, c.user.id)).map((j) => j.orderId)).toEqual([kept]);
+  });
+});
+
+describe("customer e-mail order_assigned per assignment (D129)", () => {
+  it("«Rinuncia» of A, accepted by B: a second e-mail with B's data; a repeat for the same assignment sends nothing", async () => {
+    const orderId = await paidOrder();
+    const [a, b] = await Promise.all([activeCarrier(), activeCarrier()]);
+    await run(service.from("profiles").update({ first_name: "Primo" }).eq("id", a.user.id));
+    await run(service.from("profiles").update({ first_name: "Secondo" }).eq("id", b.user.id));
+
+    await acceptJob(a.user.client, a.user.id, orderId, a.vehicleId, notifyDeps().deps);
+    await acceptJob(a.user.client, a.user.id, orderId, a.vehicleId, notifyDeps().deps); // double click: same assignment
+    expect(await assignedMails(orderId)).toHaveLength(1);
+
+    await releaseJob(a.user.client, a.user.id, orderId, notifyDeps().deps);
+    await acceptJob(b.user.client, b.user.id, orderId, b.vehicleId, notifyDeps().deps);
+    const mails = await assignedMails(orderId);
+    expect(mails).toHaveLength(2);
+    expect(mails[0].text_body).toContain("Primo (");
+    expect(mails[1].text_body).toContain("Secondo (");
+
+    // the e-mail function called again for the same (current) assignment: still two
+    const { sendOrderAssignedEmail } = await import("@/lib/orders/customer-emails");
+    await sendOrderAssignedEmail(service, orderId, APP_URL);
+    expect(await assignedMails(orderId)).toHaveLength(2);
+
+    const keys = await check(service.from("email_outbox").select("event_key").eq("template_code", "order_assigned").eq("order_id", orderId).order("created_at"));
+    expect(new Set(keys.map((k) => k.event_key)).size).toBe(2);
+    expect(keys.every((k) => /^assigned:\d{4}-/.test(k.event_key))).toBe(true);
+  });
+});
+
+describe("outbox key (D129): one-per-order e-mails and e-mails without an order are unchanged", () => {
+  it("order_paid twice for the same order (webhook retry) → one row; no-order e-mails are never deduplicated", async () => {
+    const { sendEmail } = await import("@/lib/notifications/email");
+    const orderId = await paidOrder();
+    const mail = { subject: "Pagamento ricevuto", html: "<p>ok</p>", text: "ok", templateCode: "order_paid", to: "d129@transigo.test", orderId };
+    expect(await sendEmail(service, mail)).toBe(true);
+    expect(await sendEmail(service, mail)).toBe(false);
+    const paid = await check(service.from("email_outbox").select("event_key").eq("template_code", "order_paid").eq("order_id", orderId));
+    expect(paid).toEqual([{ event_key: "" }]);
+
+    const noOrder = { subject: "Decisione", html: "<p>x</p>", text: "x", templateCode: "carrier_approved", to: "d129@transigo.test" };
+    expect(await sendEmail(service, noOrder)).toBe(true);
+    expect(await sendEmail(service, noOrder)).toBe(true);
+    const rows = await check(service.from("email_outbox").select("id").eq("template_code", "carrier_approved").eq("to_address", "d129@transigo.test"));
+    expect(rows).toHaveLength(2);
+    await service.from("email_outbox").delete().eq("to_address", "d129@transigo.test");
   });
 });

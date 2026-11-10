@@ -46,5 +46,5 @@ Sprawdź na komputerze **i na telefonie** (szerokość ~390 px).
 | C2 | Outbox: `docker exec -i supabase_db_TransiGo psql -U postgres -d postgres -c "select template_code, to_address, subject from email_outbox where template_code in ('order_assigned','order_delivered') order by created_at desc limit 5;"` | `order_assigned` na adres klienta: trasa, okno odbioru, „Marco (Ferri Trasporti Srl)”, pojazd z tablicą, link do zlecenia; **bez kwot**. |
 | C3 | Jako klient: odśwież zlecenie | Etykieta „Trasportatore assegnato”, ramka przewoźnika z danymi. |
 | C4 | Admin: „Rimuovi padroncino” | U klienta ramka wraca do „Stiamo assegnando…” (dane przewoźnika znikają). |
-| C5 | Admin: przypisz ponownie | Drugi `order_assigned` **nie** jest wysyłany (jeden mail na zlecenie — świadomie, demo). |
+| C5 | Admin: przypisz ponownie | Drugi `order_assigned` **jest** w outboxie, z imieniem i firmą nowego przewoźnika (D129). Ponowne zapisanie tego samego przypisania nie dodaje maila. |
 | C6 | Admin: Ritirato → In viaggio → Consegnato | Outbox: `order_delivered` „Ordine consegnato – TG-…”. U klienta zlecenie w „Conclusi”. |

@@ -427,7 +427,13 @@ async function notifyAdminOfRelease(
     releasedAt: new Date(released.released_at),
     adminOrderUrl: `${notify.appUrl}/admin/ordini/${orderId}`,
   });
-  // order_id stays null on purpose: the outbox keeps one e-mail per (template, order), and D121 wants an e-mail
-  // for EVERY release (the same order can be accepted and released again). The link carries the order.
-  await sendEmail(notify.serviceDb(), { ...rendered, templateCode: CARRIER_RELEASED_JOB_TEMPLATE, to: notify.adminEmail });
+  // One e-mail per release (D121, D129): keyed by the order and the release time, so the same order accepted and
+  // released again gives a new e-mail.
+  await sendEmail(notify.serviceDb(), {
+    ...rendered,
+    templateCode: CARRIER_RELEASED_JOB_TEMPLATE,
+    to: notify.adminEmail,
+    orderId,
+    eventKey: `released:${new Date(released.released_at).toISOString()}`,
+  });
 }

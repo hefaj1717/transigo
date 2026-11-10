@@ -75,5 +75,5 @@ Zatwierdzony przez właściciela 2026-11-09. Po każdym kroku: testy, commit, pu
 
 ## TODO do przeniesienia do CLAUDE.md (krok 6)
 
-- ~~Brak drugiego `order_assigned`…~~ — przeniesione do CLAUDE.md jako jedno TODO „migracja klucza outboxu” (razem z `carrier_released_job` bez `order_id`).
+- ~~Brak drugiego `order_assigned`…~~ — rozwiązane 2026-11-10 migracją klucza outboxu (D129).
 - ~~Możliwa pętla przyjmij/zrezygnuj…~~ — przeniesione do CLAUDE.md.

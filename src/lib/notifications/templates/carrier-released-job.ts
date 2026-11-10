@@ -2,7 +2,7 @@ import { escapeHtml, type RenderedEmail } from "./common";
 
 // "Rinuncia alla corsa" e-mail to the Transigo team (D121), sent after a successful release_job().
 // No customer data: order number, the carrier's company, pickup window, when the job was accepted and released,
-// and the link to /admin/ordini/[id]. Every release sends one (queued without order_id, see jobs-server.ts).
+// and the link to /admin/ordini/[id]. Every release sends one (keyed by order and release time, D129 — see jobs-server.ts).
 
 export const CARRIER_RELEASED_JOB_TEMPLATE = "carrier_released_job";
 

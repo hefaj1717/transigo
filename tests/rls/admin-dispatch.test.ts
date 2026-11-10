@@ -238,10 +238,11 @@ describe("dispatch-server: messages and the admin from deps", () => {
     expect(done).toEqual({ ok: true, message: `Stato aggiornato: Consegnato. ${msg.deliveredWithoutPod}` });
   });
 
-  it("customer e-mails: order_assigned after Assegna, order_delivered after Consegnato, once each", async () => {
+  it("customer e-mails: order_assigned after each Assegna (D129), order_delivered once", async () => {
     const orderId = await paidOrder();
-    const c = await activeCarrier();
+    const [c, d] = await Promise.all([activeCarrier(), activeCarrier()]);
     await run(service.from("profiles").update({ first_name: "Mario" }).eq("id", c.user.id));
+    await run(service.from("profiles").update({ first_name: "Paolo" }).eq("id", d.user.id));
     const mails = async () =>
       check(service.from("email_outbox").select("template_code, to_address, subject, text_body").eq("order_id", orderId).in("template_code", ["order_assigned", "order_delivered"]).order("created_at"));
 
@@ -253,12 +254,19 @@ describe("dispatch-server: messages and the admin from deps", () => {
     expect(m[0].text_body).toContain(`https://transigo.example/cliente/ordini/${orderId}`);
     expect(m[0].text_body).not.toMatch(/€|carrier_amount/); // no amounts at all
 
-    // reassignment: no second e-mail (outbox unique key)
+    // "Rimuovi padroncino" → Assegna another carrier: a second order_assigned with the NEW carrier (D129)
     await srv.unassignJob(deps(), { orderId, reason: "altro" });
-    await srv.assignJob(deps(), { orderId, candidate: `${c.user.id}:${c.vehicleId}` });
-    for (const to of ["picked_up", "in_transit", "delivered"]) await srv.advanceOrder(deps(), { orderId, to });
+    await srv.assignJob(deps(), { orderId, candidate: `${d.user.id}:${d.vehicleId}` });
     m = await mails();
-    expect(m.map((x) => x.template_code)).toEqual(["order_assigned", "order_delivered"]);
+    expect(m.map((x) => x.template_code)).toEqual(["order_assigned", "order_assigned"]);
+    expect(m[1].text_body).toContain("Paolo (Trasporti Corse Srl)");
+    expect(m[1].text_body).not.toContain("Mario");
+
+    // Consegnato: order_delivered once, even when advanced to delivered again is refused / repeated
+    for (const to of ["picked_up", "in_transit", "delivered"]) await srv.advanceOrder(deps(), { orderId, to });
+    await srv.advanceOrder(deps(), { orderId, to: "delivered" });
+    m = await mails();
+    expect(m.map((x) => x.template_code)).toEqual(["order_assigned", "order_assigned", "order_delivered"]);
   });
 
   it("clear messages for refused assignments and unassign", async () => {

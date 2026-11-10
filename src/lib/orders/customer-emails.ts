@@ -8,16 +8,17 @@ import {
   renderOrderDeliveredEmail,
 } from "@/lib/notifications/templates/order-customer-updates";
 
-// Customer e-mails after dispatch changes (spec 13), through the outbox (D93). One e-mail per order and
-// template (outbox unique key): a carrier assigned again after "Rimuovi padroncino" does not trigger a second
-// e-mail (accepted for the demo). Callers never undo the status change when an e-mail fails.
+// Customer e-mails after dispatch changes (spec 13), through the outbox (D93). order_assigned is keyed by the
+// assignment time (D129): every NEW assignment (after "Rinuncia" or "Rimuovi padroncino") sends the customer the
+// current carrier, a repeated call for the same assignment does not. order_delivered: once per order.
+// Callers never undo the status change when an e-mail fails.
 
 type Leg = { leg_index: number; pickup_city: string; delivery_city: string; pickup_window_start: string; pickup_window_end: string };
 
 async function loadOrder(db: SupabaseClient, orderId: string) {
   const { data: o, error } = await db
     .from("orders")
-    .select("id, order_number, customer_id, carrier_id, carrier_vehicle_id, delivered_at, order_legs(leg_index, pickup_city, delivery_city, pickup_window_start, pickup_window_end)")
+    .select("id, order_number, customer_id, carrier_id, carrier_vehicle_id, assigned_at, delivered_at, order_legs(leg_index, pickup_city, delivery_city, pickup_window_start, pickup_window_end)")
     .eq("id", orderId)
     .single();
   if (error || !o) throw new Error(`order for e-mail: ${error?.message ?? "not found"}`);
@@ -29,7 +30,7 @@ async function loadOrder(db: SupabaseClient, orderId: string) {
 
 export async function sendOrderAssignedEmail(db: SupabaseClient, orderId: string, appUrl: string): Promise<void> {
   const { o, profile, legs } = await loadOrder(db, orderId);
-  if (!o.carrier_id) throw new Error("order has no carrier");
+  if (!o.carrier_id || !o.assigned_at) throw new Error("order has no carrier");
   const [{ data: carrier }, { data: person }, { data: vehicle }] = await Promise.all([
     db.from("carriers").select("company_name").eq("profile_id", o.carrier_id).single(),
     db.from("profiles").select("first_name").eq("id", o.carrier_id).single(),
@@ -51,7 +52,14 @@ export async function sendOrderAssignedEmail(db: SupabaseClient, orderId: string
     pickupWindowStart: new Date(legs[0].pickup_window_start),
     pickupWindowEnd: new Date(legs[0].pickup_window_end),
   });
-  await sendEmail(db, { ...rendered, templateCode: ORDER_ASSIGNED_TEMPLATE, to: profile.email, recipientId: o.customer_id, orderId: o.id });
+  await sendEmail(db, {
+    ...rendered,
+    templateCode: ORDER_ASSIGNED_TEMPLATE,
+    to: profile.email,
+    recipientId: o.customer_id,
+    orderId: o.id,
+    eventKey: `assigned:${new Date(o.assigned_at).toISOString()}`, // this assignment (D129)
+  });
 }
 
 export async function sendOrderDeliveredEmail(db: SupabaseClient, orderId: string, appUrl: string): Promise<void> {
