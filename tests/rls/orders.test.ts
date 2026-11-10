@@ -170,12 +170,16 @@ async function countOrders() {
   return count ?? 0;
 }
 
+// order_status_history: user sessions may read only these columns (D128: no changed_by / lat / lng) — "*" fails.
+const HISTORY_COLUMNS = "id, order_id, from_status, to_status, source, note, created_at";
+
 async function rows(client: SupabaseClient, table: string, orderId?: string) {
-  let q = client.from(table).select("*");
+  const columns: string = table === "order_status_history" ? HISTORY_COLUMNS : "*";
+  let q = client.from(table).select(columns);
   if (orderId) q = q.eq(table === "orders" ? "id" : "order_id", orderId);
   const { data, error } = await q;
   // A table without privileges for the role answers with an error; treat it as "nothing visible".
-  return error ? [] : (data ?? []);
+  return error ? [] : ((data ?? []) as unknown as Record<string, unknown>[]);
 }
 
 const check = async (p: PromiseLike<{ error: unknown }>) => {
@@ -269,7 +273,7 @@ describe("cliente", () => {
     for (const table of ORDER_TABLES) {
       const visible = await rows(customerB.client, table);
       expect(visible.every((r) => (table === "orders" ? r.id : r.order_id) === orderB.id)).toBe(true);
-      expect(visible.some((r) => [orderA.id, orderA2.id].includes(table === "orders" ? r.id : r.order_id))).toBe(false);
+      expect(visible.some((r) => [orderA.id, orderA2.id].includes(String(table === "orders" ? r.id : r.order_id)))).toBe(false);
     }
   });
 
@@ -309,9 +313,11 @@ describe("padroncino", () => {
     for (const table of ORDER_TABLES) expect(await rows(otherCarrier.client, table)).toEqual([]);
   });
 
-  it("assigned: reads the order, legs, history and own carrier amounts", async () => {
+  // History rows only from the carrier's own assignment on (D128) — orderA is assigned here by a direct update
+  // without a history row, so that is covered with real accept/assign flows in carrier-job-history.test.ts.
+  it("assigned: reads the order, legs and own carrier amounts", async () => {
     expect((await rows(carrier.client, "orders")).map((o) => o.id)).toEqual([orderA.id]);
-    for (const table of ["order_legs", "order_status_history"]) {
+    for (const table of ["order_legs"]) {
       const visible = await rows(carrier.client, table);
       expect(visible.length).toBeGreaterThan(0);
       expect(visible.every((r) => r.order_id === orderA.id)).toBe(true);

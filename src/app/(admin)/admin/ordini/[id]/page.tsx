@@ -18,7 +18,7 @@ export const metadata = { title: "Ordine – Transigo" };
 
 // One order for the admin (D122, D123): route, goods, contacts, customer price, carrier amount, payment, history,
 // and dispatch — Assegna (candidates by the D120 rules), Rimuovi padroncino (reason code), next status.
-// Reads with the admin's session (RLS); candidates through the service role after the session check.
+// Reads with the admin's session (RLS; the status history through admin_order_status_history, D128); candidates through the service role after the session check.
 export default function Page({ params }: PageProps<"/admin/ordini/[id]">) {
   return (
     <Suspense fallback={<Loading />}>
@@ -49,8 +49,8 @@ type OrderDetail = {
   order_legs: Leg[];
   order_charges: { total_cents: number; subtotal_cents: number; vat_cents: number; refunded_cents: number } | null;
   order_lines: { sort_order: number; label_it: string; gross_cents: number }[];
-  order_status_history: { id: number; from_status: string | null; to_status: string; source: string; changed_by: string | null; created_at: string }[];
 };
+type HistoryRow = { id: number; from_status: string | null; to_status: string; source: string; changed_by: string | null; created_at: string };
 
 const SELECT = [
   "id, order_number, status, created_at, payment_due_at, paid_at, pickup_window_start, goods_description, items_count, weight_kg",
@@ -62,7 +62,6 @@ const SELECT = [
   "order_legs(leg_index, pickup_address, delivery_address, pickup_window_start, pickup_window_end, distance_m, duration_s, pickup_floor, pickup_has_elevator, delivery_floor, delivery_has_elevator, is_urgent, porters_count, porters_included_hours, pickup_warehouse_id, delivery_warehouse_id, order_leg_carrier_terms(carrier_amount_cents))",
   "order_charges(total_cents, subtotal_cents, vat_cents, refunded_cents)",
   "order_lines(sort_order, label_it, gross_cents)",
-  "order_status_history(id, from_status, to_status, source, changed_by, created_at)",
 ].join(", ");
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -92,7 +91,10 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
 
   const legs = [...o.order_legs].sort((a, b) => a.leg_index - b.leg_index);
   const lines = [...o.order_lines].sort((a, b) => a.sort_order - b.sort_order);
-  const history = [...o.order_status_history].sort((a, b) => a.id - b.id);
+  // The history with changed_by only through admin_order_status_history (D128: no session reads that column).
+  const { data: historyRows, error: historyError } = await db.rpc("admin_order_status_history", { p_order_id: o.id });
+  if (historyError) throw new Error(`order history unavailable: ${historyError.code}`);
+  const history = [...((historyRows ?? []) as HistoryRow[])].sort((a, b) => a.id - b.id);
   // Carrier terms hang off the legs (foreign key to order_legs, not to orders).
   const carrierAmount = legs.reduce((sum, l) => sum + (l.order_leg_carrier_terms?.carrier_amount_cents ?? 0), 0);
   const pay = paymentState({ ...o, refunded_cents: o.order_charges?.refunded_cents, total_cents: o.order_charges?.total_cents }, new Date());

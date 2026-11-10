@@ -133,7 +133,9 @@ describe("what the list shows (D119): no personal data before accepting", () => 
     const orderId = await paidOrder();
     const c = await activeCarrier();
     for (const table of ["orders", "order_legs", "order_leg_carrier_terms", "order_status_history"]) {
-      const { data } = await c.user.client.from(table).select("*").eq(table === "orders" ? "id" : "order_id", orderId);
+      const cols = table === "order_status_history" ? "id, order_id, to_status, created_at" : "*"; // D128 column grants
+      const { data, error } = await c.user.client.from(table).select(cols).eq(table === "orders" ? "id" : "order_id", orderId);
+      expect(error).toBeNull();
       expect(data ?? []).toEqual([]);
     }
   });
