@@ -63,6 +63,31 @@ export const API_URL = status.API_URL;
 const opts = { auth: { persistSession: false, autoRefreshToken: false } };
 export const service = createClient(API_URL, status.SERVICE_ROLE_KEY, opts);
 
+/**
+ * Right after `npm run db:local:reset` the REST API is still rebuilding its schema cache (PGRST002 "Could not query
+ * the database for the schema cache", or connection errors): wait for it like tests/e2e/global-setup.ts does,
+ * instead of failing halfway through a seed. Up to 60 s, a request every second.
+ */
+async function waitForRest() {
+  let last = "";
+  for (let i = 0; i < 60; i++) {
+    try {
+      const { error } = await service.from("settings").select("id").limit(1);
+      if (!error) {
+        if (i) console.log("API locale pronta.");
+        return;
+      }
+      last = `${error.code ?? ""} ${error.message ?? ""}`;
+    } catch (e) {
+      last = e instanceof Error ? e.message : String(e);
+    }
+    if (i === 0) console.log("Attendo l'API locale (dopo il reset ricostruisce la cache dello schema)…");
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  refuse(`local REST API not ready after 60 s (${last.trim()}).`);
+}
+await waitForRest();
+
 export const ok = async (p) => {
   const r = await p;
   if (r.error) throw new Error(JSON.stringify(r.error));
