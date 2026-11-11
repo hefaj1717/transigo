@@ -1,24 +1,31 @@
-// Calculator → booking link (D162). The Facchini and Deposito wizards come with plan steps 6–7; until then the
-// calculators lead to /contatti with the chosen values in the query string, and the contact page pre-fills
-// the message with them ("prenotazione online in arrivo"). When the wizards exist, only REQUEST_PATH changes
-// (→ /prenota/facchini, /prenota/deposito) and the wizards read the same parameters.
+// Calculator → booking link (D162). Facchinaggio: the calculator leads to the wizard /prenota/facchini (step 6),
+// which reads the same parameters (parsePortersPrefill). Deposito: still /contatti until its wizard (step 7) —
+// the contact page pre-fills the message ("prenotazione online in arrivo"); then only REQUEST_PATH changes.
+// portersContactHref() keeps the /contatti request for Facchinaggio outside the service area.
 //
 // The query string is user-controlled: parsing accepts only known keys with integer values in range and a box
 // code that exists in the active price list. Nothing else reaches the message.
 
 import { PALLETS_MAX, STORAGE_MAX_DAYS, type PortersEstimateInput, type PublicRates, type StorageEstimateInput } from "./rates";
 
-const REQUEST_PATH = { facchinaggio: "/contatti", deposito: "/contatti" } as const;
+const REQUEST_PATH = { facchinaggio: "/prenota/facchini", deposito: "/contatti" } as const;
 
-export function portersRequestHref(input: PortersEstimateInput): string {
-  const q = new URLSearchParams({
+const portersQuery = (input: PortersEstimateInput) =>
+  new URLSearchParams({
     servizio: "facchinaggio",
     persone: String(input.persons),
     ore: String(input.hours),
     piano: String(input.floor),
     ascensore: input.hasElevator ? "1" : "0",
   });
-  return `${REQUEST_PATH.facchinaggio}?${q}`;
+
+export function portersRequestHref(input: PortersEstimateInput): string {
+  return `${REQUEST_PATH.facchinaggio}?${portersQuery(input)}`;
+}
+
+/** Contact request for Facchinaggio (e.g. outside the service area): /contatti with the message pre-filled. */
+export function portersContactHref(input: PortersEstimateInput): string {
+  return `/contatti?${portersQuery(input)}`;
 }
 
 export function storageRequestHref(input: StorageEstimateInput): string {

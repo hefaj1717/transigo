@@ -7,6 +7,7 @@ import { placeChoice } from "../state";
 import { isIsoDate, TIME_WINDOWS } from "../windows";
 
 export const PORTERS_STORAGE_KEY = "transigo.booking.facchini.v1";
+export const PORTERS_WIZARD_PATH = "/prenota/facchini"; // D158
 
 /** Lower bounds of the form; the price list may ask for more (porters_min_persons / porters_min_hours, D157). */
 export const PORTERS_FORM_MIN_PERSONS = 2;
@@ -50,4 +51,26 @@ export function parseStoredPortersState(raw: string | null): PortersState | null
 /** Canonical JSON of what changes the price (D76): a stored quote is usable only for exactly this key. */
 export function portersPriceKey(s: PortersState): string {
   return JSON.stringify(["porters", s.place ? [s.place.placeId, s.place.floor, s.place.hasElevator] : null, s.date, s.window, s.persons, s.hours]);
+}
+
+/**
+ * Values from the calculator link (D162: ?persone=&ore=&piano=&ascensore=). The query string is user-controlled:
+ * only integers in range are taken, anything else is ignored. Floor and elevator wait for the address choice.
+ */
+export type PortersPrefill = { persons?: number; hours?: number; floor?: number; hasElevator?: boolean };
+
+export function parsePortersPrefill(sp: Record<string, string | string[] | undefined>, minPersons: number): PortersPrefill {
+  const int = (key: string, min: number, max: number) => {
+    const raw = sp[key];
+    if (typeof raw !== "string" || !/^\d{1,2}$/.test(raw)) return undefined;
+    const n = Number(raw);
+    return n >= min && n <= max ? n : undefined;
+  };
+  const lift = sp.ascensore;
+  return {
+    persons: int("persone", Math.max(minPersons, PORTERS_FORM_MIN_PERSONS), PORTERS_MAX_PERSONS),
+    hours: int("ore", 1, PORTERS_MAX_HOURS),
+    floor: int("piano", 0, 20),
+    hasElevator: lift === "1" ? true : lift === "0" ? false : undefined,
+  };
 }

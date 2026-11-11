@@ -2,8 +2,8 @@ import { Suspense } from "react";
 import { Loading } from "@/components/panel-shell";
 import { getAccountContext } from "@/lib/auth/session";
 import { loadBookingOptions } from "@/lib/booking/server";
+import { toWizardSession } from "@/lib/booking/session";
 import { createServiceClient } from "@/lib/supabase/service";
-import type { WizardSession } from "./types";
 import { Wizard } from "./wizard";
 
 export const metadata = { title: "Prenota un trasporto – Transigo" };
@@ -25,13 +25,7 @@ async function Content({ searchParams }: Pick<PageProps<"/prenota">, "searchPara
   const sp = await searchParams;
   const [ctx, options] = await Promise.all([getAccountContext(), loadBookingOptions(createServiceClient())]);
 
-  let session: WizardSession = { kind: "anonymous" };
-  if (ctx.state === "signed_in") {
-    if (ctx.isBlocked) session = { kind: "blocked" };
-    else if (ctx.role !== "cliente") session = { kind: "other_role", role: ctx.role };
-    else if (ctx.customerProfile !== "complete" || !ctx.customerType) session = { kind: "incomplete" };
-    else session = { kind: "customer", customerType: ctx.customerType, firstName: ctx.firstName };
-  }
+  const session = toWizardSession(ctx);
 
   if (!options.available) {
     return <p className="mt-6 rounded-md bg-amber-50 p-4 text-sm text-amber-900">Le prenotazioni online non sono disponibili in questo momento. Riprova più tardi.</p>;

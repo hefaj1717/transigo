@@ -3,12 +3,7 @@ import type { BookingError, BookingStep } from "@/lib/booking/messages";
 import type { PublicPorterTerms, PublicQuote } from "@/lib/booking/public-quote";
 import type { VehicleCheck } from "@/lib/booking/server";
 
-export type WizardSession =
-  | { kind: "anonymous" }
-  | { kind: "customer"; customerType: "private" | "business"; firstName: string | null }
-  | { kind: "incomplete" } // D80
-  | { kind: "other_role"; role: "padroncino" | "admin" }
-  | { kind: "blocked" };
+export type { WizardSession } from "@/lib/booking/session";
 
 export type VehiclePriceView = { vehicleTypeId: string; headlineCents: number } | { vehicleTypeId: string; error: BookingError };
 

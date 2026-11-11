@@ -45,3 +45,13 @@ describe("porters messages", () => {
     expect(JSON.stringify(pub)).not.toContain("8000");
   });
 });
+
+describe("calculator prefill (D162)", () => {
+  it("takes only integers in range; ignores anything else", async () => {
+    const { parsePortersPrefill } = await import("./state");
+    expect(parsePortersPrefill({ persone: "3", ore: "4", piano: "2", ascensore: "1" }, 2)).toEqual({ persons: 3, hours: 4, floor: 2, hasElevator: true });
+    expect(parsePortersPrefill({ persone: "5", ore: "0", piano: "21", ascensore: "si" }, 2)).toEqual({ persons: undefined, hours: undefined, floor: undefined, hasElevator: undefined });
+    expect(parsePortersPrefill({ persone: "2" }, 3)).toEqual({ persons: undefined, hours: undefined, floor: undefined, hasElevator: undefined });
+    expect(parsePortersPrefill({ persone: ["3", "4"], ore: "3.5", piano: "-1" }, 2)).toEqual({ persons: undefined, hours: undefined, floor: undefined, hasElevator: undefined });
+  });
+});

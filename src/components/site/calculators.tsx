@@ -88,19 +88,20 @@ function PriceBox({ estimate, customerType, note, excluded }: { estimate: Estima
   );
 }
 
-function RequestButton({ href, enabled }: { href: string; enabled: boolean }) {
+function RequestButton({ href, enabled, online = false }: { href: string; enabled: boolean; online?: boolean }) {
+  const text = online ? "Prenota online" : "Richiedi la prenotazione";
   return (
     <div>
       {enabled ? (
         <Link href={href} className="block w-full rounded-md bg-accent-600 px-4 py-3 text-center text-base font-semibold text-white hover:bg-accent-700">
-          Richiedi la prenotazione
+          {text}
         </Link>
       ) : (
         <span aria-disabled="true" className="block w-full cursor-not-allowed rounded-md bg-accent-600/50 px-4 py-3 text-center text-base font-semibold text-white">
-          Richiedi la prenotazione
+          {text}
         </span>
       )}
-      <p className="mt-2 text-center text-xs text-zinc-500">Prenotazione online in arrivo: per ora ti ricontattiamo noi.</p>
+      {online ? null : <p className="mt-2 text-center text-xs text-zinc-500">Prenotazione online in arrivo: per ora ti ricontattiamo noi.</p>}
     </div>
   );
 }
@@ -142,7 +143,7 @@ export function PortersCalculator({ rates }: { rates: PublicRates }) {
         note={input && input.hours < p.minHours ? `Minimo ${p.minHours} ore per facchino.` : null}
         excluded="Supplementi per urgenza, weekend e festivi esclusi."
       />
-      <RequestButton href={input ? portersRequestHref(input) : "#"} enabled={!!estimate && !!input} />
+      <RequestButton href={input ? portersRequestHref(input) : "#"} enabled={!!estimate && !!input} online />
     </div>
   );
 }

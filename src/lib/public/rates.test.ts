@@ -3,7 +3,7 @@ import { makeConfig, V } from "@/lib/pricing/__fixtures__/config";
 import { calculatePortersPrice } from "@/lib/pricing/porters-service";
 import { calculateStoragePrice } from "@/lib/pricing/storage-service";
 import { portersEstimate, publicAvailability, storageEstimate, toPublicRates, withVat } from "./rates";
-import { parsePortersRequest, parseStorageRequest, portersRequestHref, requestMessage, storageRequestHref } from "./requests";
+import { parsePortersRequest, parseStorageRequest, portersContactHref, portersRequestHref, requestMessage, storageRequestHref } from "./requests";
 
 const config = makeConfig();
 const rates = toPublicRates(config, { vehicleIds: [V.car, V.vanSmall], warehouseActive: true });
@@ -102,12 +102,13 @@ describe("storageEstimate", () => {
   });
 });
 
-describe("calculator → contact request (until the wizards, D162)", () => {
+describe("calculator → wizard (Facchinaggio, step 6) or contact request (Deposito until step 7, D162)", () => {
   const params = (href: string) => new URL(href, "https://x.it").searchParams;
 
-  it("round trip porters", () => {
+  it("porters: the calculator opens the wizard with the values; the contact request keeps them too", () => {
     const input = { persons: 3, hours: 4, floor: 2, hasElevator: false };
-    const href = portersRequestHref(input);
+    expect(portersRequestHref(input)).toBe("/prenota/facchini?servizio=facchinaggio&persone=3&ore=4&piano=2&ascensore=0");
+    const href = portersContactHref(input);
     expect(href.startsWith("/contatti?")).toBe(true);
     expect(parsePortersRequest(params(href), rates)).toEqual(input);
     expect(requestMessage(params(href), rates)).toContain("3 facchini per circa 4 ore, 2° piano senza ascensore");
@@ -133,6 +134,6 @@ describe("calculator → contact request (until the wizards, D162)", () => {
     ]) {
       expect(requestMessage(new URLSearchParams(q), rates)).toBeNull();
     }
-    expect(requestMessage(params(portersRequestHref({ persons: 2, hours: 2, floor: 0, hasElevator: true })), null)).toBeNull();
+    expect(requestMessage(params(portersContactHref({ persons: 2, hours: 2, floor: 0, hasElevator: true })), null)).toBeNull();
   });
 });

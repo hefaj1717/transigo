@@ -8,7 +8,9 @@ import type { BookingOptions } from "@/lib/booking/server";
 import { EMPTY_WIZARD_STATE, parseStoredState, WIZARD_STORAGE_KEY, type PlaceChoice, type WizardState } from "@/lib/booking/state";
 import { addDaysIso, romeToday, TIME_WINDOW_LABEL, TIME_WINDOWS, type TimeWindow } from "@/lib/booking/windows";
 import { loadCheckoutDefaults, submitBooking } from "./actions";
-import { SignOutButton } from "@/components/sign-out-button";
+import { AccountStep } from "@/components/booking/account-step";
+import { BillingFields, EMPTY_BILLING, TermsCheckbox, type Billing } from "@/components/booking/billing-fields";
+import { accountStepError } from "@/lib/booking/session";
 import { AddressField } from "@/components/address-field";
 import { ContactForm } from "@/components/contact-form";
 import { sendOutOfAreaAction } from "./out-of-area-actions";
@@ -20,9 +22,6 @@ const label = "block text-sm font-medium text-zinc-800";
 
 type Contacts = { pickupName: string; pickupPhone: string; deliveryName: string; deliveryPhone: string; notes: string };
 const EMPTY_CONTACTS: Contacts = { pickupName: "", pickupPhone: "", deliveryName: "", deliveryPhone: "", notes: "" };
-const BILLING_FIELDS = ["fiscalCode", "companyName", "vatNumber", "sdiCode", "pec", "street", "city", "postalCode", "province"] as const;
-type Billing = Record<(typeof BILLING_FIELDS)[number], string>;
-const EMPTY_BILLING = Object.fromEntries(BILLING_FIELDS.map((f) => [f, ""])) as Billing;
 
 const isStep = (s: string | null): s is BookingStep => !!s && STEPS.some((x) => x.id === s);
 const intOrNull = (v: string) => (v.trim() === "" ? null : Math.max(0, Math.trunc(Number(v))) || null);
@@ -180,10 +179,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
         if (!selected) error = "Il preventivo non è ancora pronto.";
         break;
       case "account":
-        if (session.kind === "anonymous") error = "Accedi o registrati per continuare.";
-        else if (session.kind === "incomplete") error = "Completa il tuo profilo per continuare.";
-        else if (session.kind === "other_role") error = "Hai effettuato l'accesso con un account che non è un account cliente. Esci e accedi come cliente.";
-        else if (session.kind === "blocked") error = "Il tuo account è sospeso.";
+        error = accountStepError(session);
         break;
       case "contatti":
         if (!contacts.pickupName.trim() || !contacts.pickupPhone.trim() || !contacts.deliveryName.trim() || !contacts.deliveryPhone.trim()) {
@@ -595,36 +591,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
             </div>
           ) : null}
 
-          {step === "account" ? (
-            <div className="space-y-3 text-sm">
-              {session.kind === "customer" ? (
-                <p className="rounded-md bg-green-50 p-3 text-green-900">Hai effettuato l&apos;accesso{session.firstName ? ` come ${session.firstName}` : ""}. Prosegui con i contatti.</p>
-              ) : session.kind === "incomplete" ? (
-                <p>
-                  Completa il tuo profilo per continuare:{" "}
-                  <Link className="text-blue-700 underline" href={`/completa-profilo?next=${encodeURIComponent("/prenota?passo=account")}`}>completa il profilo</Link>.
-                </p>
-              ) : session.kind === "other_role" ? (
-                <>
-                  <p className="rounded-md bg-amber-50 p-3 text-amber-900">
-                    Hai effettuato l&apos;accesso{session.role === "admin" ? " come amministratore" : session.role === "padroncino" ? " come trasportatore" : ""}. Solo i clienti possono prenotare: esci e accedi con un account cliente. Il preventivo resta salvato su questo dispositivo.
-                  </p>
-                  <SignOutButton next="/prenota?passo=account" label="Esci e accedi come cliente" className="rounded-md bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700" />
-                </>
-              ) : session.kind === "blocked" ? (
-                <p className="rounded-md bg-red-50 p-3 text-red-800">Il tuo account è sospeso. Contattaci per assistenza.</p>
-              ) : (
-                <>
-                  <p>Per confermare la prenotazione serve un account cliente. Il preventivo resta salvato su questo dispositivo.</p>
-                  <div className="flex flex-wrap gap-3">
-                    <Link href={`/accedi?next=${encodeURIComponent("/prenota?passo=account")}`} className="rounded-md bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700">Accedi</Link>
-                    <Link href="/registrati?tipo=cliente" className="rounded-md border border-blue-600 px-4 py-2 font-medium text-blue-700 hover:bg-blue-50">Registrati</Link>
-                  </div>
-                  <p className="text-xs text-zinc-500">Dopo la registrazione conferma l&apos;indirizzo e-mail: dall&apos;area cliente potrai riprendere la prenotazione.</p>
-                </>
-              )}
-            </div>
-          ) : null}
+          {step === "account" ? <AccountStep session={session} returnTo="/prenota?passo=account" /> : null}
 
           {step === "contatti" ? (
             <div className="space-y-4">
@@ -671,34 +638,8 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
 
               {selected ? <QuoteBreakdown quote={selected.quote} /> : null}
 
-              <fieldset className="space-y-4">
-                <legend className="text-sm font-medium text-zinc-800">Dati di fatturazione</legend>
-                {session.kind === "customer" && session.customerType === "business" ? (
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <BillingInput name="companyName" label="Ragione sociale" billing={billing} setBilling={setBilling} error={fe("billing.companyName")} required />
-                    <BillingInput name="vatNumber" label="Partita IVA" billing={billing} setBilling={setBilling} error={fe("billing.vatNumber")} required />
-                    <BillingInput name="sdiCode" label="Codice destinatario SDI" billing={billing} setBilling={setBilling} error={fe("billing.sdiCode")} />
-                    <BillingInput name="pec" label="PEC" billing={billing} setBilling={setBilling} error={fe("billing.pec")} />
-                  </div>
-                ) : (
-                  <BillingInput name="fiscalCode" label="Codice fiscale" billing={billing} setBilling={setBilling} error={fe("billing.fiscalCode")} required />
-                )}
-                <div className="grid gap-4 sm:grid-cols-[1fr_8rem_6rem]">
-                  <BillingInput name="street" label="Indirizzo di fatturazione" billing={billing} setBilling={setBilling} error={fe("billing.street")} required />
-                  <BillingInput name="postalCode" label="CAP" billing={billing} setBilling={setBilling} error={fe("billing.postalCode")} required />
-                  <BillingInput name="province" label="Provincia" billing={billing} setBilling={setBilling} error={fe("billing.province")} required />
-                </div>
-                <BillingInput name="city" label="Città" billing={billing} setBilling={setBilling} error={fe("billing.city")} required />
-                <p className="text-xs text-zinc-500">I dati valgono per questo ordine; il tuo profilo non viene modificato.</p>
-              </fieldset>
-
-              <div>
-                <label className="flex items-start gap-2 text-sm">
-                  <input type="checkbox" className="mt-1" checked={acceptTerms} onChange={(e) => setAcceptTerms(e.target.checked)} />
-                  <span>Accetto i <Link href="/termini" target="_blank" className="text-blue-700 underline">Termini e condizioni</Link> del servizio *</span>
-                </label>
-                {fe("acceptTerms") ? <p className="mt-1 text-sm text-red-600">{fe("acceptTerms")}</p> : null}
-              </div>
+              <BillingFields business={session.kind === "customer" && session.customerType === "business"} billing={billing} setBilling={setBilling} errors={fieldErrors} />
+              <TermsCheckbox checked={acceptTerms} onChange={setAcceptTerms} error={fe("acceptTerms")} />
             </div>
           ) : null}
 
@@ -748,33 +689,6 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
         )}
         {quote?.ok && quote.distancesKm.length ? <p className="mt-2 text-xs text-zinc-500">Percorso: {quote.distancesKm.map((k) => `${k} km`).join(" + ")}</p> : null}
       </aside>
-    </div>
-  );
-}
-
-function BillingInput({
-  name,
-  label: text,
-  billing,
-  setBilling,
-  error,
-  required,
-}: {
-  name: keyof Billing;
-  label: string;
-  billing: Billing;
-  setBilling: (b: Billing) => void;
-  error?: string;
-  required?: boolean;
-}) {
-  return (
-    <div>
-      <label htmlFor={`billing-${name}`} className={label}>
-        {text}
-        {required ? <span className="text-red-600"> *</span> : null}
-      </label>
-      <input id={`billing-${name}`} value={billing[name]} onChange={(e) => setBilling({ ...billing, [name]: e.target.value })} aria-invalid={error ? true : undefined} className={`${input} ${error ? "border-red-500" : ""}`} />
-      {error ? <p className="mt-1 text-sm text-red-600">{error}</p> : null}
     </div>
   );
 }
