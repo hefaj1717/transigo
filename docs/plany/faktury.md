@@ -1,7 +1,8 @@
 # Plan: faktury klienta — adapter DEMO (krok 4 „pełnego demo strony”, 2026-11-11)
 
 **Status:** plan zatwierdzony 2026-11-11 (D144–D149), razem z `pdf-lib` i jednorazowym wystawieniem faktur demo dla
-już opłaconych zleceń. **Migracja `invoices` (sekcja 3) — czeka na zgodę właściciela.** Nic jeszcze nie zbudowane.
+już opłaconych zleceń. Migracja `invoices` zatwierdzona 2026-11-11 ze zmianami D150 (patrz niżej) —
+`supabase/migrations/20261111180000_invoices.sql` (lokalnie), testy `tests/rls/invoices.test.ts`.
 
 Cel: klient i admin widzą faktury i noty korygujące jak w docelowym produkcie, ale dokumenty wystawia adapter DEMO
 (PDF ze znakiem „DEMO — documento senza valore fiscale”). Później Fatture in Cloud (D1) = nowy adapter + zmienna
@@ -43,7 +44,7 @@ Cel: klient i admin widzą faktury i noty korygujące jak w docelowym produkcie,
 - Kwoty noty: brutto = kwota zwrotu; IVA = `round_half_up(zwrot × iva_faktury / brutto_faktury)`, netto = reszta
   (liczy funkcja w bazie; ten sam wzór w TS do podglądu, testy na tych samych przykładach).
 
-## 3. Migracja `invoices` — PROJEKT DO ZGODY
+## 3. Migracja `invoices` — projekt (zatwierdzony; zmiany D150 w pliku migracji)
 
 Plik: `supabase/migrations/2026111118xxxx_invoices.sql`. Zapis tylko funkcjami (service role), odczyt sesją.
 

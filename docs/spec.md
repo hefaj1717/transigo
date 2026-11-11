@@ -157,6 +157,7 @@
 | D147 | Moment wystawienia faktury w jednym miejscu | Wyzwalacz w `src/lib/einvoice/trigger.ts` (dziś: po potwierdzonej płatności, D2); zmiana po decyzji commercialista = zmiana tego pliku. Webhook, „Segna come pagato” i cron `/api/cron/einvoice` pytają tę samą funkcję. |
 | D148 | PDF faktur | Prywatny bucket `invoices`; pobieranie przez podpisany URL ważny 60 s, tworzony sesją przy kliknięciu. |
 | D149 | Faktury dla zleceń sprzed kroku 4 | Jednorazowy skrypt `scripts/einvoice-backfill.mjs`: domyślnie `--dry-run` (lista), zapis tylko `--apply`; lokalnie albo staging `bacabuzzevwwdxrswbnc` (na stagingu za zgodą właściciela), odmawia innych projektów i dostawcy innego niż DEMO. |
+| D150 | Migracja `invoices` — zmiany względem planu (właściciel 2026-11-11) | (1) `queue_invoice(p_payment_id, p_provider)` — dostawca podany przy kolejkowaniu; nota bierze dostawcę z faktury. (2) Numer DEMO rezerwowany dla wiersza: `reserve_demo_invoice_number(p_invoice_id)` (seria z rodzaju dokumentu, rok w Europe/Rome; ponowienie dostaje ten sam numer — bez dziur). (3) IVA noty narastająco: `round_half_up(suma zwrotów do tej noty × IVA faktury / brutto faktury) − IVA wcześniejszych not`; suma not ≤ faktura (`exceeds_invoice`). (4) Kolumny techniczne (`provider_document_id`, `attempts`, `last_error_code`, `last_attempt_at`) — admin przez `admin_invoice_errors()`. (5) Zwrot płatności bez faktury → `invoice_not_issued`; cron bierze tylko zwroty płatności z wystawioną fakturą. |
 
 ## 1. Słownik
 
