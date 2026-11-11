@@ -1,3 +1,5 @@
+import { isWeekendOrHoliday } from "./calendar";
+import { applyBp } from "./money";
 import { enabledRules, finalizeLines, porterShareTerms, type DraftLine } from "./finalize";
 import type { CustomerType, PricingConfig, PricingError, Quote, QuotePorters } from "./types";
 
@@ -6,9 +8,11 @@ import type { CustomerType, PricingConfig, PricingError, Quote, QuotePorters } f
 //   porters = persons × max(hours, minHours) × porter_hour
 //   floors  = floor × porters_floor_no_elevator   (0 with an elevator or at the ground floor)
 //
-// Both lines belong to the carrier's porters group (carrier_share_porters, D57). No urgent / weekend
-// surcharges (those are transport surcharges, D49–D52). Overtime after the job as for transport porters
-// (D68): the terms are returned with the quote and stored with the order.
+// Urgent (start < urgentLeadHours away, D49) and weekend / holiday (start date in Europe/Rome, D51)
+// surcharges use the same rules as transport (D159): percentage of the porters line (after the minimum
+// hours, without floors — like D52), or the fixed amount once per job; both add up.
+// All lines belong to the carrier's porters group (carrier_share_porters, D57). Overtime after the job
+// as for transport porters (D68): the terms are returned with the quote and stored with the order.
 
 const HOUR_MS = 3_600_000;
 const MAX_PERSONS = 4; // D54
@@ -61,6 +65,7 @@ export function calculatePortersPrice(input: PortersPriceInput, config: PricingC
   // Fewer hours than the minimum are billed as the minimum; the label says so.
   const hours = Math.max(input.hours, service.minHours);
   const personHours = input.persons * hours;
+  const portersNet = personHours * perHour;
   const lines: DraftLine[] = [
     {
       lineType: "porters",
@@ -68,10 +73,22 @@ export function calculatePortersPrice(input: PortersPriceInput, config: PricingC
       legIndex: 0,
       quantity: personHours,
       unitAmountCents: perHour,
-      netCents: personHours * perHour,
+      netCents: portersNet,
       carrierShareGroup: "porters",
     },
   ];
+
+  const surcharge = (code: "surcharge_urgent" | "surcharge_weekend_holiday", label: string) => {
+    const rule = rules.get(code);
+    if (!rule) return;
+    const amount = rule.kind === "percent" ? applyBp(portersNet, rule.percentBp ?? 0) : (rule.amountCents ?? 0);
+    if (amount > 0) {
+      lines.push({ lineType: code, labelIt: label, legIndex: 0, quantity: 1, unitAmountCents: amount, netCents: amount, carrierShareGroup: "porters" });
+    }
+  };
+  const urgent = input.startAt.getTime() - input.now.getTime() < config.urgentLeadHours * HOUR_MS;
+  if (urgent) surcharge("surcharge_urgent", "Supplemento urgenza");
+  if (isWeekendOrHoliday(input.startAt, new Set(config.holidays))) surcharge("surcharge_weekend_holiday", "Supplemento weekend/festivo");
 
   const floors = input.hasElevator ? 0 : input.floor;
   const perFloor = service.floorNoElevatorCents;
@@ -106,7 +123,7 @@ export function calculatePortersPrice(input: PortersPriceInput, config: PricingC
       carrierAmountByLegCents: [carrierAmountCents],
       storageType: null,
       porters: [],
-      isUrgentByLeg: [false],
+      isUrgentByLeg: [urgent],
       warnings: final.warnings,
     },
     job: {

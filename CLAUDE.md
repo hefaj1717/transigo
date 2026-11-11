@@ -128,10 +128,10 @@ Priorytet właściciela: najpierw cała strona (publiczna + panel klienta + pane
 
 ## W toku: trzy równorzędne usługi (plan zatwierdzony 2026-11-11)
 
-Plan `docs/plany/tre-servizi.md`, decyzje D151–D158. Trasporto, Facchinaggio i Deposito równorzędne (strona główna z zakładkami w hero, 3 podstrony, 3 kreatory). Facchinaggio wykonują przewoźnicy z `offers_porters` (D152). Łańcuch z magazynem = osobne powiązane zlecenia, jedna płatność i jedna faktura — **zastępuje model B (D117)**. Deposito na okres stały, boxy dla privati, raty miesięczne > 2 mies., „Prolunga” przy wolnym miejscu (D154–D156).
+Plan `docs/plany/tre-servizi.md`, decyzje D151–D160. Trasporto, Facchinaggio i Deposito równorzędne (strona główna z zakładkami w hero, 3 podstrony, 3 kreatory). Facchinaggio wykonują przewoźnicy z `offers_porters` (D152). Łańcuch z magazynem = osobne powiązane zlecenia, jedna płatność i jedna faktura — **zastępuje model B (D117)**. Deposito na okres stały, boxy dla privati, raty miesięczne > 2 mies., „Prolunga” przy wolnym miejscu (D154–D156).
 
 - [x] Krok 1: decyzje i plan.
-- [x] Krok 2: silnik cenowy (bez bazy): `calculatePortersPrice()` (`porters-service.ts`), `calculateStoragePrice()` + `storageBoxCost()` (`storage-service.ts`), `installmentPlan()` (`installments.ts`); VAT i udział przewoźnika wspólne w `finalize.ts`. `PricingConfig.portersService` / `storageBoxes` — loader daje `null` / `[]` do migracji 1 (usługi niedostępne). Bez dopłat pilne/weekend przy facchinaggio; VAT raty liczony od jej netto.
+- [x] Krok 2: silnik cenowy (bez bazy): `calculatePortersPrice()` (`porters-service.ts`), `calculateStoragePrice()` + `storageBoxCost()` (`storage-service.ts`), `installmentPlan()` (`installments.ts`); VAT i udział przewoźnika wspólne w `finalize.ts`. `PricingConfig.portersService` / `storageBoxes` — loader daje `null` / `[]` do migracji 1 (usługi niedostępne). Facchinaggio z dopłatami pilne/weekend jak transport (D159); IVA raty od jej netto, klient płaci sumę rat (D160).
 - [ ] Krok 3: migracja 1 — cennik (SQL do akceptacji) + `/admin/listini`.
 - [ ] Kroki 4–11: wg planu (strona publiczna, migracja 2 — zlecenia, kreatory Facchini / Deposito / Trasporto, panele, raty i „Prolunga”, seed i staging).
 

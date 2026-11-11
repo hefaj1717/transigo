@@ -1,6 +1,6 @@
 # Plan: trzy równorzędne usługi — Trasporto, Facchinaggio, Deposito (2026-11-11)
 
-**Status:** plan zatwierdzony przez właściciela 2026-11-11 (D151–D158). Nic jeszcze nie zrobione.
+**Status:** plan zatwierdzony przez właściciela 2026-11-11 (D151–D160). Nic jeszcze nie zrobione.
 Każda migracja: przed zapisem SQL pokazujemy go właścicielowi i czekamy na zgodę (CLAUDE.md).
 
 Cel: Transigo to trzy równorzędne usługi, nie „transport z dodatkami”. Magazyn i tragarze widoczne od razu na
@@ -28,7 +28,8 @@ stronie głównej, każda usługa ma własną podstronę i własny kreator. Teks
 ## 2. Silnik cenowy (czyste funkcje + testy, `src/lib/pricing/`)
 
 - `portersServiceCost({ persons, hours, floorsWithoutElevator }, config)`:
-  `persons × max(hours, porters_min_hours) × porter_hour + floors × porters_floor_no_elevator`.
+  `persons × max(hours, porters_min_hours) × porter_hour + floors × porters_floor_no_elevator`
+  + dopłaty pilne / weekend od pozycji tragarzy (D159).
   Osoby: `porters_min_persons` (domyślnie 2) … 4. Nadgodziny jak D68 (warunki zapisane w wycenie).
 - `storageBoxCost({ box, days }, config)`: pełne miesiące (30 dni) × stawka miesięczna + reszta dni × stawka dzienna,
   reszta **nie droższa niż jeden miesiąc**; minimum 1 dzień.

@@ -59,9 +59,35 @@ describe("porters-only service (D151, D157)", () => {
     expect(ok({ customerType: "business" }).quote).toMatchObject({ display: "net_plus_vat", subtotalCents: 18_000 });
   });
 
-  it("no urgent / weekend surcharges (transport only)", () => {
+  it("weekend / holiday surcharge (D51, D159): 20 % of the porters line, not of the floors; carrier share includes it", () => {
     const saturday = new Date("2026-11-14T08:00:00Z");
-    expect(ok({ startAt: saturday }).quote.subtotalCents).toBe(18_000);
+    const { quote } = ok({ startAt: saturday, floor: 4, hasElevator: false });
+    expect(quote.lines.map((l) => [l.lineType, l.netCents])).toEqual([
+      ["porters", 18_000],
+      ["surcharge_weekend_holiday", 3600],
+      ["porters_floors", 4000],
+    ]);
+    expect(quote.carrierAmountCents).toBe(Math.round((18_000 + 3600 + 4000) * 0.8));
+    expect(ok({ startAt: new Date("2026-12-08T08:00:00Z") }).quote.lines.map((l) => l.lineType)).toContain("surcharge_weekend_holiday"); // Immacolata
+  });
+
+  it("urgent surcharge (D49): start within 24 h → 30 %; urgent + weekend add up (D52)", () => {
+    const in5h = new Date(NOW.getTime() + 5 * 3_600_000);
+    const { quote } = ok({ startAt: in5h });
+    expect(quote.lines.map((l) => [l.lineType, l.netCents])).toEqual([["porters", 18_000], ["surcharge_urgent", 5400]]);
+    expect(quote.isUrgentByLeg).toEqual([true]);
+    const saturdayNow = new Date("2026-11-14T06:00:00Z");
+    const both = ok({ startAt: new Date("2026-11-14T12:00:00Z") }, makeConfig()).quote; // not urgent from NOW
+    expect(both.lines).toHaveLength(2);
+    const r = calculatePortersPrice(input({ now: saturdayNow, startAt: new Date("2026-11-14T12:00:00Z") }), makeConfig());
+    expect(r.ok && r.quote.subtotalCents).toBe(18_000 + 5400 + 3600);
+  });
+
+  it("fixed surcharge = amount once per job; disabled rule = no line", () => {
+    const fixed = withRule(makeConfig(), "surcharge_weekend_holiday", { kind: "fixed", amountCents: 2500, percentBp: null });
+    expect(ok({ startAt: new Date("2026-11-14T08:00:00Z") }, fixed).quote.subtotalCents).toBe(18_000 + 2500);
+    const off = withRule(makeConfig(), "surcharge_weekend_holiday", { isEnabled: false });
+    expect(ok({ startAt: new Date("2026-11-14T08:00:00Z") }, off).quote.subtotalCents).toBe(18_000);
   });
 
   it("address outside the service area, too soon, service disabled", () => {
