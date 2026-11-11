@@ -4,7 +4,14 @@ import { LogoLink } from "@/components/site/logo";
 import { SignOutButton } from "@/components/sign-out-button";
 import { CUSTOMER_STATUS_LABEL, statusTone, type StatusTone } from "@/lib/orders/customer-view";
 
-// Frame of the customer area (spec 7): logo, "I miei ordini", "Nuova prenotazione", "Esci".
+const AREA_LINKS = [
+  { href: "/cliente", label: "I miei ordini" },
+  { href: "/cliente/deposito", label: "Deposito" },
+  { href: "/cliente/reclami", label: "Reclami" },
+  { href: "/cliente/profilo", label: "Profilo" },
+] as const;
+
+// Frame of the customer area (spec 7): logo, area links (ordini, deposito, reclami, profilo), "Nuova prenotazione", "Esci".
 export function CustomerShell({ title, subtitle, children }: { title: string; subtitle?: ReactNode; children: ReactNode }) {
   return (
     <div className="flex min-h-full flex-1 flex-col bg-zinc-50">
@@ -12,11 +19,9 @@ export function CustomerShell({ title, subtitle, children }: { title: string; su
         <div className="mx-auto flex h-16 max-w-4xl items-center justify-between gap-3 px-4">
           <LogoLink />
           <nav aria-label="Area cliente" className="flex items-center gap-3 sm:gap-4">
-            <Link href="/cliente" className="text-sm font-medium text-zinc-700 hover:text-brand-800">
-              <span className="sm:hidden">Ordini</span>
-              <span className="hidden sm:inline">I miei ordini</span>
-            </Link>
-            <Link href="/cliente/profilo" className="text-sm font-medium text-zinc-700 hover:text-brand-800">Profilo</Link>
+            {AREA_LINKS.map((l) => (
+              <Link key={l.href} href={l.href} className="hidden text-sm font-medium text-zinc-700 hover:text-brand-800 md:inline">{l.label}</Link>
+            ))}
             <Link href="/prenota" className="whitespace-nowrap rounded-md bg-brand-800 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-900">
               <span className="sm:hidden">Prenota</span>
               <span className="hidden sm:inline">Nuova prenotazione</span>
@@ -24,6 +29,14 @@ export function CustomerShell({ title, subtitle, children }: { title: string; su
             <SignOutButton className="rounded-md py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 sm:px-3" />
           </nav>
         </div>
+        {/* Phones and tablets: the area links in a second row (scrolls sideways if needed). */}
+        <nav aria-label="Area cliente (mobile)" className="border-t border-zinc-100 md:hidden">
+          <div className="mx-auto flex max-w-4xl gap-5 overflow-x-auto px-4 py-2 text-sm font-medium text-zinc-700">
+            {AREA_LINKS.map((l) => (
+              <Link key={l.href} href={l.href} className="whitespace-nowrap hover:text-brand-800">{l.label}</Link>
+            ))}
+          </div>
+        </nav>
       </header>
       <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-8">
         <h1 className="text-2xl font-bold tracking-tight text-brand-900 sm:text-3xl">{title}</h1>

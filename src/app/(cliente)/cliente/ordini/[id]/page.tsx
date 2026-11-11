@@ -7,6 +7,7 @@ import { requireArea } from "@/lib/auth/session";
 import { CUSTOMER_STATUS_LABEL, progressSteps, routeSummary, type ProgressStep } from "@/lib/orders/customer-view";
 import { loadCustomerExecution, type CustomerExecutionView } from "@/lib/orders/execution-read";
 import { groupPhotos, PHOTO_KIND_LABEL } from "@/lib/orders/execution-view";
+import { canOpenClaim, claimDeadline } from "@/lib/claims/claims";
 import { cancellationPreview, type CancellationPreview } from "@/lib/orders/cancellation";
 import { loadCancellationSettings } from "@/lib/orders/cancellation-server";
 import { paymentState } from "@/lib/orders/status";
@@ -54,6 +55,7 @@ type OrderRow = {
   order_charges: { total_cents: number; subtotal_cents: number; vat_cents: number; refunded_cents: number; cancellation_fee_cents: number | null; customer_type: "private" | "business" } | null;
   order_lines: { sort_order: number; label_it: string; line_type: string; net_cents: number; gross_cents: number }[];
   refunds: { amount_cents: number; status: "pending" | "succeeded" | "failed" }[];
+  claims: { id: string; status: "open" | "closed" }[];
   cancelled_at: string | null;
   order_legs: Leg[];
   order_status_history: { id: number; to_status: string; created_at: string; note: string | null }[];
@@ -70,6 +72,7 @@ const SELECT = [
   "order_charges(total_cents, subtotal_cents, vat_cents, refunded_cents, cancellation_fee_cents, customer_type)",
   "order_lines(sort_order, label_it, line_type, net_cents, gross_cents)",
   "refunds(amount_cents, status)",
+  "claims(id, status)",
   "order_legs(leg_index, pickup_address, delivery_address, pickup_city, delivery_city, pickup_window_start, pickup_window_end, pickup_floor, pickup_has_elevator, delivery_floor, delivery_has_elevator, distance_m, is_urgent, porter_package_code, porters_count, porters_included_hours, pickup_warehouse_id, delivery_warehouse_id)",
   "order_status_history(id, to_status, created_at, note)",
 ].join(", ");
@@ -190,6 +193,22 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
         ) : null}
 
         <Execution exec={exec} multiLeg={o.order_legs.length > 1} />
+
+        {/* Claims (D138) */}
+        {o.claims.some((c) => c.status === "open") ? (
+          <Note tone="warning">Hai un reclamo aperto per questo ordine. <Link href="/cliente/reclami" className="font-medium underline">Vedi il reclamo</Link></Note>
+        ) : canOpenClaim(o, now) && o.delivered_at ? (
+          <Card>
+            <H2>Problemi con la consegna?</H2>
+            <p className="mt-2 text-sm text-zinc-600">
+              Puoi aprire un reclamo fino al {rome(claimDeadline(new Date(o.delivered_at)).toISOString(), { dateStyle: "long" })}.
+            </p>
+            <Link href={`/cliente/ordini/${o.id}/reclamo`} className="mt-3 inline-block rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50">Apri un reclamo</Link>
+            {o.claims.length ? <p className="mt-2 text-xs text-zinc-500"><Link href="/cliente/reclami" className="underline">Reclami precedenti</Link></p> : null}
+          </Card>
+        ) : o.claims.length ? (
+          <p className="text-sm"><Link href="/cliente/reclami" className="font-medium text-brand-700 underline">Reclami di questo ordine</Link></p>
+        ) : null}
 
         {/* Route */}
         <Card>
