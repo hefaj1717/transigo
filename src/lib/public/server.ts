@@ -1,5 +1,6 @@
 import "server-only";
-import { cacheLife } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
+import { COMPANY_INFO_CACHE_TAG } from "@/lib/admin/settings";
 import { loadBookingOptions } from "@/lib/booking/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { toCompanyInfo, type CompanyInfo } from "./company";
@@ -11,6 +12,7 @@ import { toCompanyInfo, type CompanyInfo } from "./company";
 export async function getCompanyInfo(): Promise<CompanyInfo> {
   "use cache";
   cacheLife("hours");
+  cacheTag(COMPANY_INFO_CACHE_TAG); // refreshed by "Impostazioni" after a save
   try {
     const { data, error } = await createServiceClient()
       .from("settings")

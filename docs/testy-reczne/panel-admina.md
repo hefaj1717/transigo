@@ -38,3 +38,13 @@ Lokalnie płatności są sztuczne (`pi_demo_…`), więc każdy zwrot zostaje �
    continuano…”, czerwony pasek, historia „bloccato (motivo) · admin”. Zakładka „Bloccati” pokazuje klienta.
 4. W drugiej przeglądarce klient (`cliente@example.com`) przy następnym kliknięciu trafia na „Account sospeso”.
 5. „Sblocca cliente” → klient znów się loguje i widzi swoje zlecenia.
+
+## D. Impostazioni
+
+1. Menu „Impostazioni”: dane firmy (puste po seedzie) i reguły (24 h, 50 %, 24 h, 4 h).
+2. Dane firmy z błędną P.IVA (np. 1234) → „La P.IVA ha 11 cifre.”, **wpisane pola zostają**. Poprawna → „Dati aziendali
+   salvati.”; stopka strony publicznej pokazuje ragione sociale, sede legale (prowincja wielkimi literami) i P.IVA
+   (na produkcji od razu dzięki `revalidateTag`; inaczej najpóźniej po 1 h).
+3. Reguły: penale „40” → zapis; podgląd anulowania u klienta (`/cliente/ordini/[id]` → „Annulla ordine”) liczy 40 %.
+   Penale „101” lub ore „1,5” → komunikat, nic nie zapisane. Bez zmian → „Nessuna modifica.”
+4. `audit_log`: `settings.company` (zmienione pola), `settings.rules` (`before` / `after`).

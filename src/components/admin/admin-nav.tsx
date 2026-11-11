@@ -15,6 +15,7 @@ const LINKS = [
   { href: "/admin/area-di-servizio", label: "Area di servizio" },
   { href: "/admin/festivita", label: "Festività" },
   { href: "/admin/magazzino", label: "Magazzino" },
+  { href: "/admin/impostazioni", label: "Impostazioni" },
 ];
 
 export function AdminNav() {
