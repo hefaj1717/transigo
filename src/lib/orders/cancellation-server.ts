@@ -12,6 +12,7 @@ import {
 import { getStripe } from "@/lib/stripe/server";
 import { refundStatusFromStripe, type RefundStatus } from "./cancellation";
 import { recordRefundResult } from "./refund-record";
+import { ORDER_SUMMARY_SELECT, toOrderSummary, type OrderSummaryRow } from "./order-summary";
 
 // Customer cancellation of a paid order (D33, D137). Order of operations:
 //   1. customer_cancel_order() in the database — status, fee and the pending refund row, atomically (the amount is
@@ -117,21 +118,18 @@ export function cancellationDeps(db: SupabaseClient, opts: { appUrl: string; adm
   };
 }
 
-type Leg = { leg_index: number; pickup_city: string; delivery_city: string; pickup_window_start: string; pickup_window_end: string };
-
 async function loadOrder(db: SupabaseClient, orderId: string) {
   const { data: o, error } = await db
     .from("orders")
-    .select("id, order_number, customer_id, carrier_id, order_legs(leg_index, pickup_city, delivery_city, pickup_window_start, pickup_window_end), order_charges(cancellation_fee_cents)")
+    .select(`id, order_number, customer_id, carrier_id, order_charges(cancellation_fee_cents), ${ORDER_SUMMARY_SELECT}`)
     .eq("id", orderId)
     .single();
   if (error || !o) throw new Error(`order for e-mail: ${error?.message ?? "not found"}`);
-  const legs = [...(o.order_legs as Leg[])].sort((a, b) => a.leg_index - b.leg_index);
-  return { o, legs, first: legs[0], last: legs[legs.length - 1] };
+  return { o, summary: toOrderSummary(o as OrderSummaryRow) };
 }
 
 export async function sendOrderCancelledEmail(db: SupabaseClient, orderId: string, appUrl: string): Promise<void> {
-  const { o, first, last } = await loadOrder(db, orderId);
+  const { o, summary } = await loadOrder(db, orderId);
   const [{ data: profile }, { data: refunds }] = await Promise.all([
     db.from("profiles").select("email, first_name").eq("id", o.customer_id).single(),
     db.from("refunds").select("amount_cents, status").eq("order_id", orderId).eq("kind", "customer_cancellation"),
@@ -142,8 +140,7 @@ export async function sendOrderCancelledEmail(db: SupabaseClient, orderId: strin
   const rendered = renderOrderCancelledEmail({
     firstName: profile.first_name,
     orderNumber: o.order_number,
-    pickupCity: first.pickup_city,
-    deliveryCity: last.delivery_city,
+    summary,
     feeCents: charges?.cancellation_fee_cents ?? 0,
     refundCents,
     orderUrl: `${appUrl}/cliente/ordini/${o.id}`,
@@ -153,8 +150,7 @@ export async function sendOrderCancelledEmail(db: SupabaseClient, orderId: strin
 
 /** Request on an assigned job: the team decides (no customer data in the e-mail), the carrier stops. */
 export async function sendCancellationRequestEmails(db: SupabaseClient, orderId: string, appUrl: string, adminEmail: string | null): Promise<void> {
-  const { o, first, last } = await loadOrder(db, orderId);
-  const window = { pickupWindowStart: new Date(first.pickup_window_start), pickupWindowEnd: new Date(first.pickup_window_end) };
+  const { o, summary } = await loadOrder(db, orderId);
   const [{ data: carrier }, { data: person }] = o.carrier_id
     ? await Promise.all([
         db.from("carriers").select("company_name").eq("profile_id", o.carrier_id).single(),
@@ -164,14 +160,14 @@ export async function sendCancellationRequestEmails(db: SupabaseClient, orderId:
 
   const errors: string[] = [];
   if (adminEmail) {
-    const rendered = renderCancellationRequestedEmail({ orderNumber: o.order_number, companyName: carrier?.company_name ?? null, ...window, adminOrderUrl: `${appUrl}/admin/ordini/${o.id}` });
+    const rendered = renderCancellationRequestedEmail({ orderNumber: o.order_number, companyName: carrier?.company_name ?? null, summary, adminOrderUrl: `${appUrl}/admin/ordini/${o.id}` });
     await sendEmail(db, { ...rendered, templateCode: CANCELLATION_REQUESTED_TEMPLATE, to: adminEmail, orderId: o.id }).catch((e) => errors.push(`admin: ${e}`));
   } else {
     errors.push("ADMIN_NOTIFICATION_EMAIL not set");
   }
   if (o.carrier_id && person?.email) {
     const rendered = renderCarrierJobCancelledEmail({
-      firstName: person.first_name, orderNumber: o.order_number, pickupCity: first.pickup_city, deliveryCity: last.delivery_city, ...window,
+      firstName: person.first_name, orderNumber: o.order_number, summary,
       jobUrl: `${appUrl}/padroncino/le-mie-corse/${o.id}`,
     });
     await sendEmail(db, { ...rendered, templateCode: CARRIER_JOB_CANCELLED_TEMPLATE, to: person.email, recipientId: o.carrier_id, orderId: o.id }).catch((e) => errors.push(`carrier: ${e}`));

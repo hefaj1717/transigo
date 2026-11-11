@@ -1,4 +1,5 @@
 import { formatCents } from "@/lib/pricing/money";
+import { startLabel, summaryLine, summaryRows, summaryWindow, type OrderSummary } from "@/lib/orders/order-summary";
 import { escapeHtml, type RenderedEmail } from "./common";
 
 // E-mails of the customer cancellation (D33, D137; plan docs/plany/panel-klienta-2.md, part A):
@@ -43,8 +44,7 @@ function render(subject: string, greeting: string, paragraphs: string[], rows: [
 export type OrderCancelledData = {
   firstName: string | null;
   orderNumber: string;
-  pickupCity: string;
-  deliveryCity: string;
+  summary: OrderSummary;
   feeCents: number;
   refundCents: number;
   orderUrl: string;
@@ -52,7 +52,7 @@ export type OrderCancelledData = {
 
 export function renderOrderCancelledEmail(d: OrderCancelledData): RenderedEmail {
   const paragraphs = [
-    `il tuo ordine ${d.orderNumber} (${d.pickupCity} → ${d.deliveryCity}) è stato annullato.`,
+    `il tuo ordine ${d.orderNumber} (${summaryLine(d.summary)}) è stato annullato.`,
     d.refundCents > 0
       ? "Il rimborso viene inviato sulla carta usata per il pagamento: di solito arriva in 5–10 giorni lavorativi, a seconda della banca."
       : "Non è previsto alcun rimborso per questo ordine.",
@@ -70,16 +70,21 @@ export function renderOrderCancelledEmail(d: OrderCancelledData): RenderedEmail 
 export type CancellationRequestedData = {
   orderNumber: string;
   companyName: string | null;
-  pickupWindowStart: Date;
-  pickupWindowEnd: Date;
+  summary: OrderSummary;
   adminOrderUrl: string;
 };
+
+/** "Ritiro previsto" / "Inizio lavoro previsto" with the window; nothing for storage (no carrier, no window). */
+function plannedStart(s: OrderSummary): [string, string][] {
+  const w = summaryWindow(s);
+  return w ? [[`${startLabel(s)} previsto`, window(w.start, w.end)]] : [];
+}
 
 export function renderCancellationRequestedEmail(d: CancellationRequestedData): RenderedEmail {
   const rows: [string, string][] = [
     ["Ordine", d.orderNumber],
     ...(d.companyName ? ([["Padroncino", d.companyName]] as [string, string][]) : []),
-    ["Ritiro previsto", window(d.pickupWindowStart, d.pickupWindowEnd)],
+    ...plannedStart(d.summary),
   ];
   return render(
     `Richiesta di annullamento ${d.orderNumber}`,
@@ -95,18 +100,15 @@ export function renderCancellationRequestedEmail(d: CancellationRequestedData): 
 export type CarrierJobCancelledData = {
   firstName: string | null;
   orderNumber: string;
-  pickupCity: string;
-  deliveryCity: string;
-  pickupWindowStart: Date;
-  pickupWindowEnd: Date;
+  summary: OrderSummary;
   jobUrl: string;
 };
 
 export function renderCarrierJobCancelledEmail(d: CarrierJobCancelledData): RenderedEmail {
   const rows: [string, string][] = [
     ["Corsa", d.orderNumber],
-    ["Percorso", `${d.pickupCity} → ${d.deliveryCity}`],
-    ["Ritiro previsto", window(d.pickupWindowStart, d.pickupWindowEnd)],
+    ...summaryRows(d.summary).filter(([k]) => k !== "Ritiro" && k !== "Quando"),
+    ...plannedStart(d.summary),
   ];
   return render(
     `Corsa ${d.orderNumber} annullata dal cliente`,

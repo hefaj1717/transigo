@@ -1,8 +1,10 @@
+import { summaryLine, summaryRows, type OrderSummary } from "../../orders/order-summary";
 import { escapeHtml, type RenderedEmail } from "./common";
 
 // Customer e-mails after a dispatch change (spec 13): "Trasportatore assegnato" and "Ordine consegnato".
 // Pure: the caller loads the data. Carrier data limited as in the customer panel — first name, company,
-// vehicle type and plate (no phone, no amounts for the carrier).
+// vehicle type and plate (no phone, no amounts for the carrier). Facchinaggio (D165): "Facchini assegnati" /
+// "Lavoro concluso", no vehicle (D164).
 
 export const ORDER_ASSIGNED_TEMPLATE = "order_assigned";
 export const ORDER_DELIVERED_TEMPLATE = "order_delivered";
@@ -10,15 +12,13 @@ export const ORDER_DELIVERED_TEMPLATE = "order_delivered";
 const romeDate = (d: Date) => d.toLocaleDateString("it-IT", { timeZone: "Europe/Rome", weekday: "long", day: "numeric", month: "long" });
 const romeTime = (d: Date) => d.toLocaleTimeString("it-IT", { timeZone: "Europe/Rome", hour: "2-digit", minute: "2-digit" });
 
-type Base = { firstName: string | null; orderNumber: string; pickupCity: string; deliveryCity: string; orderUrl: string };
+type Base = { firstName: string | null; orderNumber: string; summary: OrderSummary; orderUrl: string };
 
 export type OrderAssignedData = Base & {
   carrierFirstName: string | null;
   carrierCompany: string;
   vehicleType: string | null;
   plate: string | null;
-  pickupWindowStart: Date;
-  pickupWindowEnd: Date;
 };
 
 export type OrderDeliveredData = Base & { deliveredAt: Date };
@@ -41,33 +41,40 @@ ${rows.map(([k, v]) => `<tr><td style="padding:4px 12px 4px 0;color:#71717a">${e
 }
 
 export function renderOrderAssignedEmail(d: OrderAssignedData): RenderedEmail {
+  const porters = d.summary.service === "porters";
   const who = d.carrierFirstName ? `${d.carrierFirstName} (${d.carrierCompany})` : d.carrierCompany;
-  const vehicle = [d.vehicleType, d.plate ? `targa ${d.plate}` : null].filter(Boolean).join(", ");
+  const vehicle = porters ? "" : [d.vehicleType, d.plate ? `targa ${d.plate}` : null].filter(Boolean).join(", ");
   const rows: [string, string][] = [
-    ["Percorso", `${d.pickupCity} → ${d.deliveryCity}`],
-    ["Ritiro", `${romeDate(d.pickupWindowStart)}, tra le ${romeTime(d.pickupWindowStart)} e le ${romeTime(d.pickupWindowEnd)}`],
-    ["Trasportatore", who],
+    ...summaryRows(d.summary),
+    [porters ? "Facchini" : "Trasportatore", who],
     ...(vehicle ? ([["Veicolo", vehicle]] as [string, string][]) : []),
   ];
   return render(
-    `Trasportatore assegnato – ordine ${d.orderNumber}`,
+    porters ? `Facchini assegnati – ordine ${d.orderNumber}` : `Trasportatore assegnato – ordine ${d.orderNumber}`,
     d.firstName ? `Ciao ${d.firstName},` : "Ciao,",
-    `il tuo ordine ${d.orderNumber} è stato preso in carico da un trasportatore verificato.`,
+    porters
+      ? `il tuo ordine ${d.orderNumber} è stato preso in carico da una squadra di facchini verificata.`
+      : `il tuo ordine ${d.orderNumber} è stato preso in carico da un trasportatore verificato.`,
     rows,
-    "Per qualsiasi necessità sul trasporto contattaci: siamo noi il tuo riferimento.",
+    porters
+      ? "Per qualsiasi necessità sul servizio contattaci: siamo noi il tuo riferimento."
+      : "Per qualsiasi necessità sul trasporto contattaci: siamo noi il tuo riferimento.",
     d.orderUrl,
   );
 }
 
 export function renderOrderDeliveredEmail(d: OrderDeliveredData): RenderedEmail {
+  const porters = d.summary.service === "porters";
+  const at = `${romeDate(d.deliveredAt)}, ${romeTime(d.deliveredAt)}`;
   return render(
-    `Ordine consegnato – ${d.orderNumber}`,
+    porters ? `Lavoro concluso – ${d.orderNumber}` : `Ordine consegnato – ${d.orderNumber}`,
     d.firstName ? `Ciao ${d.firstName},` : "Ciao,",
-    `il tuo ordine ${d.orderNumber} è stato consegnato. Grazie per aver scelto Transigo!`,
-    [
-      ["Percorso", `${d.pickupCity} → ${d.deliveryCity}`],
-      ["Consegnato", `${romeDate(d.deliveredAt)}, ${romeTime(d.deliveredAt)}`],
-    ],
+    porters
+      ? `il servizio di facchinaggio del tuo ordine ${d.orderNumber} è concluso. Grazie per aver scelto Transigo!`
+      : `il tuo ordine ${d.orderNumber} è stato consegnato. Grazie per aver scelto Transigo!`,
+    porters
+      ? [["Servizio", summaryLine(d.summary)], ["Concluso", at]]
+      : [["Percorso", summaryLine(d.summary)], ["Consegnato", at]],
     "Se qualcosa non va, rispondi dalla pagina dell'ordine o contattaci.",
     d.orderUrl,
   );

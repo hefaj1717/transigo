@@ -7,26 +7,26 @@ import { getStripe, getWebhookSecret } from "@/lib/stripe/server";
 import { getAppUrl } from "@/lib/supabase/env";
 import { invoiceAfterPaid } from "@/lib/einvoice/server";
 import { recordRefundResult } from "@/lib/orders/refund-record";
+import { ORDER_SUMMARY_SELECT, toOrderSummary, type OrderSummaryRow } from "@/lib/orders/order-summary";
 import { buildCheckoutSessionParams } from "./checkout-params";
 import { handlePaidSession, type ConfirmResult, type WebhookDeps } from "./webhook";
 
 // Server side of the customer payment (Stage 3). `db` is always the service-role client; every function that
 // acts for a customer takes the customer id from the verified session (Server Action) and checks ownership.
 
-type OrderForPayment = {
+type OrderForPayment = OrderSummaryRow & {
   id: string;
   order_number: string;
   customer_id: string;
   status: string;
   payment_due_at: string;
   order_charges: { total_cents: number } | null;
-  order_legs: { leg_index: number; pickup_city: string; delivery_city: string }[];
 };
 
 async function loadOrder(db: SupabaseClient, orderId: string): Promise<OrderForPayment | null> {
   const { data, error } = await db
     .from("orders")
-    .select("id, order_number, customer_id, status, payment_due_at, order_charges(total_cents), order_legs(leg_index, pickup_city, delivery_city)")
+    .select(`id, order_number, customer_id, status, payment_due_at, order_charges(total_cents), ${ORDER_SUMMARY_SELECT}`)
     .eq("id", orderId)
     .maybeSingle<OrderForPayment>();
   if (error) throw new Error(`load order: ${error.message}`);
@@ -67,15 +67,12 @@ export async function startCheckout(db: SupabaseClient, customer: { id: string; 
     await db.rpc("expire_order_payment", { p_session_id: session.id }); // expired in Stripe, webhook not here yet
   }
 
-  const leg0 = order.order_legs.find((l) => l.leg_index === 0);
-  const last = order.order_legs.reduce((a, b) => (b.leg_index > a.leg_index ? b : a), order.order_legs[0]);
   const params = buildCheckoutSessionParams(
     {
       id: order.id,
       orderNumber: order.order_number,
       totalCents: order.order_charges.total_cents,
-      pickupCity: leg0?.pickup_city ?? "",
-      deliveryCity: last?.delivery_city ?? "",
+      summary: toOrderSummary(order),
       customerEmail: customer.email,
       paymentDueAt: new Date(order.payment_due_at),
     },
@@ -200,22 +197,18 @@ export function webhookDeps(db: SupabaseClient, defer?: Defer): WebhookDeps {
 export async function sendOrderPaidEmail(db: SupabaseClient, orderId: string, opts: SendOptions = {}): Promise<void> {
   const { data: o, error } = await db
     .from("orders")
-    .select("id, order_number, customer_id, order_charges(total_cents, customer_type), order_legs(leg_index, pickup_city, delivery_city, pickup_window_start, pickup_window_end)")
+    .select(`id, order_number, customer_id, order_charges(total_cents, customer_type), ${ORDER_SUMMARY_SELECT}`)
     .eq("id", orderId)
     .single();
   if (error || !o) throw new Error(`order for e-mail: ${error?.message ?? "not found"}`);
   const { data: profile } = await db.from("profiles").select("email, first_name").eq("id", o.customer_id).single();
   if (!profile?.email) throw new Error("customer e-mail not found");
 
-  const legs = [...(o.order_legs as { leg_index: number; pickup_city: string; delivery_city: string; pickup_window_start: string; pickup_window_end: string }[])].sort((a, b) => a.leg_index - b.leg_index);
   const charges = o.order_charges as unknown as { total_cents: number; customer_type: "private" | "business" };
   const rendered = renderOrderPaidEmail({
     firstName: profile.first_name,
     orderNumber: o.order_number,
-    pickupCity: legs[0].pickup_city,
-    deliveryCity: legs[legs.length - 1].delivery_city,
-    pickupWindowStart: new Date(legs[0].pickup_window_start),
-    pickupWindowEnd: new Date(legs[0].pickup_window_end),
+    summary: toOrderSummary(o as OrderSummaryRow),
     totalCents: charges.total_cents,
     customerType: charges.customer_type,
     orderUrl: `${getAppUrl()}/cliente/ordini/${o.id}`,

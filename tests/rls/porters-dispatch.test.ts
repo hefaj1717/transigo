@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { anon, createUser, deleteCreatedUsers, localSql, service, type TestUser } from "./helpers";
 import { HOUR, PAST, accept, activeCarrier, check, history, listedIds, paidOrder, release, run, setupJobContext, teardownJobContext, type DbError } from "./job-fixtures";
@@ -429,5 +429,56 @@ describe("release and unassign on porters", () => {
     await run(advance(b, "picked_up"));
     expectError((await service.rpc("admin_unassign_job", { p_order_id: b, p_admin_id: admin.id, p_reason_code: "altro" })).error, "55000", "work_started");
     expect(await check(service.from("orders").select("status, carrier_id, handover_required_at").eq("id", b).single())).toEqual({ status: "picked_up", carrier_id: c.user.id, handover_required_at: null });
+  });
+});
+
+describe("customer e-mails for Facchinaggio (step 6b): real order shape, texts per service", () => {
+  const outbox = async (orderId: string, template: string) =>
+    check(service.from("email_outbox").select("subject, text_body").eq("template_code", template).eq("order_id", orderId).order("created_at"));
+
+  beforeEach(() => vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example"));
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("order_paid → order_assigned → order_delivered: city, window, team; no vehicle, no street", async () => {
+    const { sendOrderPaidEmail } = await import("@/lib/payments/server");
+    const { sendOrderAssignedEmail, sendOrderDeliveredEmail } = await import("@/lib/orders/customer-emails");
+    const orderId = await paidPorters({ persons: 3 });
+    const c = await portersCarrier(3);
+
+    await sendOrderPaidEmail(service, orderId);
+    await run(acceptPorters(c.user, orderId));
+    await sendOrderAssignedEmail(service, orderId, "https://app.example");
+    await run(advance(orderId, "picked_up"));
+    await run(advance(orderId, "delivered", "Confermato dal cliente"));
+    await sendOrderDeliveredEmail(service, orderId, "https://app.example");
+
+    const [paid] = await outbox(orderId, "order_paid");
+    expect(paid.text_body).toContain("Servizio: Facchinaggio a Bologna");
+    expect(paid.text_body).toContain("Squadra: 3 facchini, 2 ore");
+    expect(paid.text_body).toContain("squadra di facchini");
+    const [assigned] = await outbox(orderId, "order_assigned");
+    expect(assigned.subject).toMatch(/^Facchini assegnati/);
+    expect(assigned.text_body).toContain("Facchini: ");
+    expect(assigned.text_body).not.toContain("Veicolo");
+    const [delivered] = await outbox(orderId, "order_delivered");
+    expect(delivered.subject).toMatch(/^Lavoro concluso/);
+    for (const m of [paid, assigned, delivered]) {
+      expect(m.text_body).not.toContain("Indipendenza");
+      expect(m.text_body).not.toContain("Percorso");
+    }
+  });
+
+  it("cancellation request: the carrier gets city, team and planned start (no route)", async () => {
+    const { sendCancellationRequestEmails } = await import("@/lib/orders/cancellation-server");
+    const orderId = await paidPorters();
+    const c = await portersCarrier();
+    await run(acceptPorters(c.user, orderId));
+    await sendCancellationRequestEmails(service, orderId, "https://app.example", "admin-6b@transigo.test");
+    const [carrier] = await outbox(orderId, "carrier_job_cancelled");
+    expect(carrier.text_body).toContain("Servizio: Facchinaggio a Bologna");
+    expect(carrier.text_body).toContain("Inizio lavoro previsto: ");
+    const [toAdmin] = await outbox(orderId, "cancellation_requested");
+    expect(toAdmin.text_body).toContain("Inizio lavoro previsto: ");
+    await service.from("email_outbox").delete().eq("to_address", "admin-6b@transigo.test");
   });
 });

@@ -7,8 +7,7 @@ const order: CheckoutOrder = {
   id: "11111111-1111-4111-8111-111111111111",
   orderNumber: "TG-2026-000042",
   totalCents: 19_520,
-  pickupCity: "Milano",
-  deliveryCity: "Torino",
+  summary: { service: "transport", pickupCity: "Milano", deliveryCity: "Torino", window: { start: new Date("2026-11-10T09:00:00Z"), end: new Date("2026-11-10T11:00:00Z") } },
   customerEmail: "cliente@example.com",
   paymentDueAt: new Date("2026-11-09T11:00:00Z"),
 };
@@ -34,6 +33,13 @@ describe("buildCheckoutSessionParams", () => {
       { quantity: 1, price_data: { currency: "eur", unit_amount: 19_520, product_data: { name: "Ordine TG-2026-000042 – Trasporto e servizi", description: "Milano → Torino" } } },
     ]);
     expect(p.adaptive_pricing).toEqual({ enabled: false });
+  });
+
+  it("Facchinaggio and Deposito: own line name and description, no route (D151)", () => {
+    const porters = buildCheckoutSessionParams({ ...order, summary: { service: "porters", city: "Bologna", window: { start: now, end: now }, persons: 2, hours: 3 } }, "https://app.example", now);
+    expect(porters.line_items?.[0].price_data?.product_data).toEqual({ name: "Ordine TG-2026-000042 – Facchinaggio", description: "Facchinaggio a Bologna" });
+    const storage = buildCheckoutSessionParams({ ...order, summary: { service: "storage", startDate: "2026-12-01", endDate: "2026-12-31", unitLabel: "Box M" } }, "https://app.example", now);
+    expect(storage.line_items?.[0].price_data?.product_data).toEqual({ name: "Ordine TG-2026-000042 – Deposito", description: "Deposito Box M dal 01/12/2026 al 31/12/2026" });
   });
 
   it("carries order_id and order_number in session and PaymentIntent metadata", () => {

@@ -1,4 +1,5 @@
 import type Stripe from "stripe";
+import { checkoutProductName, summaryLine, type OrderSummary } from "../orders/order-summary";
 
 // Stripe Checkout session parameters (pure, tested). The amount always comes from order_charges.total_cents
 // read on the server (D89) — never from the browser.
@@ -21,8 +22,7 @@ export type CheckoutOrder = {
   id: string;
   orderNumber: string;
   totalCents: number;
-  pickupCity: string;
-  deliveryCity: string;
+  summary: OrderSummary; // what the order is (D151): name and description of the line
   customerEmail: string;
   paymentDueAt: Date;
 };
@@ -48,8 +48,8 @@ export function buildCheckoutSessionParams(order: CheckoutOrder, appUrl: string,
           currency: "eur",
           unit_amount: order.totalCents, // gross (VAT included); the e-invoice comes from SDI (Stage 6)
           product_data: {
-            name: `Ordine ${order.orderNumber} – Trasporto e servizi`,
-            description: `${order.pickupCity} → ${order.deliveryCity}`,
+            name: checkoutProductName(order.orderNumber, order.summary),
+            description: summaryLine(order.summary),
           },
         },
       },

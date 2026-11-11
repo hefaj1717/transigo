@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { anon, createUser, deleteCreatedUsers, localSql, service, type TestUser } from "./helpers";
 import { HOUR, accept, activeCarrier, check, listedIds, paidOrder, run, setupJobContext, teardownJobContext, vat, type DbError } from "./job-fixtures";
@@ -481,5 +481,22 @@ describe("immutable columns and carrier fields", () => {
     const res = localSql(`set session_replication_role = replica; update public.orders set vehicle_type_id = null where id = '${transport}';`);
     expect(res.ok).toBe(false);
     expect(res.output).toMatch(/orders_service_fields_check/);
+  });
+});
+
+describe("customer e-mail for Deposito (step 6b): real order shape", () => {
+  beforeEach(() => vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example"));
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("order_paid: unit and period, no route and no pickup", async () => {
+    const { sendOrderPaidEmail } = await import("@/lib/payments/server");
+    const storage = (await created(storagePayload({ warehouse: await newWarehouse({ s: 1 }), start: romeDate(2), end: romeDate(31) }))).id;
+    await pay(storage);
+    await sendOrderPaidEmail(service, storage);
+    const [m] = await check(service.from("email_outbox").select("text_body").eq("template_code", "order_paid").eq("order_id", storage));
+    expect(m.text_body).toContain("Deposito: Box S");
+    expect(m.text_body).toMatch(/Periodo: dal \d{2}\/\d{2}\/\d{4} al \d{2}\/\d{2}\/\d{4}/);
+    expect(m.text_body).not.toContain("Percorso");
+    expect(m.text_body).not.toContain("Ritiro");
   });
 });
