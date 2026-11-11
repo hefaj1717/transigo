@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { toCompanyInfo } from "../public/company";
-import { buildCreditNoteDocument, buildInvoiceDocument, buyerFrom, creditNoteAmounts, type InvoiceSnapshot } from "./document";
+import { buildCreditNoteDocument, buildInvoiceDocument, buyerFrom, creditNoteAmounts, withProfileName, type InvoiceSnapshot } from "./document";
 import { EInvoiceError } from "./provider";
 
 const company = toCompanyInfo({
@@ -102,5 +102,17 @@ describe("buildCreditNoteDocument", () => {
   it("inconsistent amounts → amount_mismatch", () => {
     expect(() => buildCreditNoteDocument({ ...base, amounts: { netCents: 1, vatCents: 1, totalCents: 3 } }, company, 19_520)).toThrow(EInvoiceError);
     expect(() => buildCreditNoteDocument({ ...base, amounts: { netCents: 16_001, vatCents: 3_520, totalCents: 19_521 } }, company, 19_520)).toThrow(EInvoiceError);
+  });
+});
+
+describe("withProfileName (snapshots without the person)", () => {
+  const profile = { first_name: "Giulia", last_name: "Conti" };
+  it("fills only a missing name", () => {
+    expect(withProfileName({ fiscal_code: "X", city: "Milano" }, profile)).toEqual({ fiscal_code: "X", city: "Milano", first_name: "Giulia", last_name: "Conti" });
+  });
+  it("keeps the snapshot when it has a name, or without a profile", () => {
+    expect(withProfileName(privateBilling, profile)).toBe(privateBilling);
+    expect(withProfileName({ last_name: "Rossi" }, profile)).toEqual({ last_name: "Rossi" });
+    expect(withProfileName({ fiscal_code: "X" }, null)).toEqual({ fiscal_code: "X" });
   });
 });

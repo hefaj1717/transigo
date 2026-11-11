@@ -96,6 +96,19 @@ export function buyerFrom(customerType: "private" | "business", b: Record<string
   return { customerType, name: person, fiscalCode: str(b.fiscal_code), vatNumber: null, sdiCode: null, pec: null, address };
 }
 
+/**
+ * Snapshots written before the names were part of billing_details (demo seeds before 2026-11-11) have no person:
+ * the customer's profile name fills ONLY the missing first / last name (the wizard always stores them, D36).
+ * Everything else stays as in the snapshot.
+ */
+export function withProfileName(
+  billing: Record<string, unknown>,
+  profile: { first_name: string | null; last_name: string | null } | null,
+): Record<string, unknown> {
+  if (str(billing.first_name) || str(billing.last_name) || !profile) return billing;
+  return { ...billing, first_name: profile.first_name, last_name: profile.last_name };
+}
+
 export type InvoiceSnapshot = {
   invoiceId: string;
   orderNumber: string;

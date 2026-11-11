@@ -4,6 +4,7 @@ import type { Defer } from "../notifications/email";
 import { sendEmail } from "../notifications/email";
 import { INVOICE_ISSUED_TEMPLATE, renderInvoiceIssuedEmail } from "../notifications/templates/invoice-issued";
 import { toCompanyInfo, type CompanyRow } from "../public/company";
+import { withProfileName } from "./document";
 import { getAppUrl } from "../supabase/env";
 import { getEInvoiceProvider } from "./index";
 import {
@@ -35,6 +36,13 @@ async function must<T>(p: PromiseLike<{ data: T; error: { message: string; code?
 }
 
 export function einvoiceDeps(db: SupabaseClient, provider: EInvoiceProvider = getEInvoiceProvider(db), appUrl: string = getAppUrl()): EInvoiceDeps {
+  /** billing_details, with the profile name only when the snapshot has none (withProfileName). */
+  const chargesWithName = async (o: OrderSnapshotRow): Promise<OrderSnapshotRow["order_charges"]> => {
+    const b = o.order_charges.billing_details;
+    if (b.first_name || b.last_name) return o.order_charges;
+    const { data: profile } = await db.from("profiles").select("first_name, last_name").eq("id", o.customer_id).maybeSingle();
+    return { ...o.order_charges, billing_details: withProfileName(b, profile) };
+  };
   return {
     provider,
     company: async () => toCompanyInfo(await must(db.from("settings").select("company_name, company_vat_number, company_street, company_city, company_postal_code, company_province, company_email, company_phone, company_pec").single<CompanyRow>(), "settings")),
@@ -66,17 +74,17 @@ export function einvoiceDeps(db: SupabaseClient, provider: EInvoiceProvider = ge
     },
     loadRow: (invoiceId) => must(db.from("invoices").select(ROW_COLUMNS).eq("id", invoiceId).single<InvoiceRow>(), "invoice"),
     invoiceSnapshot: async (row) => {
-      const o = await must(db.from("orders").select("order_number, order_charges(customer_type, vat_rate_bp, subtotal_cents, vat_cents, total_cents, billing_details), order_lines(sort_order, label_it, quantity, net_cents, vat_cents, gross_cents)").eq("id", row.order_id).single(), "order");
+      const o = await must(db.from("orders").select("order_number, customer_id, order_charges(customer_type, vat_rate_bp, subtotal_cents, vat_cents, total_cents, billing_details), order_lines(sort_order, label_it, quantity, net_cents, vat_cents, gross_cents)").eq("id", row.order_id).single(), "order");
       const pay = await must(db.from("payments").select("paid_at").eq("id", row.payment_id).single(), "payment");
       const order = o as unknown as OrderSnapshotRow;
-      return { invoiceId: row.id, orderNumber: order.order_number, charges: order.order_charges, lines: order.order_lines, paidAt: new Date(pay.paid_at as string) };
+      return { invoiceId: row.id, orderNumber: order.order_number, charges: await chargesWithName(order), lines: order.order_lines, paidAt: new Date(pay.paid_at as string) };
     },
     creditNoteSnapshot: async (row) => {
-      const o = (await must(db.from("orders").select("order_number, order_charges(customer_type, vat_rate_bp, subtotal_cents, vat_cents, total_cents, billing_details)").eq("id", row.order_id).single(), "order")) as unknown as OrderSnapshotRow;
+      const o = (await must(db.from("orders").select("order_number, customer_id, order_charges(customer_type, vat_rate_bp, subtotal_cents, vat_cents, total_cents, billing_details)").eq("id", row.order_id).single(), "order")) as unknown as OrderSnapshotRow;
       const inv = await must(db.from("invoices").select("number, issued_at, total_cents, status").eq("id", row.invoice_id!).single(), "invoice of the note");
       const refund = await must(db.from("refunds").select("updated_at").eq("id", row.refund_id!).single(), "refund");
       return {
-        snapshot: { noteId: row.id, orderNumber: o.order_number, charges: o.order_charges, invoice: { number: inv.number as string, issuedAt: new Date(inv.issued_at as string) }, refundedAt: new Date(refund.updated_at as string) },
+        snapshot: { noteId: row.id, orderNumber: o.order_number, charges: await chargesWithName(o), invoice: { number: inv.number as string, issuedAt: new Date(inv.issued_at as string) }, refundedAt: new Date(refund.updated_at as string) },
         invoiceTotalCents: inv.total_cents as number,
       };
     },
@@ -111,6 +119,7 @@ type EInvoicePaymentRow = {
 };
 type OrderSnapshotRow = {
   order_number: string;
+  customer_id: string;
   order_charges: { customer_type: "private" | "business"; vat_rate_bp: number; subtotal_cents: number; vat_cents: number; total_cents: number; billing_details: Record<string, unknown> };
   order_lines: { sort_order: number; label_it: string; quantity: number; net_cents: number; vat_cents: number; gross_cents: number }[];
 };
