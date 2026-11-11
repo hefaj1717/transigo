@@ -114,6 +114,8 @@ Stan:
   - [x] Krok 2: czysta logika `src/lib/carriers/execution.ts` (+ testy).
   - [x] „Da gestire” (migracja `20261111120000_carrier_handover.sql`, **na stagingu od 2026-11-11**): zdjęcie przewoźnika z towarem na pokładzie → znacznik `handover_required_at` (status bez zmian, poza listą kursów), `admin_assign_handover` z adresem towaru (`order_handovers`) i powodem; znacznik i filtr na `/admin/ordini`. Testy `tests/rls/carrier-handover.test.ts`.
   - [x] Krok 3 (2026-11-11, bez zmian w bazie): `src/lib/carriers/execution-server.ts` + `execution-actions.ts`, akcje `src/app/(padroncino)/padroncino/le-mie-corse/[id]/actions.ts` (krok, podpisany URL do wgrania zdjęcia/podpisu, rejestracja i usuwanie zdjęcia, POD). Pliki idą z przeglądarki prosto do Storage; klucz serwisowy tylko po udanym RPC (usunięcie pliku, mail `order_delivered` — jeden na zlecenie, błąd maila tylko w logu). Testy `actions.test.ts` i `tests/rls/carrier-execution-server.test.ts`.
+  - [x] Ponawianie maili (D131, 2026-11-11, bez zmian w bazie): `/api/cron/send-emails` co 15 min (`vercel.json`), maks. 5 prób → „Fallito”, `/admin/email` z „Invia di nuovo”, dosyłanie `order_delivered` dla dostarczonych zleceń bez maila. Wysyłka Resend (`fetch`, `Idempotency-Key` = id wiersza) działa dopiero z `EMAIL_TRANSPORT=resend` + `RESEND_API_KEY` + `RESEND_FROM_EMAIL` (D79). **Vercel Hobby pozwala tylko na crony raz dziennie** — przy `*/15` wdrożenie na Hobby się nie uda (Pro albo zewnętrzny harmonogram).
+  - **TODO retencji (przed startem):** usuwanie niezarejestrowanych plików w `order-photos`/`pod-signatures` starszych niż 24 h.
   - [ ] Kroki 4–6: ekran kursu, POD u klienta i admina, seed i przegląd.
 - Dalej (bez zmian): GPS (Etap 5), „Segnala un problema” (D39), Stripe Connect, SMS.
 

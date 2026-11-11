@@ -12,7 +12,7 @@
 6. Czas tragarzy w dół do pełnych minut.
 7. Odbiorca nie podpisuje → „Contatta Transigo”; admin daje „Consegnato” bez POD **tylko z powodem** (notatka w historii statusów). Zdjęcia ze „Scarico completato” zostają.
 8. Zdjęcia zmniejszane w przeglądarce: dłuższy bok ~1600 px, JPEG ~80 %; limity 1–10 na odcinek i rodzaj, ≤ 5 MB; podpis PNG ≤ 512 KB.
-9. Retencja zdjęć i podpisów — TODO przed startem.
+9. Retencja zdjęć i podpisów — TODO przed startem; w tym usuwanie niezarejestrowanych plików (wgranych przez podpisany URL, ale nie zarejestrowanych) starszych niż 24 h (właściciel 2026-11-11).
 - Czas kroku zapisuje baza (`now()`), nie telefon; czas tragarzy liczy baza (`order_porters_worked_minutes`), odbiorca widzi wartość z serwera.
 - Kroki tylko w kolejności, sprawdzane w bazie. Ponowne wysłanie kroku = bez duplikatu i bez błędu.
 - Przewoźnik nie cofa kroku; cofnięcie ostatniego kroku tylko admin (`admin_revert_last_step`) z powodem w historii.

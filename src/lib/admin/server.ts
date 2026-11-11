@@ -26,8 +26,10 @@ export async function audit(
   entityType: string,
   entityId: string | null,
   data: Record<string, unknown> = {},
+  /** Service-role client the caller already has (e.g. AdminDeps.serviceDb); default: a new one. */
+  db = createServiceClient(),
 ) {
-  const { error } = await createServiceClient()
+  const { error } = await db
     .from("audit_log")
     .insert({ actor_id: actor.userId, actor_email: actor.email, action, entity_type: entityType, entity_id: entityId, data });
   if (error) console.error("[audit] insert failed", { action, code: error.code, message: error.message });
