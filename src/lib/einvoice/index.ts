@@ -1,19 +1,19 @@
 import "server-only";
-import { createServiceClient } from "../supabase/service";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { providerNameFrom } from "./config";
 import { createDemoProvider } from "./demo";
 import { EInvoiceError, type EInvoiceProvider } from "./provider";
 
 // The configured e-invoice provider (server only). EINVOICE_PROVIDER=demo|fatture_in_cloud (default demo).
-// Fatture in Cloud (D1) = a new adapter here; nothing else changes.
+// Fatture in Cloud (D1) = a new adapter here; nothing else changes. `db` = the service-role client of the caller.
 
-export function getEInvoiceProvider(env: Record<string, string | undefined> = process.env): EInvoiceProvider {
+export function getEInvoiceProvider(db: SupabaseClient, env: Record<string, string | undefined> = process.env): EInvoiceProvider {
   const name = providerNameFrom(env);
   if (name === "demo") {
     return createDemoProvider({
       env,
       reserveNumber: async (invoiceId) => {
-        const { data, error } = await createServiceClient().rpc("reserve_demo_invoice_number", { p_invoice_id: invoiceId });
+        const { data, error } = await db.rpc("reserve_demo_invoice_number", { p_invoice_id: invoiceId });
         if (error || typeof data !== "string") throw new EInvoiceError("demo_number_reserve_failed");
         return data;
       },

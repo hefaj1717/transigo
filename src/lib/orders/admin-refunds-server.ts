@@ -4,6 +4,8 @@ import type { AdminDeps } from "@/lib/admin/deps";
 import { getStripe } from "@/lib/stripe/server";
 import { refundStatusFromStripe, type RefundStatus } from "./cancellation";
 import { sendOrderCancelledEmail } from "./cancellation-server";
+import { recordRefundResult } from "./refund-record";
+import { invoiceAcceptedPayment } from "@/lib/einvoice/server";
 import {
   decideCancellationSchema,
   manualRefundSchema,
@@ -40,8 +42,7 @@ export function stripeRefundIo(db: SupabaseClient): RefundIo {
         { idempotencyKey: `refund:${refundId}` },
       ),
     recordRefund: async (refundId, stripeRefundId, status) => {
-      const { error } = await db.rpc("record_refund_result", { p_refund_id: refundId, p_stripe_refund_id: stripeRefundId, p_status: status });
-      if (error) throw new Error(`record_refund_result: ${error.message}`);
+      await recordRefundResult(db, refundId, stripeRefundId, status);
     },
   };
 }
@@ -113,7 +114,10 @@ export async function resolvePaymentReview(deps: AdminDeps, input: Record<string
     return { ok: false, error: refundDbError(error) };
   }
   if (data.result === "already_resolved") return { ok: false, error: REFUND_MSG.alreadyResolved };
-  if (data.result === "paid") return { ok: true, message: REFUND_MSG.markedPaid };
+  if (data.result === "paid") {
+    await invoiceAcceptedPayment(deps.serviceDb, paymentId); // D147: the invoice of the accepted payment; never throws
+    return { ok: true, message: REFUND_MSG.markedPaid };
+  }
 
   let status: RefundStatus = "succeeded";
   if (data.refund_id && data.refund_cents) {

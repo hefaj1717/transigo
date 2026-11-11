@@ -11,6 +11,7 @@ import {
 } from "@/lib/notifications/templates/order-cancellation";
 import { getStripe } from "@/lib/stripe/server";
 import { refundStatusFromStripe, type RefundStatus } from "./cancellation";
+import { recordRefundResult } from "./refund-record";
 
 // Customer cancellation of a paid order (D33, D137). Order of operations:
 //   1. customer_cancel_order() in the database — status, fee and the pending refund row, atomically (the amount is
@@ -101,8 +102,7 @@ export function cancellationDeps(db: SupabaseClient, opts: { appUrl: string; adm
         { idempotencyKey: `refund:${refundId}` },
       ),
     recordRefund: async (refundId, stripeRefundId, status) => {
-      const { error } = await db.rpc("record_refund_result", { p_refund_id: refundId, p_stripe_refund_id: stripeRefundId, p_status: status });
-      if (error) throw new Error(`record_refund_result: ${error.message}`);
+      await recordRefundResult(db, refundId, stripeRefundId, status);
     },
     notify: (kind, orderId) =>
       opts.defer(async () => {

@@ -5,6 +5,8 @@ import { sendEmail, type Defer, type SendOptions } from "@/lib/notifications/ema
 import { renderOrderPaidEmail } from "@/lib/notifications/templates/order-paid";
 import { getStripe, getWebhookSecret } from "@/lib/stripe/server";
 import { getAppUrl } from "@/lib/supabase/env";
+import { invoiceAfterPaid } from "@/lib/einvoice/server";
+import { recordRefundResult } from "@/lib/orders/refund-record";
 import { buildCheckoutSessionParams } from "./checkout-params";
 import { handlePaidSession, type ConfirmResult, type WebhookDeps } from "./webhook";
 
@@ -185,9 +187,11 @@ export function webhookDeps(db: SupabaseClient, defer?: Defer): WebhookDeps {
     expirePayment: (sessionId) => rpc<string | null>("expire_order_payment", { p_session_id: sessionId }),
     expireOrder: (orderId) => rpc<boolean>("expire_order", { p_order_id: orderId, p_source: "stripe_webhook" }),
     failPayment: (sessionId, message) => rpc<string | null>("fail_order_payment", { p_session_id: sessionId, p_message: message }),
-    onPaid: (orderId) => sendOrderPaidEmail(db, orderId, { defer }),
-    recordRefund: (refundId, stripeRefundId, status) =>
-      rpc<boolean>("record_refund_result", { p_refund_id: refundId, p_stripe_refund_id: stripeRefundId, p_status: status }),
+    onPaid: async (orderId) => {
+      await invoiceAfterPaid(db, orderId, defer); // D147; never throws — the provider runs after the response
+      await sendOrderPaidEmail(db, orderId, { defer });
+    },
+    recordRefund: (refundId, stripeRefundId, status) => recordRefundResult(db, refundId, stripeRefundId, status),
     log: (message, data) => console.warn(`[stripe] ${message}`, data ?? {}),
   };
 }

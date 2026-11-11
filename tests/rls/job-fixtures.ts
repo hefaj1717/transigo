@@ -124,7 +124,7 @@ function payload(o: OrderOpts) {
     charges: {
       price_list_id: priceList.id, price_list_version: priceList.version, customer_type: "private", vat_rate_bp: 2200,
       subtotal_cents: 16_000, vat_cents: 3_520, total_cents: 19_520, porter_overtime_rate_cents: 3_500,
-      billing_details: { fiscal_code: "RSSMRA80A01F205X", street: "Via Roma 1", city: "Milano", postal_code: "20121", province: "MI" },
+      billing_details: { first_name: "Mario", last_name: "Rossi", fiscal_code: "RSSMRA80A01F205X", street: "Via Roma 1", city: "Milano", postal_code: "20121", province: "MI" },
       terms_accepted_at: new Date().toISOString(), terms_version: "2026-11-01", quoted_at: new Date().toISOString(),
     },
     lines: [line(0, 0, "transport", 10_000, 2_200, "transport"), line(1, 0, "porters", 6_000, 1_320, "porters")],
