@@ -112,7 +112,7 @@ stronie głównej, każda usługa ma własną podstronę i własny kreator. Teks
 3. Migracja 1 — cennik (SQL do akceptacji) + `/admin/listini`. ✔ (2026-11-11, D161; migracje `20261111190000_pricing_services_code.sql` + `20261111190001_pricing_services.sql` lokalnie; opublikowane cenniki bez zmian — usługi dostępne po „Crea bozza” → „Pubblica”)
 4. Strona publiczna (sekcja 4). ✔ (2026-11-11, D162; kalkulatory → `/contatti` do kroków 6–7 — wtedy zmienić `REQUEST_PATH` w `src/lib/public/requests.ts`)
 5. Migracja 2 — zlecenia (SQL do akceptacji) + filtr w `/admin/ordini`. Podzielony (D163):
-   - **5a ✔** (2026-11-11, **lokalnie**): migracje `20261111200000_three_services_enum.sql` + `20261111200001_three_services.sql`
+   - **5a ✔** (2026-11-11; migracje **na stagingu od 2026-11-11**, za zgodą właściciela): migracje `20261111200000_three_services_enum.sql` + `20261111200001_three_services.sql`
      (SQL zatwierdzony przez właściciela, bez zmian względem szkicu), testy `tests/rls/three-services.test.ts` (29: tylko
      service role, walidacje porters/storage, pojemność i wyścig o ostatni box, widoczność per rola, brak na liście kursów
      i u kandydatów admina, kolumny niezmienne). Aplikacja: `src/lib/orders/service-type.ts` (etykiety, filtr, pomocnicze
