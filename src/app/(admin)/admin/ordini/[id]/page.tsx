@@ -263,7 +263,12 @@ function Dispatch({ o, candidates }: { o: OrderDetail; candidates: Candidate[] }
             <input type="hidden" name="orderId" value={o.id} />
             <input type="hidden" name="to" value={next.to} />
             {next.to === "delivered" ? (
-              <p className="text-sm text-amber-900">Senza firma e foto del destinatario: il pagamento al padroncino non partirà in automatico.</p>
+              <>
+                <p className="text-sm text-amber-900">Senza firma e foto del destinatario: il pagamento al padroncino non partirà in automatico.</p>
+                <label htmlFor="note" className="mt-2 block text-sm font-medium text-zinc-800">Motivo (obbligatorio)</label>
+                <textarea id="note" name="note" required maxLength={1000} rows={2} className={`${inputClass} mt-1 w-full`} />
+                <p className="mt-1 text-xs text-zinc-500">Il motivo resta nello storico dell&apos;ordine (lo vedono anche cliente e padroncino).</p>
+              </>
             ) : (
               <p className="text-sm text-zinc-700">Stato successivo: {ORDER_STATUS_LABEL[next.to]}.</p>
             )}

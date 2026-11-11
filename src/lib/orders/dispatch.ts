@@ -30,6 +30,7 @@ export const DISPATCH_MSG = {
   deliveredWithoutPod: "Consegna registrata senza firma e foto: il pagamento al padroncino non partirà in automatico.",
   chooseCandidate: "Scegli un padroncino e un veicolo.",
   chooseReason: "Scegli il motivo.",
+  noteRequired: "Scrivi il motivo della consegna senza firma e foto (massimo 1000 caratteri).",
   alreadyTaken: "L'ordine è già stato assegnato (forse da un padroncino dall'app). Ricarica la pagina.",
   notAvailable: "L'ordine non è più da assegnare. Ricarica la pagina.",
   tooLate: "La finestra di ritiro è già iniziata: non si può assegnare.",
@@ -63,10 +64,14 @@ export const unassignSchema = z.object({
   reason: z.enum(UNASSIGN_REASONS.map((r) => r.code) as [UnassignReason, ...UnassignReason[]], { error: DISPATCH_MSG.chooseReason }),
 });
 
-export const advanceSchema = z.object({
-  orderId: uuid,
-  to: z.enum(["picked_up", "in_transit", "delivered"]),
-});
+/** "Consegnato" by the admin = without POD: a reason is required (status history note, 2026-11-11). */
+export const advanceSchema = z
+  .object({
+    orderId: uuid,
+    to: z.enum(["picked_up", "in_transit", "delivered"]),
+    note: z.string().trim().max(1000).optional().transform((v) => (v ? v : undefined)),
+  })
+  .refine((v) => v.to !== "delivered" || v.note !== undefined, { path: ["note"] });
 
 type DbError = { code?: string | null; message?: string | null; details?: string | null } | null | undefined;
 
@@ -77,6 +82,7 @@ export function dispatchDbError(error: DbError): string {
     case "42501":
       return DISPATCH_MSG.forbidden;
     case "22023":
+      if (detail === "note") return DISPATCH_MSG.noteRequired;
       return detail === "reason" ? DISPATCH_MSG.chooseReason : DISPATCH_MSG.notFound;
     case "55000":
       if (detail.startsWith("carrier_not_eligible")) return DISPATCH_MSG.carrierNotEligible;

@@ -50,7 +50,7 @@ const historyOf = async (c: TestUser, orderId: string) =>
   (await check(c.client.from("order_status_history").select(HISTORY).eq("order_id", orderId).order("id"))) as History[];
 const steps = (rows: Pick<History, "from_status" | "to_status" | "source">[]) => rows.map((r) => `${r.from_status ?? "∅"}→${r.to_status}:${r.source}`);
 const advance = (orderId: string, to: string) =>
-  run(service.rpc("admin_advance_order", { p_order_id: orderId, p_admin_id: admin.id, p_to_status: to }));
+  run(service.rpc("admin_advance_order", { p_order_id: orderId, p_admin_id: admin.id, p_to_status: to, p_note: to === "delivered" ? "Test" : null }));
 
 type Scenario = { orderId: string; a: Awaited<ReturnType<typeof activeCarrier>>; b: Awaited<ReturnType<typeof activeCarrier>>; aStep: string };
 

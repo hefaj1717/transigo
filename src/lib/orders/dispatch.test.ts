@@ -26,7 +26,12 @@ describe("forms", () => {
     expect(unassignSchema.safeParse({ orderId: O, reason: "il cliente ha chiamato" }).success).toBe(false);
   });
   it("advance: only forward targets", () => {
-    expect(advanceSchema.safeParse({ orderId: O, to: "delivered" }).success).toBe(true);
+    expect(advanceSchema.safeParse({ orderId: O, to: "picked_up" }).success).toBe(true);
+    // delivered without POD needs a reason (2026-11-11)
+    expect(advanceSchema.safeParse({ orderId: O, to: "delivered" }).success).toBe(false);
+    expect(advanceSchema.safeParse({ orderId: O, to: "delivered", note: "   " }).success).toBe(false);
+    expect(advanceSchema.safeParse({ orderId: O, to: "delivered", note: "x".repeat(1001) }).success).toBe(false);
+    expect(advanceSchema.safeParse({ orderId: O, to: "delivered", note: " Portiere " }).data).toEqual({ orderId: O, to: "delivered", note: "Portiere" });
     expect(advanceSchema.safeParse({ orderId: O, to: "paid" }).success).toBe(false);
   });
 });
@@ -38,6 +43,7 @@ describe("dispatchDbError", () => {
     expect(dispatchDbError({ code: "55000", details: "vehicle_not_suitable" })).toBe(DISPATCH_MSG.vehicleNotSuitable);
     expect(dispatchDbError({ code: "55000", details: "picked_up" })).toBe(DISPATCH_MSG.notNextStatus);
     expect(dispatchDbError({ code: "22023", details: "reason" })).toBe(DISPATCH_MSG.chooseReason);
+    expect(dispatchDbError({ code: "22023", details: "note" })).toBe(DISPATCH_MSG.noteRequired);
     expect(dispatchDbError({ code: "42501" })).toBe(DISPATCH_MSG.forbidden);
     expect(dispatchDbError(null)).toBe(DISPATCH_MSG.generic);
   });

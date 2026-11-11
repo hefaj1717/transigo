@@ -109,7 +109,10 @@ Stan:
 - **D128 zrobione (2026-11-10, lokalnie):** migracja `20261110140000_order_status_history_privacy.sql` — sesje nie czytają `changed_by`/`lat`/`lng` z `order_status_history` (zapytania do tej tabeli zawsze z jawną listą kolumn, nie `*`), przewoźnik widzi wiersze od swojego przypisania, admin pełną historię przez `admin_order_status_history()` (`/admin/ordini/[id]`). Testy `tests/rls/carrier-job-history.test.ts`. **Na stagingu od 2026-11-10** (za zgodą właściciela; `db:list` — lokalne = zdalne).
 - **TODO (panel admina):** możliwa pętla „przyjmij → zrezygnuj” w oknie 15 min (jeden przewoźnik blokuje kurs) — licznik rezygnacji przewoźnika w `/admin/padroncini`.
 - **TODO (krok Stripe Connect, D118):** lista i `accept_job()` wymagają `carriers.stripe_payouts_enabled` — migracja + test RLS.
-- Dalej (bez zmian): statusy w PWA, GPS, podpis i zdjęcia (Etap 4/5), „Segnala un problema” (D39), Stripe Connect, SMS.
+- **Realizacja kursu (od 2026-11-11, plan `docs/plany/realizacja-kursu.md` zatwierdzony, D130):**
+  - [x] Krok 1: migracja `20261111100000_carrier_job_execution.sql` (**tylko lokalnie** — staging po zgodzie) — `order_leg_steps`, `order_photos`, `delivery_proofs`, buckety `order-photos`/`pod-signatures`, `carrier_record_step`, `register_order_photo`, `delete_order_photo`, `complete_delivery`, `order_porters_worked_minutes`, `admin_revert_last_step`, `admin_order_execution`, `admin_delivery_proof`; `admin_advance_order` z `p_note` (powód wymagany przy „Consegnato”). Testy `tests/rls/carrier-execution.test.ts`.
+  - [ ] Kroki 2–6: logika, serwer i akcje, ekran kursu, POD u klienta i admina, seed i przegląd.
+- Dalej (bez zmian): GPS (Etap 5), „Segnala un problema” (D39), Stripe Connect, SMS.
 
 ## Struktura folderów (docelowa)
 

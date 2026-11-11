@@ -66,9 +66,11 @@ export async function unassignJob(deps: AdminDeps, input: Record<string, string>
 
 export async function advanceOrder(deps: AdminDeps, input: Record<string, string>): Promise<DispatchResult> {
   const parsed = advanceSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: DISPATCH_MSG.generic };
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues.some((i) => i.path[0] === "note") ? DISPATCH_MSG.noteRequired : DISPATCH_MSG.generic };
+  }
   const { error } = await deps.serviceDb.rpc("admin_advance_order", {
-    p_order_id: parsed.data.orderId, p_admin_id: deps.admin.userId, p_to_status: parsed.data.to,
+    p_order_id: parsed.data.orderId, p_admin_id: deps.admin.userId, p_to_status: parsed.data.to, p_note: parsed.data.note ?? null,
   });
   if (error) {
     if (!expected(error)) log("admin_advance_order", error);

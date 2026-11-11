@@ -1,6 +1,26 @@
 # Plan: realizacja kursu w PWA przewoźnika (statusy, zdjęcia, podpis, czas pracy tragarzy)
 
-**Status: projekt do akceptacji właściciela (2026-11-11).** Nic nie jest jeszcze zrobione. Po akceptacji: po każdym kroku testy, commit, push, krótkie „co sprawdzić” — i stop.
+**Zatwierdzony przez właściciela 2026-11-11** (propozycje 1–9 + doprecyzowania niżej, D130). Po każdym kroku: testy, commit, push, krótkie „co sprawdzić” — i stop.
+
+## Decyzje właściciela (2026-11-11)
+
+1. Osobny przycisk „Inizia il viaggio”.
+2. Kurs od dnia odbioru odcinka (Europe/Rome). Admin może zacząć wcześniej ręcznie (`admin_advance_order` → `picked_up` znosi ograniczenie dnia na odcinku 1).
+3. Bez kolejki offline, ale **zrobione zdjęcie nie ginie**: przy błędzie sieci zostaje na ekranie, „Riprova” wysyła ten sam plik (ta sama ścieżka; `register_order_photo` idempotentne).
+4. Jednorazowa lokalizacja przy kroku, nigdy nie blokuje, czyta ją tylko admin.
+5. Magazyn w modelu A — patrz „Znane ograniczenie”.
+6. Czas tragarzy w dół do pełnych minut.
+7. Odbiorca nie podpisuje → „Contatta Transigo”; admin daje „Consegnato” bez POD **tylko z powodem** (notatka w historii statusów). Zdjęcia ze „Scarico completato” zostają.
+8. Zdjęcia zmniejszane w przeglądarce: dłuższy bok ~1600 px, JPEG ~80 %; limity 1–10 na odcinek i rodzaj, ≤ 5 MB; podpis PNG ≤ 512 KB.
+9. Retencja zdjęć i podpisów — TODO przed startem.
+- Czas kroku zapisuje baza (`now()`), nie telefon; czas tragarzy liczy baza (`order_porters_worked_minutes`), odbiorca widzi wartość z serwera.
+- Kroki tylko w kolejności, sprawdzane w bazie. Ponowne wysłanie kroku = bez duplikatu i bez błędu.
+- Przewoźnik nie cofa kroku; cofnięcie ostatniego kroku tylko admin (`admin_revert_last_step`) z powodem w historii.
+- Imię odbiorcy obowiązkowe.
+
+## Znane ograniczenie (do modelu B, D117)
+
+Zlecenie z magazynem: jeden przewoźnik na oba odcinki; przez cały czas składowania zlecenie ma status `in_transit` (w UI „In magazzino”); w magazynie tylko zdjęcie (bez podpisu); odbiorca w B potwierdza podpisem czas tragarzy **obu** odcinków. Odcinek 2 zaczyna się dopiero w swoim dniu odbioru i admin nie może tego obejść (poza „Consegnato” bez POD). Do zmiany razem z modelem B — przed Etapem 7 i przed startem.
 
 Zakres: Etap 4 — przewoźnik prowadzi przyjęty kurs: kolejne kroki na każdym odcinku, zdjęcia ładunku, podpis i imię odbiorcy (POD), czas pracy tragarzy (D69). Podstawa: spec 8.2 „Esecuzione corsa”, D19, D69, D74, D116, D117 (model A), D123, D128, `docs/db-schema.md` (projekt `order_photos`, `delivery_proofs`, bucketów).
 
@@ -52,11 +72,11 @@ Każdy odcinek ma te same kroki, w tej kolejności (przycisk na dole ekranu kurs
 
 ## Kroki
 
-- [ ] **Krok 1 — migracja + testy RLS** (lokalnie). Staging dopiero po osobnej zgodzie w rozmowie.
+- [x] **Krok 1 — migracja + testy RLS** — zrobione 2026-11-11, **tylko lokalnie** (staging po osobnej zgodzie). `20261111100000_carrier_job_execution.sql`, `tests/rls/carrier-execution.test.ts` (17 testów). Poza planem: `admin_advance_order(..., p_note)` — „Consegnato” bez POD wymaga powodu (22023 `note`), zmienione wywołania (`dispatch.ts`, `dispatch-server.ts`, pole „Motivo” w `/admin/ordini/[id]`, testy, `seed-demo.mjs`). Przy zmianie przewoźnika (rezygnacja / „Rimuovi padroncino”) trigger cofa jego kroki (`reverted_at`, `reverted_by` = null). `delete_order_photo` zwraca ścieżkę — plik usuwa serwer (krok 3).
 - [ ] **Krok 2 — czysta logika `src/lib/carriers/execution.ts` + testy**: następny krok i tekst przycisku, wymagania (zdjęcia, dzień), minuty tragarzy per odcinek i podgląd nadgodzin przez `porterOvertimeCost()`, mapowanie błędów RPC na włoskie komunikaty, etykiety „In magazzino” itp., daty w Europe/Rome.
 - [ ] **Krok 3 — serwer i akcje**: `execution-server.ts` (sesja przewoźnika; service role tylko do maila po udanym `complete_delivery` → `order_delivered`), akcje `recordStepAction`, `registerPhotoAction`, `deletePhotoAction`, `completeDeliveryAction` (DAL → status konta `active`/`suspended` → zod → RPC → `revalidatePath`), test „każdy eksport jako nie-przewoźnik”.
 - [ ] **Krok 4 — ekran kursu (mobile-first, 375 px)** w `/padroncino/le-mie-corse/[id]`: oś kroków per odcinek, jeden przycisk następnego kroku w `stickyActionBar`, zdjęcia (`<input capture>` → przeskalowanie do 2000 px i JPEG w przeglądarce, podgląd, usuwanie przed zamknięciem kroku), opcjonalna lokalizacja przy kroku (pyt. 4), ekran „Conferma consegna”: imię odbiorcy (podpowiedź: kontakt dostawy), czas tragarzy do potwierdzenia, pole podpisu (własny canvas, pointer events, „Cancella”, bez nowej biblioteki), blokada podwójnego wysłania, błędy po włosku z „Riprova”. Baner „Tieni l'app aperta…” dopiero z GPS (Etap 5).
-- [ ] **Krok 5 — klient i admin**: `/cliente/ordini/[id]` — sekcja „Prova di consegna” (imię odbiorcy, godzina, podpis, zdjęcia przez signed URL 5 min sesją klienta) i czas tragarzy; `/admin/ordini/[id]` — kroki z godzinami, zdjęcia, POD, minuty tragarzy, znacznik „senza firma e foto” bez zmian.
+- [ ] **Krok 5 — klient i admin**: przycisk „Annulla ultimo passo” z powodem (`admin_revert_last_step`); `/cliente/ordini/[id]` — sekcja „Prova di consegna” (imię odbiorcy, godzina, podpis, zdjęcia przez signed URL 5 min sesją klienta) i czas tragarzy; `/admin/ordini/[id]` — kroki z godzinami, zdjęcia, POD, minuty tragarzy, znacznik „senza firma e foto” bez zmian.
 - [ ] **Krok 6 — seed, przegląd, dokumentacja**: kursy demo w różnych krokach (1 i 2 odcinki, z tragarzami), przejście w Playwright przy 375 px, lista `docs/testy-reczne/realizacja-kursu.md`, decyzje D130+ w spec, CLAUDE.md.
 
 ## Pytania do właściciela (proponowana odpowiedź w nawiasie)

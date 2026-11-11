@@ -76,7 +76,7 @@ await approveCarrier(galli, admin);
 const mk = (o) => order(customer, o);
 const assign = (o) => ok(service.rpc("admin_assign_job", { p_order_id: o.id, p_carrier_id: ferri.id, p_vehicle_id: ferriVan, p_admin_id: admin.id }));
 const advance = async (o, ...steps) => {
-  for (const to of steps) await ok(service.rpc("admin_advance_order", { p_order_id: o.id, p_admin_id: admin.id, p_to_status: to }));
+  for (const to of steps) await ok(service.rpc("admin_advance_order", { p_order_id: o.id, p_admin_id: admin.id, p_to_status: to, p_note: to === "delivered" ? "Consegna demo (seed)" : null }));
 };
 const accept = (c, o, vehicleId) => ok(c.client.rpc("accept_job", { p_order_id: o.id, p_vehicle_id: vehicleId }));
 

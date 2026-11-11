@@ -11,7 +11,7 @@ let otherCustomer: TestUser;
 
 const assign = (orderId: string, carrierId: string, vehicleId: string) =>
   service.rpc("admin_assign_job", { p_order_id: orderId, p_carrier_id: carrierId, p_vehicle_id: vehicleId, p_admin_id: admin.id });
-const advance = (orderId: string, to: string) => service.rpc("admin_advance_order", { p_order_id: orderId, p_admin_id: admin.id, p_to_status: to });
+const advance = (orderId: string, to: string) => service.rpc("admin_advance_order", { p_order_id: orderId, p_admin_id: admin.id, p_to_status: to, p_note: to === "delivered" ? "Test" : null });
 const carrierOf = async (c: TestUser["client"], orderId: string) => {
   const { data, error } = await c.rpc("customer_order_carrier", { p_order_id: orderId });
   return { rows: (data ?? []) as Record<string, unknown>[], error };

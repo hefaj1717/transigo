@@ -15,8 +15,8 @@ const assign = (orderId: string, carrierId: string, vehicleId: string, adminId =
   service.rpc("admin_assign_job", { p_order_id: orderId, p_carrier_id: carrierId, p_vehicle_id: vehicleId, p_admin_id: adminId });
 const unassign = (orderId: string, reason: string | null = "errore_admin", adminId = admin.id) =>
   service.rpc("admin_unassign_job", { p_order_id: orderId, p_admin_id: adminId, p_reason_code: reason });
-const advance = (orderId: string, to: string, adminId = admin.id) =>
-  service.rpc("admin_advance_order", { p_order_id: orderId, p_admin_id: adminId, p_to_status: to });
+const advance = (orderId: string, to: string, adminId = admin.id, note: string | null = to === "delivered" ? "Consegna confermata al telefono" : null) =>
+  service.rpc("admin_advance_order", { p_order_id: orderId, p_admin_id: adminId, p_to_status: to, p_note: note });
 const lastAudit = async (orderId: string) =>
   (await check(service.from("audit_log").select("action, actor_id, actor_email, entity_type, data").eq("entity_id", orderId).order("id", { ascending: false }).limit(1)))[0];
 const fullOrder = (id: string) =>
@@ -167,6 +167,9 @@ describe("admin_advance_order (D122, D123)", () => {
     expect((await advance(orderId, "picked_up")).error).toMatchObject({ code: "55000", details: "picked_up" }); // twice
     expect((await advance(orderId, "in_transit")).data).toBe("in_transit");
     expect((await fullOrder(orderId)).delivered_without_pod).toBe(false);
+    expect((await advance(orderId, "delivered", admin.id, null)).error).toMatchObject({ code: "22023", details: "note" });
+    expect((await advance(orderId, "delivered", admin.id, "  ")).error).toMatchObject({ code: "22023", details: "note" });
+    expect((await advance(orderId, "delivered", admin.id, "x".repeat(1001))).error).toMatchObject({ code: "22023", details: "note" });
     expect((await advance(orderId, "delivered")).data).toBe("delivered");
 
     const o = await fullOrder(orderId);
@@ -176,6 +179,9 @@ describe("admin_advance_order (D122, D123)", () => {
       ["assigned", "picked_up", "admin_panel"], ["picked_up", "in_transit", "admin_panel"], ["in_transit", "delivered", "admin_panel"],
     ]);
     expect((await lastAudit(orderId)).data).toEqual({ from: "in_transit", to: "delivered", pod: false });
+    const notes = await check(service.from("order_status_history").select("to_status, note").eq("order_id", orderId).order("id"));
+    expect(notes.at(-1)).toEqual({ to_status: "delivered", note: "Consegna confermata al telefono" }); // reason in the history
+    expect(notes.at(-2)?.note).toBeNull();
     expect((await advance(orderId, "delivered")).error).toMatchObject({ code: "55000", details: "delivered" });
   });
 
@@ -234,7 +240,9 @@ describe("dispatch-server: messages and the admin from deps", () => {
     expect(await srv.advanceOrder(deps(), { orderId, to: "picked_up" })).toEqual({ ok: true, message: "Stato aggiornato: Ritirato." });
     expect(await srv.advanceOrder(deps(), { orderId, to: "picked_up" })).toEqual({ ok: false, error: msg.notNextStatus });
     await srv.advanceOrder(deps(), { orderId, to: "in_transit" });
-    const done = await srv.advanceOrder(deps(), { orderId, to: "delivered" });
+    expect(await srv.advanceOrder(deps(), { orderId, to: "delivered" })).toEqual({ ok: false, error: msg.noteRequired });
+    expect(await srv.advanceOrder(deps(), { orderId, to: "delivered", note: "   " })).toEqual({ ok: false, error: msg.noteRequired });
+    const done = await srv.advanceOrder(deps(), { orderId, to: "delivered", note: "Destinatario assente, merce lasciata al portiere" });
     expect(done).toEqual({ ok: true, message: `Stato aggiornato: Consegnato. ${msg.deliveredWithoutPod}` });
   });
 
@@ -263,8 +271,8 @@ describe("dispatch-server: messages and the admin from deps", () => {
     expect(m[1].text_body).not.toContain("Mario");
 
     // Consegnato: order_delivered once, even when advanced to delivered again is refused / repeated
-    for (const to of ["picked_up", "in_transit", "delivered"]) await srv.advanceOrder(deps(), { orderId, to });
-    await srv.advanceOrder(deps(), { orderId, to: "delivered" });
+    for (const to of ["picked_up", "in_transit", "delivered"]) await srv.advanceOrder(deps(), { orderId, to, note: "Test" });
+    await srv.advanceOrder(deps(), { orderId, to: "delivered", note: "Test" });
     m = await mails();
     expect(m.map((x) => x.template_code)).toEqual(["order_assigned", "order_assigned", "order_delivered"]);
   });
