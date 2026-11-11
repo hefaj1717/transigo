@@ -4,7 +4,7 @@ Zakres (spec 9): **Clienti**, **zwroty i decyzje** (`cancellation_review`, `paym
 nieudanego zwrotu), **Reclami**, **Impostazioni**, **pozycje w magazynie**, **Dashboard**. Bez faktur i not
 korygujących (krok 4), bez wypłat i potrąceń (Etap 6 — tu tylko zapis kwoty dla przewoźnika z D40).
 
-**Status:** zatwierdzony 2026-11-11 (D140–D143).
+**Status:** zatwierdzony 2026-11-11 (D140–D143). A–F zrobione 2026-11-11 (migracje `admin_refunds`, `admin_customer_block` lokalnie, staging za zgodą).
 
 ## A. Pieniądze: anulowania, płatności do sprawdzenia, zwroty — migracja `admin_refunds`
 

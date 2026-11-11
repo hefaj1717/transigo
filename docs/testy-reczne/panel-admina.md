@@ -55,3 +55,12 @@ Lokalnie płatności są sztuczne (`pi_demo_…`), więc każdy zwrot zostaje �
    odcinka 1, opłacone do = odbiór z magazynu, dni w magazynie / opłacone, przewoźnik), licznik palet.
 2. „In arrivo” (zlecenia z magazynem przed rozładunkiem, np. 3 i 17), „Usciti” (po załadunku odcinka 2 / dostarczone).
 3. Zlecenie 22 po „Rimuovi padroncino” → w wierszu „Da gestire”. Po terminie „Pagato fino a” → „Periodo pagato scaduto”.
+
+## F. Dashboard
+
+1. `/admin`: kafelki „Da gestire” z liczbami; każdy prowadzi do właściwej listy (filtry zleceń, „Reclami”,
+   „Richieste”, kolejki „Padroncini”). Kafelek > 0 ma żółtą ramkę i napis „Da fare”.
+2. Po decyzji w zleceniu 23 / 24 / 25 i zamknięciu reklamacji liczniki spadają do 0.
+3. „Incassi di <mese>”: zlecenia z płatnością potwierdzoną w miesiącu (czas Rzymu); netto = bez IVA, proporcjonalnie
+   do zwrotów; „Quota padroncini (prevista)” z kwot zlecenia (anulowane — kwota z decyzji); „← mese precedente”.
+4. „Ordini per stato” — suma = liczba zleceń w bazie.
