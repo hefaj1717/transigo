@@ -47,7 +47,7 @@ afterAll(async () => {
 });
 
 describe("price tables are admin-only (D59)", () => {
-  for (const table of ["price_lists", "price_list_vehicle_rates", "price_rules", "price_list_porter_packages"]) {
+  for (const table of ["price_lists", "price_list_vehicle_rates", "price_rules", "price_list_porter_packages", "price_list_storage_boxes"]) {
     it(`anon, cliente, padroncino and a blocked admin read nothing from ${table}`, async () => {
       for (const client of [anon, cliente.client, carrier.client, blockedAdmin.client]) {
         const { data } = await client.from(table).select("*");
@@ -98,7 +98,7 @@ describe("price list versioning (D60)", () => {
     const { count: rates } = await admin.client.from("price_list_vehicle_rates").select("*", { count: "exact", head: true }).eq("price_list_id", draftId);
     const { count: rules } = await admin.client.from("price_rules").select("*", { count: "exact", head: true }).eq("price_list_id", draftId);
     expect(rates).toBeGreaterThan(0);
-    expect(rules).toBe(15); // the 14 seeded rules + porter_overtime_hour filled in by the clone (D68)
+    expect(rules).toBe(16); // the 14 seeded rules + porter_overtime_hour (D68) and porters_floor_no_elevator (D157) filled in by the clone
   });
 
   it("admin edits a draft (list fields, rates, rules)", async () => {
@@ -301,6 +301,143 @@ describe("porter packages and overtime (D67, D68)", () => {
     const draftId = await cloneActiveAsAdmin();
     for (const client of [admin.client, cliente.client, anon]) {
       const { error } = await client.rpc("fill_porter_defaults", { p_price_list_id: draftId });
+      expect(error).not.toBeNull();
+    }
+  });
+});
+
+describe("porters-only service and storage boxes (D154, D157)", () => {
+  const boxesOf = async (listId: string) =>
+    (await admin.client.from("price_list_storage_boxes").select("code, label_it, volume_m3, day_cents, month_cents, sort_order, is_enabled").eq("price_list_id", listId).order("sort_order")).data;
+  const newBox = (listId: string, code = "xl") => ({ price_list_id: listId, code, label_it: "Box XL", volume_m3: 15, day_cents: 1000, month_cents: 20000, sort_order: 4 });
+
+  it("the seeded v1 has no boxes nor floor rule; its clone gets the placeholders and minimums 2 h / 2 persons", async () => {
+    const { data: v1 } = await service.from("price_lists").select("id, porters_min_hours, porters_min_persons").eq("version", 1).single();
+    expect(await boxesOf(v1!.id)).toEqual([]);
+    const { data: v1Rule } = await service.from("price_rules").select("code").eq("price_list_id", v1!.id).eq("code", "porters_floor_no_elevator");
+    expect(v1Rule).toEqual([]);
+    const draftId = (await admin.client.rpc("clone_price_list", { p_source_id: v1!.id })).data as string;
+    createdDrafts.push(draftId);
+    expect(await boxesOf(draftId)).toEqual([
+      { code: "s", label_it: "Box S", volume_m3: 3, day_cents: 300, month_cents: 6000, sort_order: 1, is_enabled: true },
+      { code: "m", label_it: "Box M", volume_m3: 6, day_cents: 500, month_cents: 10000, sort_order: 2, is_enabled: true },
+      { code: "l", label_it: "Box L", volume_m3: 10, day_cents: 800, month_cents: 15000, sort_order: 3, is_enabled: true },
+    ]);
+    const { data: rule } = await admin.client.from("price_rules").select("kind, amount_cents, is_enabled").eq("price_list_id", draftId).eq("code", "porters_floor_no_elevator").single();
+    expect(rule).toEqual({ kind: "per_unit", amount_cents: 1000, is_enabled: true });
+    const { data: list } = await admin.client.from("price_lists").select("porters_min_hours, porters_min_persons").eq("id", draftId).single();
+    expect(list).toEqual({ porters_min_hours: 2, porters_min_persons: 2 });
+  });
+
+  it("admin edits, disables and adds boxes and minimums of a draft; a clone copies them and does not re-add placeholders", async () => {
+    const draftId = await cloneActiveAsAdmin();
+    const a = await admin.client.from("price_list_storage_boxes").update({ label_it: "Box piccolo", volume_m3: 3.5, day_cents: 350, month_cents: 7000, sort_order: 5, is_enabled: false }).eq("price_list_id", draftId).eq("code", "s").select();
+    expect(a.error).toBeNull();
+    expect(a.data?.length).toBe(1);
+    const b = await admin.client.from("price_list_storage_boxes").insert(newBox(draftId));
+    expect(b.error).toBeNull();
+    const c = await admin.client.from("price_list_storage_boxes").delete().eq("price_list_id", draftId).eq("code", "m").select();
+    expect(c.data?.length).toBe(1);
+    const d = await admin.client.from("price_lists").update({ porters_min_hours: 3, porters_min_persons: 3 }).eq("id", draftId).select();
+    expect(d.data?.length).toBe(1);
+    const e = await admin.client.from("price_rules").update({ amount_cents: 1500, is_enabled: false }).eq("price_list_id", draftId).eq("code", "porters_floor_no_elevator").select();
+    expect(e.data?.length).toBe(1);
+
+    const copyId = (await admin.client.rpc("clone_price_list", { p_source_id: draftId })).data as string;
+    createdDrafts.push(copyId);
+    expect(await boxesOf(copyId)).toEqual([
+      { code: "l", label_it: "Box L", volume_m3: 10, day_cents: 800, month_cents: 15000, sort_order: 3, is_enabled: true },
+      { code: "xl", label_it: "Box XL", volume_m3: 15, day_cents: 1000, month_cents: 20000, sort_order: 4, is_enabled: true },
+      { code: "s", label_it: "Box piccolo", volume_m3: 3.5, day_cents: 350, month_cents: 7000, sort_order: 5, is_enabled: false },
+    ]);
+    const { data: list } = await admin.client.from("price_lists").select("porters_min_hours, porters_min_persons").eq("id", copyId).single();
+    expect(list).toEqual({ porters_min_hours: 3, porters_min_persons: 3 });
+    const { data: rule } = await admin.client.from("price_rules").select("amount_cents, is_enabled").eq("price_list_id", copyId).eq("code", "porters_floor_no_elevator").single();
+    expect(rule).toEqual({ amount_cents: 1500, is_enabled: false });
+  });
+
+  it("the box code cannot be changed, even by admin", async () => {
+    const draftId = await cloneActiveAsAdmin();
+    const { error } = await admin.client.from("price_list_storage_boxes").update({ code: "zz" }).eq("price_list_id", draftId).eq("code", "s");
+    expect(error).not.toBeNull();
+  });
+
+  it("non-admins cannot read, change, add or delete boxes of a draft, nor change the minimums", async () => {
+    const draftId = await cloneActiveAsAdmin();
+    for (const client of [cliente.client, carrier.client, blockedAdmin.client, anon]) {
+      const read = await client.from("price_list_storage_boxes").select("code").eq("price_list_id", draftId);
+      expect(read.data ?? []).toEqual([]);
+      const upd = await client.from("price_list_storage_boxes").update({ day_cents: 1 }).eq("price_list_id", draftId).select();
+      expect(upd.data ?? []).toEqual([]);
+      const ins = await client.from("price_list_storage_boxes").insert(newBox(draftId, "hack"));
+      expect(ins.error).not.toBeNull();
+      const del = await client.from("price_list_storage_boxes").delete().eq("price_list_id", draftId).select();
+      expect(del.data ?? []).toEqual([]);
+      const min = await client.from("price_lists").update({ porters_min_hours: 9 }).eq("id", draftId).select();
+      expect(min.data ?? []).toEqual([]);
+    }
+    expect((await boxesOf(draftId))?.map((b) => [b.code, b.day_cents])).toEqual([["s", 300], ["m", 500], ["l", 800]]);
+    const { data: list } = await service.from("price_lists").select("porters_min_hours").eq("id", draftId).single();
+    expect(list?.porters_min_hours).toBe(2);
+  });
+
+  it("boxes, minimums and floor rule of the published list are read-only for admin and service role", async () => {
+    expect((await boxesOf(activeId))?.length).toBe(3); // the active list is a clone published above
+    for (const client of [admin.client, service]) {
+      const r1 = await client.from("price_list_storage_boxes").update({ day_cents: 1 }).eq("price_list_id", activeId).eq("code", "s");
+      expect(r1.error).not.toBeNull();
+      const r2 = await client.from("price_list_storage_boxes").delete().eq("price_list_id", activeId).eq("code", "s");
+      expect(r2.error).not.toBeNull();
+      const r3 = await client.from("price_list_storage_boxes").insert(newBox(activeId));
+      expect(r3.error).not.toBeNull();
+      const r4 = await client.from("price_lists").update({ porters_min_hours: 5 }).eq("id", activeId);
+      expect(r4.error).not.toBeNull();
+      const r5 = await client.from("price_rules").update({ amount_cents: 1 }).eq("price_list_id", activeId).eq("code", "porters_floor_no_elevator");
+      expect(r5.error).not.toBeNull();
+    }
+    expect((await boxesOf(activeId))?.find((b) => b.code === "s")?.day_cents).toBe(300);
+  });
+
+  it("checks reject bad box values, minimums outside range and a non per_unit floor rule", async () => {
+    const draftId = await cloneActiveAsAdmin();
+    for (const patch of [{ day_cents: 0 }, { month_cents: 0 }, { volume_m3: 0 }, { volume_m3: 101 }, { label_it: " " }, { sort_order: 1000 }]) {
+      const { error } = await admin.client.from("price_list_storage_boxes").update(patch).eq("price_list_id", draftId).eq("code", "s");
+      expect(error, JSON.stringify(patch)).not.toBeNull();
+    }
+    for (const code of ["XL", "a b", "", "x".repeat(21)]) {
+      const { error } = await admin.client.from("price_list_storage_boxes").insert(newBox(draftId, code));
+      expect(error, code).not.toBeNull();
+    }
+    for (const patch of [{ porters_min_hours: 0 }, { porters_min_hours: 13 }, { porters_min_persons: 1 }, { porters_min_persons: 5 }]) {
+      const { error } = await admin.client.from("price_lists").update(patch).eq("id", draftId);
+      expect(error, JSON.stringify(patch)).not.toBeNull();
+    }
+    const { error } = await admin.client.from("price_rules").update({ kind: "fixed" }).eq("price_list_id", draftId).eq("code", "porters_floor_no_elevator");
+    expect(error).not.toBeNull();
+  });
+
+  it("publishing a draft without the floor rule fails; without boxes it succeeds (boxes are optional)", async () => {
+    const noRule = await cloneActiveAsAdmin();
+    await admin.client.from("price_rules").delete().eq("price_list_id", noRule).eq("code", "porters_floor_no_elevator");
+    const a = await admin.client.rpc("publish_price_list", { p_price_list_id: noRule });
+    expect(a.error?.message).toMatch(/missing 1 pricing rule/);
+    expect((await activeList()).id).toBe(activeId);
+
+    const noBoxes = await cloneActiveAsAdmin();
+    await admin.client.from("price_list_storage_boxes").delete().eq("price_list_id", noBoxes);
+    const b = await admin.client.rpc("publish_price_list", { p_price_list_id: noBoxes });
+    expect(b.error).toBeNull();
+    // Restore the previous content (with boxes) as the active list for later tests.
+    const restoredId = (await admin.client.rpc("clone_price_list", { p_source_id: activeId })).data as string;
+    expect((await admin.client.rpc("publish_price_list", { p_price_list_id: restoredId })).error).toBeNull();
+    activeId = restoredId;
+    expect((await boxesOf(activeId))?.length).toBe(3);
+  });
+
+  it("fill_service_defaults is not callable through the API", async () => {
+    const draftId = await cloneActiveAsAdmin();
+    for (const client of [admin.client, cliente.client, anon]) {
+      const { error } = await client.rpc("fill_service_defaults", { p_price_list_id: draftId });
       expect(error).not.toBeNull();
     }
   });

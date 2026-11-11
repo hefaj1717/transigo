@@ -1,4 +1,4 @@
-import { PORTER_PACKAGE_CODES, PRICE_RULE_CODES, type PorterPackage, type PorterPackageCode, type PriceRule, type PriceRuleCode, type PriceRuleKind, type PricingConfig, type StorageBillingUnit } from "./types";
+import { PORTER_PACKAGE_CODES, PRICE_RULE_CODES, type PorterPackage, type PorterPackageCode, type PriceRule, type PriceRuleCode, type PriceRuleKind, type PricingConfig, type StorageBillingUnit, type StorageBox } from "./types";
 
 // Pure mapping from database rows (snake_case, as returned by Supabase) to PricingConfig.
 
@@ -11,6 +11,8 @@ export type PriceListRow = {
   storage_short_term_max_days: number;
   storage_billing_unit: StorageBillingUnit;
   porter_overtime_grace_minutes: number;
+  porters_min_hours: number;
+  porters_min_persons: number;
   notes: string | null;
   published_at: string | null;
 };
@@ -32,6 +34,16 @@ export type PriceRuleRow = {
 
 export type PorterPackageRow = { code: string; porters_count: number; included_hours: number; is_enabled: boolean };
 
+export type StorageBoxRow = {
+  code: string;
+  label_it: string;
+  volume_m3: number | string; // numeric(5,2); PostgREST may send it as a string
+  day_cents: number;
+  month_cents: number;
+  sort_order: number;
+  is_enabled: boolean;
+};
+
 export type PricingSettingsRow = { max_route_distance_m: number; min_booking_lead_hours: number };
 
 export function toPricingConfig(input: {
@@ -39,6 +51,7 @@ export function toPricingConfig(input: {
   rates: VehicleRateRow[];
   rules: PriceRuleRow[];
   packages?: PorterPackageRow[];
+  boxes?: StorageBoxRow[];
   holidays: { date: string }[];
   provinces: { province_code: string }[];
   settings: PricingSettingsRow;
@@ -53,6 +66,23 @@ export function toPricingConfig(input: {
     .filter((p) => packageCodes.has(p.code))
     .map((p) => ({ code: p.code as PorterPackageCode, portersCount: p.porters_count, includedHours: p.included_hours, isEnabled: p.is_enabled }));
 
+  // The porters-only service (D151, D157) exists only in lists that carry its floor rule (created by the
+  // pricing_services migration or "Crea bozza"); a disabled rule means no floor surcharge.
+  const floorRule = input.rules.find((r) => r.code === "porters_floor_no_elevator");
+  const portersService = floorRule
+    ? {
+        minPersons: input.list.porters_min_persons,
+        minHours: input.list.porters_min_hours,
+        floorNoElevatorCents: floorRule.is_enabled ? floorRule.amount_cents : null,
+      }
+    : null;
+
+  // Disabled boxes are kept: the engine rejects them, the admin preview still lists them.
+  const storageBoxes: StorageBox[] = [...(input.boxes ?? [])]
+    .map((b) => ({ ...b, volume: Number(b.volume_m3) }))
+    .sort((a, b) => a.sort_order - b.sort_order || a.volume - b.volume || a.code.localeCompare(b.code))
+    .map((b) => ({ code: b.code, labelIt: b.label_it, volumeM3: b.volume, dayCents: b.day_cents, monthCents: b.month_cents, isEnabled: b.is_enabled }));
+
   return {
     priceListId: input.list.id,
     priceListVersion: input.list.version,
@@ -62,9 +92,8 @@ export function toPricingConfig(input: {
     storageBillingUnit: input.list.storage_billing_unit,
     porterOvertimeGraceMinutes: input.list.porter_overtime_grace_minutes,
     porterPackages,
-    // Filled from the price list once the pricing_services migration exists (plan tre-servizi, step 3).
-    portersService: null,
-    storageBoxes: [],
+    portersService,
+    storageBoxes,
     // Only active vehicle types can be quoted.
     vehicleRates: input.rates
       .filter((r) => r.vehicle_types?.is_active)

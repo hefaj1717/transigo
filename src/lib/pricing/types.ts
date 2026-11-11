@@ -7,6 +7,7 @@ export const PRICE_RULE_CODES = [
   "surcharge_floor_no_elevator",
   "porter_hour",
   "porter_overtime_hour",
+  "porters_floor_no_elevator",
   "packing_flat",
   "packing_per_item",
   "storage_day",

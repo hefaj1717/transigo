@@ -35,6 +35,8 @@ const settingsSchema = z.object({
   storage_short_term_max_days: z.coerce.number().int().min(1).max(3650),
   storage_billing_unit: z.enum(["day", "pallet_day"]),
   porter_overtime_grace_minutes: z.coerce.number().int().min(0).max(120),
+  porters_min_hours: z.coerce.number().int().min(1).max(12), // D157
+  porters_min_persons: z.coerce.number().int().min(2).max(4), // D157, D54
   notes: z.string().max(1000),
 });
 
@@ -47,6 +49,8 @@ export async function updateListSettingsAction(_prev: ActionResult, fd: FormData
     storage_short_term_max_days: str(fd, "storage_short_term_max_days"),
     storage_billing_unit: str(fd, "storage_billing_unit"),
     porter_overtime_grace_minutes: str(fd, "porter_overtime_grace_minutes"),
+    porters_min_hours: str(fd, "porters_min_hours"),
+    porters_min_persons: str(fd, "porters_min_persons"),
     notes: str(fd, "notes"),
   });
   const vatBp = parsed.success ? parsePercentToBp(parsed.data.vat) : null;
@@ -57,6 +61,8 @@ export async function updateListSettingsAction(_prev: ActionResult, fd: FormData
     storage_short_term_max_days: parsed.data.storage_short_term_max_days,
     storage_billing_unit: parsed.data.storage_billing_unit,
     porter_overtime_grace_minutes: parsed.data.porter_overtime_grace_minutes,
+    porters_min_hours: parsed.data.porters_min_hours,
+    porters_min_persons: parsed.data.porters_min_persons,
     notes: parsed.data.notes || null,
   };
   const { data, error } = await db.from("price_lists").update(patch).eq("id", id).select("id");
@@ -164,6 +170,72 @@ export async function updatePackagesAction(_prev: ActionResult, fd: FormData): P
   await audit(ctx, "price_list.porter_packages", "price_list", id, { packages: rows });
   refresh();
   return ok("Categorie facchinaggio salvate.");
+}
+
+const BOX_CODE = /^[a-z0-9_]{1,20}$/;
+
+/** "3", "3,5" or "3.25" → 3.25 (m³, at most 2 decimals, 0 < v ≤ 100 as in the table check); else null. */
+function parseVolume(raw: string): number | null {
+  if (!/^\d{1,3}([.,]\d{1,2})?$/.test(raw)) return null;
+  const value = Number(raw.replace(",", "."));
+  return value > 0 && value <= 100 ? value : null;
+}
+
+type BoxPatch = { label_it: string; volume_m3: number; day_cents: number; month_cents: number; sort_order: number; is_enabled: boolean };
+
+function parseBox(fd: FormData, prefix: string): BoxPatch | string {
+  const label = str(fd, `label_${prefix}`);
+  const volume = parseVolume(str(fd, `volume_${prefix}`));
+  const day = parseEuroToCents(str(fd, `day_${prefix}`));
+  const month = parseEuroToCents(str(fd, `month_${prefix}`));
+  const order = z.coerce.number().int().min(0).max(999).safeParse(str(fd, `order_${prefix}`) || "0");
+  if (label.length < 1 || label.length > 60) return "nome da 1 a 60 caratteri";
+  if (volume === null) return "volume in m³ tra 0,01 e 100";
+  if (!day || !month) return "prezzi al giorno e al mese maggiori di zero (es. 3,00)";
+  if (!order.success) return "ordine 0–999";
+  return { label_it: label, volume_m3: volume, day_cents: day, month_cents: month, sort_order: order.data, is_enabled: fd.get(`enabled_${prefix}`) === "on" };
+}
+
+/** Storage boxes of a draft (D154): edit existing ones (also disable) and optionally add one. */
+export async function updateStorageBoxesAction(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
+  const { ctx, db } = await adminAction();
+  const id = idFrom(fd);
+  if (!id) return { error: "Listino non valido." };
+
+  const { data: existing, error: readError } = await db.from("price_list_storage_boxes").select("code").eq("price_list_id", id);
+  if (readError) return dbError(readError);
+  const have = new Set((existing ?? []).map((r) => r.code as string));
+
+  const updates: ({ code: string } & BoxPatch)[] = [];
+  for (const code of fd.getAll("box_code").map(String)) {
+    if (!have.has(code)) return { error: "Box non valido: ricarica la pagina." };
+    const box = parseBox(fd, code);
+    if (typeof box === "string") return { error: `Box "${code}": ${box}.` };
+    updates.push({ code, ...box });
+  }
+
+  let added: ({ code: string } & BoxPatch) | null = null;
+  const newCode = str(fd, "new_code").toLowerCase();
+  const newFilled = ["label_new", "volume_new", "day_new", "month_new"].some((k) => str(fd, k) !== "");
+  if (newCode || newFilled) {
+    if (!BOX_CODE.test(newCode)) return { error: "Nuovo box: codice di 1–20 caratteri (lettere minuscole, cifre, _)." };
+    if (have.has(newCode)) return { error: `Nuovo box: il codice "${newCode}" esiste già.` };
+    const box = parseBox(fd, "new");
+    if (typeof box === "string") return { error: `Nuovo box: ${box}.` };
+    added = { code: newCode, ...box };
+  }
+
+  for (const { code, ...patch } of updates) {
+    const { error } = await db.from("price_list_storage_boxes").update(patch).eq("price_list_id", id).eq("code", code);
+    if (error) return dbError(error);
+  }
+  if (added) {
+    const { error } = await db.from("price_list_storage_boxes").insert({ price_list_id: id, ...added });
+    if (error) return dbError(error);
+  }
+  await audit(ctx, "price_list.storage_boxes", "price_list", id, { boxes: updates, added });
+  refresh();
+  return ok(added ? `Box salvati, aggiunto "${added.label_it}".` : "Box salvati.");
 }
 
 export async function publishListAction(_prev: ActionResult, fd: FormData): Promise<ActionResult> {

@@ -10,7 +10,7 @@ import { formatBp, formatCents } from "@/lib/pricing/money";
 import { KIND_LABEL, PORTER_PACKAGE_LABEL, RULE_META } from "@/lib/pricing/rule-meta";
 import { PORTER_PACKAGE_CODES, PRICE_RULE_CODES, type PriceRuleKind } from "@/lib/pricing/types";
 import { romeDate } from "@/lib/pricing/calendar";
-import { deleteDraftAction, publishListAction, updateListSettingsAction, updatePackagesAction, updateRatesAction, updateRulesAction } from "../actions";
+import { deleteDraftAction, publishListAction, updateListSettingsAction, updatePackagesAction, updateRatesAction, updateRulesAction, updateStorageBoxesAction } from "../actions";
 import { QuotePreview } from "../quote-preview";
 
 export const metadata = { title: "Listino – Transigo" };
@@ -38,12 +38,13 @@ async function Content({ params }: { params: Promise<{ id: string }> }) {
   if (!z.uuid().safeParse(id).success) notFound();
 
   const db = await createClient();
-  const [{ data: list }, { data: vehicles }, { data: rates }, { data: rules }, { data: packages }] = await Promise.all([
+  const [{ data: list }, { data: vehicles }, { data: rates }, { data: rules }, { data: packages }, { data: boxes }] = await Promise.all([
     db.from("price_lists").select("*").eq("id", id).maybeSingle(),
     db.from("vehicle_types").select("id, name_it, is_active, size_rank").order("size_rank"),
     db.from("price_list_vehicle_rates").select("vehicle_type_id, rate_per_km_cents, min_price_cents").eq("price_list_id", id),
     db.from("price_rules").select("code, kind, amount_cents, percent_bp, is_enabled").eq("price_list_id", id),
     db.from("price_list_porter_packages").select("code, porters_count, included_hours, is_enabled").eq("price_list_id", id),
+    db.from("price_list_storage_boxes").select("code, label_it, volume_m3, day_cents, month_cents, sort_order, is_enabled").eq("price_list_id", id).order("sort_order").order("volume_m3"),
   ]);
   if (!list) notFound();
 
@@ -54,6 +55,8 @@ async function Content({ params }: { params: Promise<{ id: string }> }) {
   const missingRules = PRICE_RULE_CODES.filter((c) => !ruleBy.has(c));
   const packageBy = new Map((packages ?? []).map((p) => [p.code as string, p]));
   const missingPackages = PORTER_PACKAGE_CODES.filter((c) => !packageBy.has(c));
+  const hasPortersService = ruleBy.has("porters_floor_no_elevator");
+  const enabledBoxes = (boxes ?? []).filter((b) => b.is_enabled).length;
 
 
   return (
@@ -72,6 +75,14 @@ async function Content({ params }: { params: Promise<{ id: string }> }) {
       {!editable && missingPackages.length ? (
         <p className="mb-4 rounded-md bg-amber-50 p-3 text-sm text-amber-900">Questo listino non ha categorie facchinaggio: il facchinaggio non è prenotabile. Crea una bozza e pubblicala.</p>
       ) : null}
+      {!editable && (!hasPortersService || !boxes?.length) ? (
+        <p className="mb-4 rounded-md bg-amber-50 p-3 text-sm text-amber-900">
+          Questo listino non ha {[!hasPortersService ? "le impostazioni del facchinaggio senza trasporto" : "", !boxes?.length ? "i box del deposito" : ""].filter(Boolean).join(" né ")}: questi servizi non sono prenotabili. Crea una bozza e pubblicala.
+        </p>
+      ) : null}
+      {editable && !enabledBoxes ? (
+        <p className="mb-4 rounded-md bg-amber-50 p-3 text-sm text-amber-900">Nessun box attivo: il deposito per privati non sarà prenotabile.</p>
+      ) : null}
 
       <section className="mb-8">
         <h2 className="mb-2 text-lg font-semibold">Impostazioni</h2>
@@ -87,6 +98,8 @@ async function Content({ params }: { params: Promise<{ id: string }> }) {
               </select>
             </label>
             <label className="flex flex-col gap-1">Facchinaggio: tolleranza ore extra (min)<input name="porter_overtime_grace_minutes" defaultValue={list.porter_overtime_grace_minutes} className={inputClass} /></label>
+            <label className="flex flex-col gap-1">Facchinaggio senza trasporto: ore minime<input name="porters_min_hours" defaultValue={list.porters_min_hours} className={inputClass} /></label>
+            <label className="flex flex-col gap-1">Facchinaggio senza trasporto: persone minime (2–4)<input name="porters_min_persons" defaultValue={list.porters_min_persons} className={inputClass} /></label>
             <label className="col-span-2 flex flex-col gap-1 sm:col-span-4">Note<input name="notes" defaultValue={list.notes ?? ""} className={inputClass} /></label>
           </div>
         </ActionForm>
@@ -94,7 +107,8 @@ async function Content({ params }: { params: Promise<{ id: string }> }) {
           <p className="text-sm">
             IVA {formatBp(list.vat_rate_bp)}% · urgente entro {list.urgent_lead_hours} h · deposito breve fino a {list.storage_short_term_max_days} giorni ·
             tariffa deposito {list.storage_billing_unit === "day" ? "al giorno" : "per pallet al giorno"} ·
-            tolleranza ore extra facchinaggio {list.porter_overtime_grace_minutes} min
+            tolleranza ore extra facchinaggio {list.porter_overtime_grace_minutes} min ·
+            facchinaggio senza trasporto: minimo {list.porters_min_persons} persone × {list.porters_min_hours} h
           </p>
         ) : null}
       </section>
@@ -142,6 +156,43 @@ async function Content({ params }: { params: Promise<{ id: string }> }) {
             </tbody>
           </table>
           <p className="mt-1 text-xs text-zinc-500">Prezzo = persone × ore incluse × tariffa «Facchinaggio (ore incluse)». Il cliente può aggiungere persone (max 4), non ore. Ore extra: regola «ora extra iniziata», oltre la tolleranza.</p>
+        </ActionForm>
+      </section>
+
+      <section className="mb-8">
+        <h2 className="mb-2 text-lg font-semibold">Deposito – box per privati</h2>
+        <ActionForm action={updateStorageBoxesAction} submitLabel="Salva box" hideSubmit={!editable}>
+          <input type="hidden" name="id" value={list.id} />
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left text-zinc-500"><tr><th className="py-1">Codice</th><th>Nome</th><th>m³</th><th>€/giorno</th><th>€/mese</th><th>Ordine</th><th /></tr></thead>
+              <tbody>
+                {(boxes ?? []).map((b) => (
+                  <tr key={b.code} className="border-t border-zinc-100">
+                    <td className="py-1 font-mono">{b.code}<input type="hidden" name="box_code" value={b.code} /></td>
+                    <td><input name={`label_${b.code}`} defaultValue={b.label_it} disabled={!editable} className={`${inputClass} w-32`} /></td>
+                    <td><input name={`volume_${b.code}`} defaultValue={String(b.volume_m3).replace(".", ",")} disabled={!editable} className={`${inputClass} w-16`} /></td>
+                    <td><input name={`day_${b.code}`} defaultValue={euro(b.day_cents)} disabled={!editable} className={`${inputClass} w-20`} /></td>
+                    <td><input name={`month_${b.code}`} defaultValue={euro(b.month_cents)} disabled={!editable} className={`${inputClass} w-20`} /></td>
+                    <td><input name={`order_${b.code}`} defaultValue={b.sort_order} disabled={!editable} className={`${inputClass} w-14`} /></td>
+                    <td><label className="flex items-center gap-1"><input type="checkbox" name={`enabled_${b.code}`} defaultChecked={b.is_enabled} disabled={!editable} /> attivo</label></td>
+                  </tr>
+                ))}
+                {editable ? (
+                  <tr className="border-t border-zinc-200">
+                    <td className="py-1"><input name="new_code" placeholder="nuovo" className={`${inputClass} w-20 font-mono`} /></td>
+                    <td><input name="label_new" placeholder="Box XL" className={`${inputClass} w-32`} /></td>
+                    <td><input name="volume_new" className={`${inputClass} w-16`} /></td>
+                    <td><input name="day_new" className={`${inputClass} w-20`} /></td>
+                    <td><input name="month_new" className={`${inputClass} w-20`} /></td>
+                    <td><input name="order_new" className={`${inputClass} w-14`} /></td>
+                    <td><label className="flex items-center gap-1"><input type="checkbox" name="enabled_new" defaultChecked /> attivo</label></td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-1 text-xs text-zinc-500">Prezzo = mesi interi (30 giorni) × €/mese + giorni restanti × €/giorno; i giorni restanti non costano più di un mese. Il codice non si può cambiare: per togliere un box disattivalo. Per aggiungerne uno compila l&apos;ultima riga.</p>
         </ActionForm>
       </section>
 

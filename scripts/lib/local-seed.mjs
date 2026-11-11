@@ -304,17 +304,19 @@ export const legsToTodaySql = (id) => `
     from public.order_legs l where l.order_id = o.id and l.leg_index = 0 and o.id = ${sqlUuid(id)};`;
 
 /**
- * Porters (D67) need a price list with porter packages; the migrations' list v1 has none. When the active list
- * lacks them, the admin clones it (clone_price_list adds the placeholder packages and the overtime rule) and
- * publishes the clone — exactly what "Crea bozza" → "Pubblica" does in /admin/listini. LOCAL database only.
+ * Porters (D67) need a price list with porter packages, the porters-only service and storage boxes need its
+ * floor rule and boxes (D154, D157); the migrations' list v1 has none of them. When the active list lacks any,
+ * the admin clones it (clone_price_list adds the placeholder packages, rules and boxes) and publishes the clone — exactly what "Crea bozza" → "Pubblica" does in /admin/listini. LOCAL database only.
  */
 export async function ensurePorterPackages(admin) {
   const active = await ok(service.from("price_lists").select("id, version").eq("status", "active").single());
   const packages = await ok(service.from("price_list_porter_packages").select("code").eq("price_list_id", active.id));
-  if (packages.length) return;
+  const floorRule = await ok(service.from("price_rules").select("code").eq("price_list_id", active.id).eq("code", "porters_floor_no_elevator"));
+  const boxes = await ok(service.from("price_list_storage_boxes").select("code").eq("price_list_id", active.id));
+  if (packages.length && floorRule.length && boxes.length) return;
   const draftId = await ok(admin.client.rpc("clone_price_list", { p_source_id: active.id }));
   await ok(admin.client.rpc("publish_price_list", { p_price_list_id: draftId }));
-  console.log(`Listino: pubblicata una nuova versione con i pacchetti facchini (da v${active.version}).`);
+  console.log(`Listino: pubblicata una nuova versione con i pacchetti facchini e i box deposito (da v${active.version}).`);
 }
 
 /** A valid, deterministic partita IVA (check digit as in src/lib/auth/italian-ids.ts); `k` keeps them unique. */

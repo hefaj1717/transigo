@@ -45,7 +45,7 @@ stronie głównej, każda usługa ma własną podstronę i własny kreator. Teks
 - `price_rule_code` + `porters_floor_no_elevator`.
 - `price_lists.porters_min_hours` (domyślnie 2), `porters_min_persons` (domyślnie 2).
 - `price_list_storage_boxes` (wersjonowana jak `price_list_porter_packages`): `code`, `label_it`, `volume_m3`,
-  `day_cents`, `month_cents`, `is_active`, kolejność. Tylko admin; opublikowanego cennika nie da się zmienić.
+  `day_cents`, `month_cents`, `is_enabled`, `sort_order`. Tylko admin; opublikowanego cennika nie da się zmienić.
 - `config-from-db.ts`, `/admin/listini` (nowe pola i tabela boxów), testy RLS `tests/rls/pricing.test.ts`.
 
 ## 4. Strona publiczna
@@ -109,7 +109,7 @@ stronie głównej, każda usługa ma własną podstronę i własny kreator. Teks
 
 1. Decyzje D151–D158 + ten plan. ✔
 2. Silnik cenowy (sekcja 2). ✔ (2026-11-11; stawka za piętro w `PricingConfig.portersService.floorNoElevatorCents` — loader wypełni ją z reguły `porters_floor_no_elevator` w kroku 3)
-3. Migracja 1 — cennik (SQL do akceptacji) + `/admin/listini`.
+3. Migracja 1 — cennik (SQL do akceptacji) + `/admin/listini`. ✔ (2026-11-11, D161; migracje `20261111190000_pricing_services_code.sql` + `20261111190001_pricing_services.sql` lokalnie; opublikowane cenniki bez zmian — usługi dostępne po „Crea bozza” → „Pubblica”)
 4. Strona publiczna (sekcja 4).
 5. Migracja 2 — zlecenia (SQL do akceptacji) + filtr w `/admin/ordini`.
 6. Kreator Facchini → płatność → admin przypisuje → „Consegnato”.

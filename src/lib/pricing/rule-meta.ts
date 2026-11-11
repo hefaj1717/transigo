@@ -10,6 +10,7 @@ export const RULE_META: Record<PriceRuleCode, RuleMeta> = {
   surcharge_floor_no_elevator: { label: "Piano senza ascensore", section: "Supplementi", kinds: ["per_unit"], unit: "piano" },
   porter_hour: { label: "Facchinaggio (ore incluse)", section: "Servizi", kinds: ["per_unit"], unit: "persona/ora" },
   porter_overtime_hour: { label: "Facchinaggio, ora extra iniziata", section: "Servizi", kinds: ["per_unit"], unit: "persona/ora" },
+  porters_floor_no_elevator: { label: "Facchinaggio senza trasporto, piano senza ascensore", section: "Servizi", kinds: ["per_unit"], unit: "piano" },
   packing_flat: { label: "Imballaggio, forfait", section: "Servizi", kinds: ["fixed"] },
   packing_per_item: { label: "Imballaggio, per collo", section: "Servizi", kinds: ["per_unit"], unit: "collo" },
   transshipment_flat: { label: "Trasbordo (0 giorni)", section: "Deposito", kinds: ["fixed"] },
