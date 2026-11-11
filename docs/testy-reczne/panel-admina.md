@@ -27,4 +27,4 @@ Lokalnie płatności są sztuczne (`pi_demo_…`), więc każdy zwrot zostaje �
    zlecenie z linkiem, przewoźnik, kontakt do klienta. `/admin/ordini/[id]` zlecenia 20 pokazuje „Reclamo aperto … apri”.
 3. „Chiudi il reclamo” bez tekstu → przeglądarka wymaga pola; z tekstem → „Chiuso”, odpowiedź z datą i adminem.
    `/admin/email`: `claim_closed` do klienta. Klient w „I miei reclami” widzi „Chiuso” i odpowiedź.
-4. Druga karta z tym samym reklamacją otwartą wcześniej → „Chiudi” → „Il reclamo era già chiuso.”
+4. Druga karta z tą samą reklamacją otwartą wcześniej → „Chiudi” → „Il reclamo era già chiuso.”
