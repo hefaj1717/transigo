@@ -42,6 +42,7 @@ export type OrderLineType =
   | "surcharge_weekend_holiday"
   | "surcharge_floors"
   | "porters"
+  | "porters_floors" // porters-only service (D157); DB enum value added with the orders migration (D151)
   | "packing"
   | "storage";
 
@@ -62,6 +63,23 @@ export type VehicleRate = {
   minPriceCents: number;
 };
 
+/** Porters-only service settings of a price list (D151, D157). Rate per person-hour = rule porter_hour. */
+export type PortersServiceConfig = {
+  minPersons: number; // D157: at least 2
+  minHours: number; // minimum billed hours per person
+  floorNoElevatorCents: number | null; // per floor without elevator; null = no surcharge
+};
+
+/** Storage box for private customers (D154). Price = full 30-day months × month + remaining days × day. */
+export type StorageBox = {
+  code: string;
+  labelIt: string;
+  volumeM3: number;
+  dayCents: number;
+  monthCents: number;
+  isEnabled: boolean;
+};
+
 /** Everything calculatePrice needs besides the order itself. Built by the server-side loader. */
 export type PricingConfig = {
   priceListId: string;
@@ -72,6 +90,8 @@ export type PricingConfig = {
   storageBillingUnit: StorageBillingUnit; // D55
   porterOvertimeGraceMinutes: number; // D68
   porterPackages: PorterPackage[]; // D67
+  portersService: PortersServiceConfig | null; // D151; null = porters-only service not offered
+  storageBoxes: StorageBox[]; // D154, ordered by size
   vehicleRates: VehicleRate[]; // active vehicle types with a rate in this price list
   rules: PriceRule[];
   holidays: string[]; // "YYYY-MM-DD" (Europe/Rome calendar dates), D27

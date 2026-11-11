@@ -62,6 +62,9 @@ export function toPricingConfig(input: {
     storageBillingUnit: input.list.storage_billing_unit,
     porterOvertimeGraceMinutes: input.list.porter_overtime_grace_minutes,
     porterPackages,
+    // Filled from the price list once the pricing_services migration exists (plan tre-servizi, step 3).
+    portersService: null,
+    storageBoxes: [],
     // Only active vehicle types can be quoted.
     vehicleRates: input.rates
       .filter((r) => r.vehicle_types?.is_active)

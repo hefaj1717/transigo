@@ -131,7 +131,7 @@ Priorytet właściciela: najpierw cała strona (publiczna + panel klienta + pane
 Plan `docs/plany/tre-servizi.md`, decyzje D151–D158. Trasporto, Facchinaggio i Deposito równorzędne (strona główna z zakładkami w hero, 3 podstrony, 3 kreatory). Facchinaggio wykonują przewoźnicy z `offers_porters` (D152). Łańcuch z magazynem = osobne powiązane zlecenia, jedna płatność i jedna faktura — **zastępuje model B (D117)**. Deposito na okres stały, boxy dla privati, raty miesięczne > 2 mies., „Prolunga” przy wolnym miejscu (D154–D156).
 
 - [x] Krok 1: decyzje i plan.
-- [ ] Krok 2: silnik cenowy (facchinaggio, boxy, raty) + testy.
+- [x] Krok 2: silnik cenowy (bez bazy): `calculatePortersPrice()` (`porters-service.ts`), `calculateStoragePrice()` + `storageBoxCost()` (`storage-service.ts`), `installmentPlan()` (`installments.ts`); VAT i udział przewoźnika wspólne w `finalize.ts`. `PricingConfig.portersService` / `storageBoxes` — loader daje `null` / `[]` do migracji 1 (usługi niedostępne). Bez dopłat pilne/weekend przy facchinaggio; VAT raty liczony od jej netto.
 - [ ] Krok 3: migracja 1 — cennik (SQL do akceptacji) + `/admin/listini`.
 - [ ] Kroki 4–11: wg planu (strona publiczna, migracja 2 — zlecenia, kreatory Facchini / Deposito / Trasporto, panele, raty i „Prolunga”, seed i staging).
 

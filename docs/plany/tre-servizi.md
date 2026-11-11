@@ -107,7 +107,7 @@ stronie głównej, każda usługa ma własną podstronę i własny kreator. Teks
 ## 8. Kolejność (po każdym kroku commit + push)
 
 1. Decyzje D151–D158 + ten plan. ✔
-2. Silnik cenowy (sekcja 2).
+2. Silnik cenowy (sekcja 2). ✔ (2026-11-11; stawka za piętro w `PricingConfig.portersService.floorNoElevatorCents` — loader wypełni ją z reguły `porters_floor_no_elevator` w kroku 3)
 3. Migracja 1 — cennik (SQL do akceptacji) + `/admin/listini`.
 4. Strona publiczna (sekcja 4).
 5. Migracja 2 — zlecenia (SQL do akceptacji) + filtr w `/admin/ordini`.

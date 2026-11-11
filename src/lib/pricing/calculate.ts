@@ -1,38 +1,31 @@
 import { isWeekendOrHoliday } from "./calendar";
-import { allocateProportionally, applyBp } from "./money";
+import { enabledRules, finalizeLines, porterShareTerms, type DraftLine } from "./finalize";
+import { applyBp } from "./money";
 import { PORTER_PACKAGE_LABEL } from "./rule-meta";
 import { storageCost } from "./storage";
 import { PORTER_PACKAGE_CODES } from "./types";
 import type {
-  CarrierShareGroup,
   OrderLineType,
   PriceInput,
   PriceResult,
-  PriceRule,
   PriceRuleCode,
   PricingConfig,
   PricingError,
-  QuoteLine,
   QuotePorters,
-  QuoteWarning,
   StorageType,
 } from "./types";
 
 // Pricing engine (docs/spec.md section 3, decisions D47–D58). Pure: no database, no Google Maps.
 //
 // Rounding (D56): every amount is integer cents. Each percentage is applied once per component with
-// round-half-up (applyBp). VAT is computed once on the subtotal and split over the lines
-// proportionally to their net amount (largest remainder), so line VATs always add up to the total.
-// Carrier share (D57) is computed once per group (transport per leg, porters, packing) on the net
-// amount and split over the group's lines the same way.
+// round-half-up (applyBp). VAT and carrier share: finalizeLines() (finalize.ts), shared with the
+// porters-only and storage-only quotes (D151).
 
 const HOUR_MS = 3_600_000;
 const MAX_LEGS = 2; // D20: no intermediate stops; a warehouse order has two legs (D47)
 const MAX_DISTANCE_M = 2_000_000;
 const MAX_FLOOR = 20; // D53
 const MAX_PORTERS = 4; // D54
-
-type DraftLine = Omit<QuoteLine, "vatCents" | "grossCents" | "carrierAmountCents">;
 
 const isInt = (n: unknown, min: number, max: number): n is number =>
   typeof n === "number" && Number.isSafeInteger(n) && n >= min && n <= max;
@@ -72,8 +65,7 @@ export function calculatePrice(input: PriceInput, config: PricingConfig): PriceR
   const validationError = validate(input);
   if (validationError) return invalid(validationError);
 
-  const rules = new Map<PriceRuleCode, PriceRule>();
-  for (const r of config.rules) if (r.isEnabled) rules.set(r.code, r);
+  const rules = enabledRules(config.rules);
   const amountOf = (code: PriceRuleCode) => rules.get(code)?.amountCents ?? null;
 
   const holidays = new Set(config.holidays);
@@ -227,59 +219,14 @@ export function calculatePrice(input: PriceInput, config: PricingConfig): PriceR
     }
   }
 
-  // 6. VAT: once on the subtotal, split over lines (D56).
-  const nets = lines.map((l) => l.netCents);
-  const subtotalCents = nets.reduce((s, n) => s + n, 0);
-  const vatCents = applyBp(subtotalCents, config.vatRateBp);
-  const lineVat = allocateProportionally(vatCents, nets);
-
-  // 7. Carrier share per group (D57, D74): transport and porters per leg, packing per order.
-  const carrierAmounts = lines.map(() => 0);
-  const warnings: QuoteWarning[] = [];
-  const shareRuleFor: Record<Exclude<CarrierShareGroup, "none">, PriceRuleCode> = {
-    transport: "carrier_share_transport",
-    porters: "carrier_share_porters",
-    packing: "carrier_share_packing",
-  };
-  const buckets = new Map<string, number[]>(); // key → line indexes
-  lines.forEach((l, idx) => {
-    if (l.carrierShareGroup === "none") return;
-    const key = l.carrierShareGroup === "packing" ? "packing" : `${l.carrierShareGroup}:${l.legIndex}`;
-    buckets.set(key, [...(buckets.get(key) ?? []), idx]);
-  });
-  for (const idxs of buckets.values()) {
-    const group = lines[idxs[0]].carrierShareGroup as Exclude<CarrierShareGroup, "none">;
-    const base = idxs.reduce((s, i) => s + lines[i].netCents, 0);
-    const rule = rules.get(shareRuleFor[group]);
-    // A disabled carrier-share rule means the carrier gets nothing for that group.
-    const share = !rule ? 0 : rule.kind === "percent" ? applyBp(base, rule.percentBp ?? 0) : (rule.amountCents ?? 0);
-    if (share > base) warnings.push({ code: "negative_margin", group, legIndex: group === "packing" ? null : lines[idxs[0]].legIndex });
-    allocateProportionally(share, idxs.map((i) => lines[i].netCents)).forEach((a, k) => (carrierAmounts[idxs[k]] = a));
-  }
-
-  const quoteLines: QuoteLine[] = lines.map((l, idx) => ({
-    ...l,
-    vatCents: lineVat[idx],
-    grossCents: l.netCents + lineVat[idx],
-    carrierAmountCents: carrierAmounts[idx],
-  }));
+  // 6–7. VAT (D56) and carrier share per group (D57, D74).
+  const { lines: quoteLines, subtotalCents, vatCents, warnings } = finalizeLines(lines, rules, config.vatRateBp);
 
   // Porter terms with the carrier share of the leg, so overtime gets the same share (D68, D74).
-  const shareRule = rules.get("carrier_share_porters");
-  const porters: QuotePorters[] = porterTerms.map((terms) => {
-    const legLines = quoteLines.filter((l) => l.carrierShareGroup === "porters" && l.legIndex === terms.legIndex);
-    const carrierShare: QuotePorters["carrierShare"] = !shareRule
-      ? null
-      : shareRule.kind === "percent"
-        ? { kind: "percent", percentBp: shareRule.percentBp ?? 0 }
-        : {
-            // A fixed amount per leg cannot be applied per hour: overtime keeps the package's proportion.
-            kind: "ratio",
-            carrierCents: legLines.reduce((s, l) => s + l.carrierAmountCents, 0),
-            netCents: legLines.reduce((s, l) => s + l.netCents, 0),
-          };
-    return { ...terms, carrierShare };
-  });
+  const porters: QuotePorters[] = porterTerms.map((terms) => ({
+    ...terms,
+    carrierShare: porterShareTerms(rules, quoteLines.filter((l) => l.carrierShareGroup === "porters" && l.legIndex === terms.legIndex)),
+  }));
 
   // Carrier amount per leg (each leg can be a separate job for a different carrier).
   const carrierAmountByLegCents = input.legs.map((_, i) =>

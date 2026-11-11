@@ -33,6 +33,12 @@ export function makeConfig(overrides: Partial<PricingConfig> = {}): PricingConfi
       { code: "bilocale", portersCount: 2, includedHours: 3, isEnabled: true },
       { code: "trilocale_plus", portersCount: 3, includedHours: 4, isEnabled: true },
     ],
+    portersService: { minPersons: 2, minHours: 2, floorNoElevatorCents: 1000 },
+    storageBoxes: [
+      { code: "S", labelIt: "Box S", volumeM3: 3, dayCents: 300, monthCents: 6000, isEnabled: true },
+      { code: "M", labelIt: "Box M", volumeM3: 6, dayCents: 500, monthCents: 10000, isEnabled: true },
+      { code: "L", labelIt: "Box L", volumeM3: 10, dayCents: 800, monthCents: 15000, isEnabled: true },
+    ],
     vehicleRates: [
       { vehicleTypeId: V.car, nameIt: "Auto / station wagon", ratePerKmCents: 90, minPriceCents: 3500 },
       { vehicleTypeId: V.vanSmall, nameIt: "Furgone piccolo", ratePerKmCents: 110, minPriceCents: 4500 },
