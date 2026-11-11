@@ -10,17 +10,17 @@ import { ADMIN_CARRIER_PATHS } from "@/lib/carriers/admin";
 import { ADMIN_CLAIM_PATHS } from "@/lib/claims/admin";
 import { ADMIN_CUSTOMER_PATHS } from "@/lib/customers/admin";
 import { CLAIM_CATEGORY_LABEL, CLAIM_STATUS_LABEL, type ClaimCategory } from "@/lib/claims/claims";
-import { ADMIN_ORDER_PATHS, HANDOVER_BADGE, handoverKind, isHandoverPending, NEXT_STATUS, removalOutcome, UNASSIGN_REASONS } from "@/lib/orders/dispatch";
-import { loadCandidates, type Candidate } from "@/lib/orders/dispatch-server";
+import { ADMIN_ORDER_PATHS, HANDOVER_BADGE, handoverKind, isHandoverPending, nextStatusFor, removalOutcome, teamTooSmall, UNASSIGN_REASONS } from "@/lib/orders/dispatch";
+import { loadCandidates, loadPorterCandidates, type Candidate, type PortersCandidate } from "@/lib/orders/dispatch-server";
 import { loadAdminExecution } from "@/lib/orders/execution-read";
-import { ORDER_STATUS_LABEL, PAYMENT_STATE_LABEL, paymentState } from "@/lib/orders/status";
+import { orderStatusLabel, PAYMENT_STATE_LABEL, paymentState } from "@/lib/orders/status";
 import {
   bookingDays, bookingUnitLabel, formatDateOnly, SERVICE_TYPE_LABEL, serviceTypeOf, STORAGE_BOOKING_STATUS_LABEL, STORAGE_INTAKE_LABEL,
   STORAGE_OUTBOUND_LABEL, type ServiceType,
 } from "@/lib/orders/service-type";
 import { formatCents } from "@/lib/pricing/money";
 import { createClient } from "@/lib/supabase/server";
-import { advanceOrderAction, assignHandoverAction, assignJobAction, unassignJobAction } from "../actions";
+import { advanceOrderAction, assignHandoverAction, assignJobAction, assignPortersJobAction, unassignJobAction } from "../actions";
 import { Execution } from "./execution";
 import { Money, type MoneyPayment, type MoneyRefund } from "./money";
 import { ADMIN_DOC_COLUMNS, AdminInvoiceTable, type AdminDoc, type DocTech } from "@/components/admin/invoice-table";
@@ -30,8 +30,9 @@ export const metadata = { title: "Ordine – Transigo" };
 // One order for the admin (D122, D123): route, goods, contacts, customer price, carrier amount, payment, history,
 // and dispatch — Assegna (candidates by the D120 rules), Rimuovi padroncino (reason code), next status — plus the
 // job execution (steps, photos, POD, porter time, "Annulla ultimo passo", "Consenti inizio anticipato", internal notes).
-// Facchinaggio and Deposito orders (D151) have no legs: their job / booking replaces "Percorso"; they are not
-// dispatched from here yet (porters: step 6 of the three-services plan; storage: never to a carrier).
+// Facchinaggio and Deposito orders (D151) have no legs: their job / booking replaces "Percorso". Facchinaggio is
+// assigned to carriers offering porters, without a vehicle (D164); statuses without "In viaggio" (D165); a team
+// that became too small is flagged "Squadra insufficiente" (D167). Deposito is never dispatched to a carrier.
 // Reads with the admin's session (RLS; the status history through admin_order_status_history, D128); candidates through the service role after the session check.
 export default function Page({ params }: PageProps<"/admin/ordini/[id]">) {
   return (
@@ -69,7 +70,7 @@ type OrderDetail = {
   in_transit_at: string | null; delivered_at: string | null; delivered_without_pod: boolean;
   handover_required_at: string | null; handover_leg_index: number | null;
   vehicle_types: { name_it: string } | null;
-  carriers: { company_name: string } | null;
+  carriers: { company_name: string; offers_porters: boolean; porters_team_size: number | null } | null;
   carrier_vehicles: { plate: string; vehicle_types: { name_it: string } | null } | null;
   customers: { customer_type: string; profiles: { first_name: string | null; last_name: string | null; email: string; phone: string | null } | null } | null;
   order_legs: Leg[];
@@ -90,7 +91,7 @@ const SELECT = [
   "largest_item_length_cm, largest_item_width_cm, largest_item_height_cm, pallets_count, packing_items_count, storage_type, storage_days",
   "pickup_contact_name, pickup_contact_phone, delivery_contact_name, delivery_contact_phone, customer_notes",
   "carrier_id, assigned_at, picked_up_at, in_transit_at, delivered_at, delivered_without_pod, handover_required_at, handover_leg_index",
-  "vehicle_types(name_it), carriers(company_name), carrier_vehicles(plate, vehicle_types(name_it))",
+  "vehicle_types(name_it), carriers(company_name, offers_porters, porters_team_size), carrier_vehicles(plate, vehicle_types(name_it))",
   "customers(customer_type, profiles(first_name, last_name, email, phone))",
   "order_legs(leg_index, pickup_address, delivery_address, pickup_window_start, pickup_window_end, distance_m, duration_s, pickup_floor, pickup_has_elevator, delivery_floor, delivery_has_elevator, is_urgent, porters_count, porters_included_hours, pickup_warehouse_id, delivery_warehouse_id, early_start_allowed_at, porter_overtime_grace_minutes, order_leg_carrier_terms(carrier_amount_cents))",
   "order_porter_jobs(address, city, province, window_start, window_end, floor, has_elevator, persons, requested_hours, billed_hours, is_urgent, worked_minutes, order_porter_carrier_terms(carrier_amount_cents))",
@@ -140,10 +141,12 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
   const carrierAmount = legs.reduce((sum, l) => sum + (l.order_leg_carrier_terms?.carrier_amount_cents ?? 0), 0)
     + (o.order_porter_jobs?.order_porter_carrier_terms?.carrier_amount_cents ?? 0);
   const pay = paymentState({ ...o, refunded_cents: o.order_charges?.refunded_cents, total_cents: o.order_charges?.total_cents }, new Date());
-  // Only transport orders have candidates today (admin_job_candidates needs a vehicle type).
+  // Transport: carrier + vehicle (admin_job_candidates); Facchinaggio: carriers offering porters (D164).
   const assignable = type === "transport" && ((o.status === "paid" && !o.carrier_id) || isHandoverPending(o));
-  const [candidates, exec, settingsRes, docsRes, techRes] = await Promise.all([
+  const portersAssignable = type === "porters" && o.status === "paid" && !o.carrier_id;
+  const [candidates, porterCandidates, exec, settingsRes, docsRes, techRes] = await Promise.all([
     assignable ? loadCandidates(deps, o.id) : Promise.resolve([] as Candidate[]),
+    portersAssignable ? loadPorterCandidates(deps, o.id) : Promise.resolve([] as PortersCandidate[]),
     loadAdminExecution(db, { id: o.id, order_legs: legs }),
     db.from("settings").select("free_cancellation_hours, late_cancellation_fee_bp").single(),
     db.from("invoices").select(ADMIN_DOC_COLUMNS).eq("order_id", o.id).order("created_at").returns<AdminDoc[]>(),
@@ -175,7 +178,10 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
 
       <div className="flex flex-wrap items-center gap-2">
         <span className={`rounded px-2 py-0.5 text-sm ${type === "transport" ? "bg-zinc-100 text-zinc-700" : "bg-violet-100 text-violet-900"}`}>{SERVICE_TYPE_LABEL[type]}</span>
-        <span className="rounded bg-zinc-100 px-2 py-0.5 text-sm font-medium text-zinc-900">{ORDER_STATUS_LABEL[o.status] ?? o.status}</span>
+        <span className="rounded bg-zinc-100 px-2 py-0.5 text-sm font-medium text-zinc-900">{orderStatusLabel(o.status, o.service_type)}</span>
+        {teamTooSmall(o, o.order_porter_jobs?.persons, o.carriers) ? (
+          <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-900">Squadra insufficiente: il padroncino non può più coprire {o.order_porter_jobs?.persons} facchini</span>
+        ) : null}
         <span className="text-sm text-zinc-600">Pagamento: {PAYMENT_STATE_LABEL[pay]}{o.paid_at ? ` (${rome(o.paid_at)})` : ""}</span>
         {o.delivered_without_pod ? (
           <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-900">Consegnato senza firma e foto — nessun pagamento automatico al padroncino</span>
@@ -193,7 +199,11 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
         </ul>
       ) : null}
 
-      <Dispatch o={o} type={type} legs={legs} steps={exec.steps.map((st) => ({ leg_index: st.legIndex, step: st.step, reverted_at: st.revertedAt }))} candidates={candidates} />
+      {type === "porters" ? (
+        <PortersDispatch o={o} candidates={porterCandidates} />
+      ) : (
+        <Dispatch o={o} type={type} legs={legs} steps={exec.steps.map((st) => ({ leg_index: st.legIndex, step: st.step, reverted_at: st.revertedAt }))} candidates={candidates} />
+      )}
 
       <Money d={{
         orderId: o.id, status: o.status, pickupWindowStart: o.pickup_window_start, totalCents: o.order_charges?.total_cents ?? 0,
@@ -284,8 +294,8 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
         <ol className="space-y-1 text-sm">
           {history.map((h) => (
             <li key={h.id}>
-              <span className="text-zinc-500">{rome(h.created_at)}</span> · {h.from_status ? `${ORDER_STATUS_LABEL[h.from_status] ?? h.from_status} → ` : ""}
-              <span className="font-medium">{ORDER_STATUS_LABEL[h.to_status] ?? h.to_status}</span>
+              <span className="text-zinc-500">{rome(h.created_at)}</span> · {h.from_status ? `${orderStatusLabel(h.from_status, o.service_type)} → ` : ""}
+              <span className="font-medium">{orderStatusLabel(h.to_status, o.service_type)}</span>
               <span className="text-zinc-500"> · {SOURCE_LABEL[h.source] ?? h.source}{actorName(h.changed_by) ? ` (${actorName(h.changed_by)})` : ""}</span>
             </li>
           ))}
@@ -342,17 +352,9 @@ type StepRef = { leg_index: number; step: string; reverted_at: string | null };
 type LegRef = OrderDetail["order_legs"][number];
 
 function Dispatch({ o, type, legs, steps, candidates }: { o: OrderDetail; type: ServiceType; legs: LegRef[]; steps: StepRef[]; candidates: Candidate[] }) {
-  const next = NEXT_STATUS[o.status];
-  // Deposito is never dispatched to a carrier (D152); Facchinaggio to carriers offering porters — step 6.
-  if (type === "storage") return null;
-  if (type === "porters" && !o.carrier_id) {
-    return o.status === "paid" ? (
-      <section className={section} aria-labelledby="dispatch">
-        <h2 id="dispatch" className={h2}>Assegna facchini</h2>
-        <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-900">L&apos;assegnazione del facchinaggio ai padroncini non è ancora disponibile.</p>
-      </section>
-    ) : null;
-  }
+  const next = nextStatusFor(o.status, type);
+  // Deposito is never dispatched to a carrier (D152); Facchinaggio has its own section (PortersDispatch).
+  if (type !== "transport") return null;
   const windowPassed = new Date(o.pickup_window_start) <= new Date();
   // from leg 1 "Carico completato" (status picked_up) on, release_job refuses — only the admin removes the carrier;
   // the order then never goes back to the list (D130, D136): "da gestire", or refused when everything is unloaded
@@ -415,7 +417,7 @@ function Dispatch({ o, type, legs, steps, candidates }: { o: OrderDetail; type: 
                 <p className="mt-1 text-xs text-zinc-500">Il motivo è interno: lo vedono solo gli amministratori.</p>
               </>
             ) : (
-              <p className="text-sm text-zinc-700">Stato successivo: {ORDER_STATUS_LABEL[next.to]}.</p>
+              <p className="text-sm text-zinc-700">Stato successivo: {orderStatusLabel(next.to, o.service_type)}.</p>
             )}
           </ActionForm>
         ) : null}
@@ -429,7 +431,7 @@ function Dispatch({ o, type, legs, steps, candidates }: { o: OrderDetail; type: 
             </select>
             {outcome === "in_warehouse" ? (
               <p className="mt-1 text-sm font-medium text-red-800">
-                La merce è in magazzino: l&apos;ordine passa in «Da gestire». Il cliente continua a vedere «{ORDER_STATUS_LABEL[o.status]}»;
+                La merce è in magazzino: l&apos;ordine passa in «Da gestire». Il cliente continua a vedere «{orderStatusLabel(o.status, o.service_type)}»;
                 dovrai assegnare tu un nuovo padroncino per la tratta successiva (ritiro in magazzino).
               </p>
             ) : outcome === "all_unloaded" ? (
@@ -453,7 +455,7 @@ function Dispatch({ o, type, legs, steps, candidates }: { o: OrderDetail; type: 
 
 /** "Da gestire": the admin removed the carrier with the load on board — assign directly or close without POD. */
 function Handover({ o, legs, steps, candidates }: { o: OrderDetail; legs: LegRef[]; steps: StepRef[]; candidates: Candidate[] }) {
-  const next = NEXT_STATUS[o.status];
+  const next = nextStatusFor(o.status, o.service_type);
   const kind = handoverKind(o, steps);
   // goods in the warehouse: the leg to take over starts there — its pickup address, editable (D136)
   const warehouseAddress = kind === "in_warehouse" ? (legs.find((l) => l.leg_index === o.handover_leg_index)?.pickup_address ?? "") : "";
@@ -463,7 +465,7 @@ function Handover({ o, legs, steps, candidates }: { o: OrderDetail; legs: LegRef
       <p className="rounded-md bg-red-50 p-3 text-sm font-medium text-red-900">
         {HANDOVER_BADGE[kind]}
         {o.handover_leg_index !== null && o.order_legs.length > 1 ? ` (tratta ${o.handover_leg_index + 1})` : ""} — dal {rome(o.handover_required_at)}.
-        <span className="mt-1 block font-normal">L&apos;ordine non è visibile ai padroncini. Il cliente vede ancora «{ORDER_STATUS_LABEL[o.status]}».</span>
+        <span className="mt-1 block font-normal">L&apos;ordine non è visibile ai padroncini. Il cliente vede ancora «{orderStatusLabel(o.status, o.service_type)}».</span>
       </p>
       <div className="mt-3 grid gap-4 sm:grid-cols-2">
         {candidates.length ? (
@@ -500,9 +502,89 @@ function Handover({ o, legs, steps, candidates }: { o: OrderDetail; legs: LegRef
                 <p className="mt-1 text-xs text-zinc-500">Il motivo è interno: lo vedono solo gli amministratori.</p>
               </>
             ) : (
-              <p className="text-sm text-zinc-700">Stato successivo: {ORDER_STATUS_LABEL[next.to]}.</p>
+              <p className="text-sm text-zinc-700">Stato successivo: {orderStatusLabel(next.to, o.service_type)}.</p>
             )}
           </ActionForm>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Facchinaggio (D164–D167): "Assegna facchini" among carriers offering porters with a big enough team (no vehicle);
+ * then "Segna lavoro iniziato" → "Segna lavoro concluso" (reason required: without POD, D123). "Rimuovi padroncino"
+ * only before the work started (admin_unassign_job refuses after: work_started).
+ */
+function PortersDispatch({ o, candidates }: { o: OrderDetail; candidates: PortersCandidate[] }) {
+  const job = o.order_porter_jobs;
+  const next = nextStatusFor(o.status, "porters");
+  if (o.status === "paid" && !o.carrier_id) {
+    const started = new Date(o.pickup_window_start) <= new Date();
+    return (
+      <section className={section} aria-labelledby="dispatch">
+        <h2 id="dispatch" className={h2}>Assegna facchini</h2>
+        {candidates.length ? (
+          <ActionForm action={assignPortersJobAction} submitLabel="Assegna" className="max-w-xl rounded-md border border-zinc-200 p-3">
+            <input type="hidden" name="orderId" value={o.id} />
+            <label htmlFor="porters-carrier" className="block text-sm font-medium text-zinc-800">Padroncino</label>
+            <select id="porters-carrier" name="carrierId" required defaultValue="" className={`${inputClass} mt-1 w-full`}>
+              <option value="" disabled>Scegli…</option>
+              {candidates.map((c) => (
+                <option key={c.carrier_id} value={c.carrier_id}>{c.company_name} — squadra di {c.porters_team_size}</option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-zinc-500">Solo padroncini attivi con documenti approvati che offrono il facchinaggio con almeno {job?.persons ?? "?"} persone. Nessun veicolo richiesto.</p>
+          </ActionForm>
+        ) : (
+          <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-900">
+            {started
+              ? "Il lavoro doveva già iniziare: l'ordine non si può assegnare. Serve un cambio data o un rimborso."
+              : `Nessun padroncino attivo offre il facchinaggio con una squadra di almeno ${job?.persons ?? "?"} persone.`}
+          </p>
+        )}
+      </section>
+    );
+  }
+  if (!o.carrier_id) return null;
+  return (
+    <section className={section} aria-labelledby="dispatch">
+      <h2 id="dispatch" className={h2}>Facchini</h2>
+      <p className="text-sm">
+        {o.carriers?.company_name ?? "—"}
+        {o.carriers?.offers_porters ? ` · squadra di ${o.carriers.porters_team_size}` : " · non offre più il facchinaggio"}
+        {" · "}<Link href={ADMIN_CARRIER_PATHS.detail(o.carrier_id)} className="text-blue-700 hover:underline">scheda padroncino</Link>
+      </p>
+      <p className="mt-1 text-xs text-zinc-500">Assegnato {rome(o.assigned_at)} · lavoro iniziato {rome(o.picked_up_at)} · lavoro concluso {rome(o.delivered_at)}</p>
+      <div className="mt-3 grid gap-4 sm:grid-cols-2">
+        {next ? (
+          <ActionForm action={advanceOrderAction} submitLabel={next.label} className="rounded-md border border-zinc-200 p-3">
+            <input type="hidden" name="orderId" value={o.id} />
+            <input type="hidden" name="to" value={next.to} />
+            {next.to === "delivered" ? (
+              <>
+                <p className="text-sm text-amber-900">Senza firma del cliente dall&apos;app: il pagamento al padroncino non partirà in automatico.</p>
+                <label htmlFor="porters-note" className="mt-2 block text-sm font-medium text-zinc-800">Motivo (obbligatorio)</label>
+                <textarea id="porters-note" name="note" required maxLength={1000} rows={2} className={`${inputClass} mt-1 w-full`} />
+                <p className="mt-1 text-xs text-zinc-500">Il motivo è interno: lo vedono solo gli amministratori.</p>
+              </>
+            ) : (
+              <p className="text-sm text-zinc-700">Stato successivo: {orderStatusLabel(next.to, "porters")}.</p>
+            )}
+          </ActionForm>
+        ) : null}
+        {o.status === "assigned" ? (
+          <ActionForm action={unassignJobAction} submitLabel="Rimuovi padroncino" variant="danger" className="rounded-md border border-zinc-200 p-3">
+            <input type="hidden" name="orderId" value={o.id} />
+            <label htmlFor="porters-reason" className="block text-sm font-medium text-zinc-800">Motivo</label>
+            <select id="porters-reason" name="reason" required defaultValue="" className={`${inputClass} mt-1 w-full`}>
+              <option value="" disabled>Scegli…</option>
+              {UNASSIGN_REASONS.map((r) => <option key={r.code} value={r.code}>{r.label}</option>)}
+            </select>
+            <p className="mt-1 text-xs text-zinc-500">L&apos;ordine tornerà tra quelli da assegnare.</p>
+          </ActionForm>
+        ) : o.status === "picked_up" ? (
+          <p className="rounded-md bg-zinc-50 p-3 text-sm text-zinc-700">Il lavoro è già iniziato: il padroncino non si può più rimuovere.</p>
         ) : null}
       </div>
     </section>

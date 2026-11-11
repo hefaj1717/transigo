@@ -10,7 +10,7 @@ import { ADMIN_CLAIM_PATHS } from "@/lib/claims/admin";
 import { CLAIM_CATEGORY_LABEL, CLAIM_STATUS_LABEL, type ClaimCategory } from "@/lib/claims/claims";
 import { ADMIN_CUSTOMER_PATHS, BLOCK_REASON_LABEL, BLOCK_REASONS, CUSTOMER_TYPE_LABEL, customerDisplayName } from "@/lib/customers/admin";
 import { ADMIN_ORDER_PATHS } from "@/lib/orders/dispatch";
-import { ORDER_STATUS_LABEL } from "@/lib/orders/status";
+import { orderStatusLabel } from "@/lib/orders/status";
 import { formatCents } from "@/lib/pricing/money";
 import { createClient } from "@/lib/supabase/server";
 import { setCustomerBlockedAction } from "../actions";
@@ -32,7 +32,7 @@ type Detail = {
   sdi_code: string | null; pec: string | null; billing_street: string | null; billing_city: string | null; billing_postal_code: string | null;
   billing_province: string | null; billing_country: string; created_at: string;
   profiles: { first_name: string | null; last_name: string | null; email: string; phone: string | null; is_blocked: boolean; privacy_accepted_at: string | null } | null;
-  orders: { id: string; order_number: string; status: string; created_at: string; pickup_window_start: string; order_charges: { total_cents: number; refunded_cents: number } | null }[];
+  orders: { id: string; order_number: string; service_type: string; status: string; created_at: string; pickup_window_start: string; order_charges: { total_cents: number; refunded_cents: number } | null }[];
 };
 type AuditRow = { id: number; action: string; actor_email: string | null; data: { reason?: string; active_orders?: number }; created_at: string };
 
@@ -47,7 +47,7 @@ async function Content({ params }: Pick<PageProps<"/admin/clienti/[id]">, "param
   const db = await createClient();
   const { data: c, error } = await db
     .from("customers")
-    .select("profile_id, customer_type, company_name, vat_number, fiscal_code, sdi_code, pec, billing_street, billing_city, billing_postal_code, billing_province, billing_country, created_at, profiles(first_name, last_name, email, phone, is_blocked, privacy_accepted_at), orders(id, order_number, status, created_at, pickup_window_start, order_charges(total_cents, refunded_cents))")
+    .select("profile_id, customer_type, company_name, vat_number, fiscal_code, sdi_code, pec, billing_street, billing_city, billing_postal_code, billing_province, billing_country, created_at, profiles(first_name, last_name, email, phone, is_blocked, privacy_accepted_at), orders(id, order_number, service_type, status, created_at, pickup_window_start, order_charges(total_cents, refunded_cents))")
     .eq("profile_id", id)
     .maybeSingle<Detail>();
   if (error) throw new Error(`customer unavailable: ${error.code}`);
@@ -109,7 +109,7 @@ async function Content({ params }: Pick<PageProps<"/admin/clienti/[id]">, "param
                     <td className="py-1 pr-3"><Link href={ADMIN_ORDER_PATHS.detail(o.id)} className="text-blue-700 hover:underline">{o.order_number}</Link></td>
                     <td className="py-1 pr-3 whitespace-nowrap">{rome(o.created_at)}</td>
                     <td className="py-1 pr-3 whitespace-nowrap">{rome(o.pickup_window_start)}</td>
-                    <td className="py-1 pr-3">{ORDER_STATUS_LABEL[o.status] ?? o.status}</td>
+                    <td className="py-1 pr-3">{orderStatusLabel(o.status, o.service_type)}</td>
                     <td className="py-1 text-right">{o.order_charges ? formatCents(o.order_charges.total_cents) : "—"}</td>
                   </tr>
                 ))}

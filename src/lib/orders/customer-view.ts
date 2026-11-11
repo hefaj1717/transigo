@@ -1,6 +1,6 @@
 // How the customer panel presents an order (spec 7). Pure — tested in customer-view.test.ts.
 import { bookingUnitLabel, SERVICE_TYPE_LABEL, serviceTypeOf } from "./service-type";
-import { ORDER_STATUS_LABEL } from "./status";
+import { ORDER_STATUS_LABEL, orderStatusLabel } from "./status";
 
 /** Customer-facing wording where the admin label is too technical. */
 export const CUSTOMER_STATUS_LABEL: Record<string, string> = {
@@ -11,6 +11,15 @@ export const CUSTOMER_STATUS_LABEL: Record<string, string> = {
   completed: "Consegnato",
   cancellation_review: "Annullamento in corso",
 };
+
+/** The customer's wording per service (D165): "Facchini assegnati", "Lavoro iniziato", "Lavoro concluso". */
+export function customerStatusLabel(status: string, serviceType?: string | null): string {
+  if (serviceType === "porters") {
+    if (status === "assigned") return "Facchini assegnati";
+    if (status === "picked_up" || status === "delivered" || status === "completed") return orderStatusLabel(status, serviceType);
+  }
+  return CUSTOMER_STATUS_LABEL[status] ?? status;
+}
 
 const FINISHED = new Set(["delivered", "completed", "cancelled", "refunded", "expired"]);
 
@@ -47,13 +56,23 @@ export function statusTone(status: string): StatusTone {
 
 export type ProgressStep = { key: string; label: string; state: "done" | "current" | "todo"; at: string | null };
 
-const STEPS = [
+type StepDef = { key: string; label: string; column: "paid_at" | "assigned_at" | "picked_up_at" | "in_transit_at" | "delivered_at" };
+
+const STEPS: readonly StepDef[] = [
   { key: "paid", label: "Confermato", column: "paid_at" },
   { key: "assigned", label: "Trasportatore assegnato", column: "assigned_at" },
   { key: "picked_up", label: "Ritirato", column: "picked_up_at" },
   { key: "in_transit", label: "In viaggio", column: "in_transit_at" },
   { key: "delivered", label: "Consegnato", column: "delivered_at" },
-] as const;
+];
+
+/** Facchinaggio (D165): no "In viaggio". */
+const PORTERS_STEPS: readonly StepDef[] = [
+  { key: "paid", label: "Confermato", column: "paid_at" },
+  { key: "assigned", label: "Facchini assegnati", column: "assigned_at" },
+  { key: "picked_up", label: "Lavoro iniziato", column: "picked_up_at" },
+  { key: "delivered", label: "Lavoro concluso", column: "delivered_at" },
+];
 
 type ProgressInput = {
   status: string;
@@ -69,11 +88,12 @@ type ProgressInput = {
  * Times come from the order's columns (shown only for done steps). Orders that are not on this path
  * (unpaid, expired, cancelled, refunded, under review) get no bar.
  */
-export function progressSteps(o: ProgressInput): ProgressStep[] | null {
+export function progressSteps(o: ProgressInput, serviceType?: string | null): ProgressStep[] | null {
+  const steps = serviceType === "porters" ? PORTERS_STEPS : STEPS;
   const status = o.status === "completed" ? "delivered" : o.status;
-  const index = STEPS.findIndex((s) => s.key === status);
+  const index = steps.findIndex((s) => s.key === status);
   if (index < 0) return null;
-  return STEPS.map((s, i) => ({
+  return steps.map((s, i) => ({
     key: s.key,
     label: s.label,
     state: i < index || (i === index && s.key === "delivered") ? "done" : i === index ? "current" : "todo",

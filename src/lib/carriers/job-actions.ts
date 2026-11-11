@@ -10,6 +10,8 @@ import { JOB_MSG } from "./jobs";
 // Any other field (carrierId, userId, …) is ignored: z.object() strips unknown keys.
 
 export const acceptJobForm = z.object({ orderId: z.uuid(), vehicleId: z.uuid() });
+/** Facchinaggio (D164): no vehicle; `kind` tells the action which database function to call. */
+export const acceptPorterJobForm = z.object({ orderId: z.uuid(), kind: z.literal("porters") });
 export const releaseJobForm = z.object({ orderId: z.uuid() });
 
 export type AcceptJobActionState =

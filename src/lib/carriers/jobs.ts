@@ -147,7 +147,57 @@ export type JobCard = {
   services: string[];
   amount: { totalCents: number; transportCents: number; portersCents: number; packingCents: number };
   matchingVehicleIds: string[];
+  /** Facchinaggio (D164): a job without a route and without a vehicle; null for transport. */
+  porters: PortersJobView | null;
 };
+
+export type PortersJobView = { persons: number; hours: number; floor: string | null; jobDate: string };
+
+/** A row of list_available_porter_jobs (no street, contact, goods or notes — D119). */
+export type AvailablePorterJobRow = {
+  order_id: string;
+  order_number: string;
+  city: string;
+  province: string;
+  job_date: string;
+  window_start: string;
+  window_end: string;
+  persons: number;
+  requested_hours: number;
+  billed_hours: number;
+  floor: number;
+  has_elevator: boolean;
+  is_urgent: boolean;
+  carrier_amount_cents: number;
+};
+
+/** The same card as a transport job: one place, the team, the floor; the whole amount is the porters' (D152). */
+export function toPorterJobCard(row: AvailablePorterJobRow): JobCard {
+  const team = `${row.persons} facchini, ${row.billed_hours} h`;
+  return {
+    orderId: row.order_id,
+    orderNumber: row.order_number,
+    vehicleTypeName: "Facchinaggio (nessun veicolo)",
+    stops: [{ city: row.city, province: row.province, isWarehouse: false }],
+    legs: [],
+    pickupWindowStart: row.window_start,
+    pickupWindowEnd: row.window_end,
+    isUrgent: row.is_urgent,
+    distanceM: 0,
+    durationS: 0,
+    load: [],
+    services: [`Facchinaggio: ${team}`],
+    amount: { totalCents: row.carrier_amount_cents, transportCents: 0, portersCents: row.carrier_amount_cents, packingCents: 0 },
+    matchingVehicleIds: [],
+    porters: { persons: row.persons, hours: row.billed_hours, floor: floorLabel(row.floor, row.has_elevator), jobDate: row.job_date },
+  };
+}
+
+/** Busy time of a job for the overlap warning (D120): legs with driving, or the porters' window + their hours. */
+export function busyLegsOf(job: Pick<JobCard, "legs" | "porters" | "pickupWindowStart" | "pickupWindowEnd">): BusyLeg[] {
+  if (job.porters) return [{ pickupWindowStart: job.pickupWindowStart, pickupWindowEnd: job.pickupWindowEnd, durationS: job.porters.hours * 3600 }];
+  return job.legs.map((l) => ({ pickupWindowStart: l.pickupWindowStart, pickupWindowEnd: l.pickupWindowEnd, durationS: l.durationS }));
+}
 
 /** "3° piano, con ascensore" / "Piano terra" / null when the floor is not given. */
 export function floorLabel(floor: number | null, hasElevator: boolean | null): string | null {
@@ -242,6 +292,7 @@ export function toJobCard(row: AvailableJobRow): JobCard {
       packingCents: row.packing_carrier_cents,
     },
     matchingVehicleIds: row.matching_vehicle_ids ?? [],
+    porters: null,
   };
 }
 
@@ -294,6 +345,7 @@ export const JOB_MSG = {
   acceptTooLate: "Il ritiro di questa corsa è già iniziato: non è più possibile accettarla.",
   vehicleNotReady: "Il veicolo scelto non è pronto: controlla che sia approvato e che libretto e RCA siano validi.",
   vehicleNotSuitable: "Il veicolo scelto non è adatto a questa corsa.",
+  teamNotSuitable: "La tua squadra non basta per questo lavoro di facchinaggio (o non offri il facchinaggio).",
   chooseVehicle: "Scegli il veicolo per questa corsa.",
   notEligible: "Il tuo account non può accettare nuove corse in questo momento.",
   documents: "Per accettare corse servono documenti aziendali approvati e non scaduti.",
@@ -333,6 +385,8 @@ export function jobDbError(op: "accept" | "release", error: DbError): JobErrorVi
           return fail(JOB_MSG.vehicleNotReady);
         case "vehicle_not_suitable":
           return fail(JOB_MSG.vehicleNotSuitable);
+        case "team_not_suitable":
+          return fail(JOB_MSG.teamNotSuitable, true);
         case "not_assigned":
           return fail(JOB_MSG.notAssigned);
         case "loaded":
@@ -505,6 +559,15 @@ export const CARRIER_JOB_STATUS_LABEL: Record<string, string> = {
   delivered: "Consegnata",
   completed: "Completata",
 };
+
+/** Facchinaggio (D165): the job is a "lavoro" — "Da iniziare", "Iniziato", "Concluso"; never "In viaggio". */
+export function carrierJobStatusLabel(status: string, serviceType?: string | null): string {
+  if (serviceType === "porters") {
+    const porters: Record<string, string> = { assigned: "Da iniziare", picked_up: "Lavoro iniziato", delivered: "Lavoro concluso", completed: "Lavoro concluso" };
+    if (porters[status]) return porters[status];
+  }
+  return CARRIER_JOB_STATUS_LABEL[status] ?? status;
+}
 
 // ---------------------------------------------------------------------------
 // Notice on "Corse disponibili" after a failed accept (?avviso=<JOB_MSG key>)

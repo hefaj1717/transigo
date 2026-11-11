@@ -6,7 +6,7 @@ import { CUSTOMER_DOC_COLUMNS, InvoiceList, type CustomerDoc } from "@/component
 import { groupDocuments } from "@/lib/einvoice/view";
 import { Loading } from "@/components/panel-shell";
 import { requireArea } from "@/lib/auth/session";
-import { CUSTOMER_STATUS_LABEL, orderTitle, progressSteps, type ProgressStep } from "@/lib/orders/customer-view";
+import { customerStatusLabel, orderTitle, progressSteps, type ProgressStep } from "@/lib/orders/customer-view";
 import { bookingDays, bookingUnitLabel, CUSTOMER_STORAGE_INTAKE_LABEL, CUSTOMER_STORAGE_OUTBOUND_LABEL, formatDateOnly, serviceTypeOf } from "@/lib/orders/service-type";
 import { loadCustomerExecution, type CustomerExecutionView } from "@/lib/orders/execution-read";
 import { groupPhotos, PHOTO_KIND_LABEL } from "@/lib/orders/execution-view";
@@ -124,8 +124,8 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
   const charges = o.order_charges;
   const business = charges?.customer_type === "business";
   const pay = paymentState({ ...o, refunded_cents: charges?.refunded_cents, total_cents: charges?.total_cents }, now);
-  // The steps (assigned, picked up, in transit) describe a transport; other services get theirs with their wizard.
-  const progress = type === "transport" ? progressSteps(o) : null;
+  // Transport: assigned → picked up → in transit → delivered; Facchinaggio without "In viaggio" (D165); Deposito: none.
+  const progress = type === "storage" ? null : progressSteps(o, type);
   const returnedFromCheckout = sp.pagamento === "ok";
   const cancelledCheckout = sp.pagamento === "annullato";
   const paidAndOpen = ["paid", "assigned"].includes(o.status);
@@ -157,7 +157,7 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
         <Card>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <StatusBadge status={o.status} />
+              <StatusBadge status={o.status} serviceType={o.service_type} />
               {o.status === "delivered" && o.delivered_without_pod ? <span className="text-xs text-zinc-500">Consegna confermata dal nostro team</span> : null}
             </div>
             {charges ? (
@@ -193,18 +193,18 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
         {/* Carrier */}
         {carrier ? (
           <Card>
-            <H2>Il tuo trasportatore</H2>
+            <H2>{type === "porters" ? "I tuoi facchini" : "Il tuo trasportatore"}</H2>
             <p className="mt-2 text-zinc-900">
               <span className="font-semibold">{carrier.first_name ?? carrier.company_name}</span>
               {carrier.first_name ? <span className="text-zinc-600"> · {carrier.company_name}</span> : null}
             </p>
-            {carrier.vehicle_type || carrier.plate ? (
+            {type === "transport" && (carrier.vehicle_type || carrier.plate) ? (
               <p className="mt-1 text-sm text-zinc-600">
                 {carrier.vehicle_type}
                 {carrier.plate ? <> · targa <span className="font-mono font-semibold text-zinc-900">{carrier.plate}</span></> : null}
               </p>
             ) : null}
-            <p className="mt-3 text-xs text-zinc-500">Per qualsiasi necessità sul trasporto <Link href="/contatti" className="underline">contattaci</Link>: siamo noi il tuo riferimento.</p>
+            <p className="mt-3 text-xs text-zinc-500">Per qualsiasi necessità {type === "porters" ? "sul servizio" : "sul trasporto"} <Link href="/contatti" className="underline">contattaci</Link>: siamo noi il tuo riferimento.</p>
           </Card>
         ) : o.status === "paid" && type === "transport" ? (
           <Card>
@@ -377,7 +377,7 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
               <li key={h.id} className="flex gap-3">
                 <span className="w-32 shrink-0 text-zinc-500">{rome(h.created_at, { dateStyle: "short", timeStyle: "short" })}</span>
                 <span className="text-zinc-900">
-                  {CUSTOMER_STATUS_LABEL[h.to_status] ?? h.to_status}
+                  {customerStatusLabel(h.to_status, o.service_type)}
                   {h.note ? <span className="text-zinc-500"> — {h.note}</span> : null}
                 </span>
               </li>

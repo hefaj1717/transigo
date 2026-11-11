@@ -33,6 +33,8 @@ export const metadata = { title: "La mia corsa – Transigo" };
 // floors, contacts (tel:), goods, services, notes, the amount, the status history — and "Rinuncia alla corsa"
 // while status is 'assigned' (D121): the deadline in Europe/Rome before the button; after it (or when
 // release_job answers too_late) "Contatta Transigo" instead of the button. ?esito= after "Accetta la Corsa".
+// Facchinaggio (D164, D165): one place (address, floor, on-site contact), the team, no vehicle and no execution
+// steps in the app yet — the admin records "Lavoro iniziato" / "Lavoro concluso".
 export default function Page({ params, searchParams }: PageProps<"/padroncino/le-mie-corse/[id]">) {
   return (
     <Suspense fallback={<Loading />}>
@@ -80,7 +82,7 @@ async function Content({ params, searchParams }: Pick<PageProps<"/padroncino/le-
   // Running (or delivered) job: the execution state, read with the carrier's session (D130).
   let execution: ExecutionView | null = null;
   let executionFailed = false;
-  if (isJobRunning(job.status) || job.status === "delivered" || job.status === "completed") {
+  if (!job.porters && (isJobRunning(job.status) || job.status === "delivered" || job.status === "completed")) {
     try {
       execution = await loadJobExecution(await createClient(), ctx.userId, id, { serviceDb: () => createServiceClient() });
     } catch {
@@ -89,7 +91,7 @@ async function Content({ params, searchParams }: Pick<PageProps<"/padroncino/le-
   }
 
   return (
-    <CarrierShell title={`Corsa ${job.orderNumber}`} back={back}>
+    <CarrierShell title={job.porters ? `Facchinaggio ${job.orderNumber}` : `Corsa ${job.orderNumber}`} back={back}>
       <div className="space-y-4">
         {confirmation ? <Notice tone="success">{confirmation}</Notice> : null}
 
@@ -115,12 +117,32 @@ async function Content({ params, searchParams }: Pick<PageProps<"/padroncino/le-
           </Notice>
         ) : null}
 
-        <Section title="Percorso">
+        {job.porters ? (
+          <>
+            {job.status === "assigned" || job.status === "picked_up" ? (
+              <Notice tone="info">Lo stato del lavoro lo aggiorna Transigo: avvisaci quando inizi e quando finisci.</Notice>
+            ) : null}
+            <Stop
+              title="Lavoro"
+              when={romeWindow(job.pickupWindowStart, job.pickupWindowEnd)}
+              stop={job.stops[0]}
+              address={job.portersPlace?.address ?? null}
+              postalCode={null}
+              lat={job.portersPlace?.lat}
+              lng={job.portersPlace?.lng}
+              floor={job.porters.floor}
+              contact={job.pickupContact.name ? job.pickupContact : null}
+              extra={<Row label="Squadra">{job.porters.persons} facchini · {job.porters.hours} h di lavoro</Row>}
+            />
+          </>
+        ) : null}
+
+        {job.porters ? null : <Section title="Percorso">
           <RouteList stops={job.stops} />
           <p className="mt-3 text-sm text-zinc-600">
             {formatKm(job.distanceM)} · {formatDuration(job.durationS)} di guida (stima)
           </p>
-        </Section>
+        </Section>}
 
         {job.legs.map((leg, i) => {
           const addr = job.addresses.find((a) => a.legIndex === leg.legIndex);
@@ -154,9 +176,9 @@ async function Content({ params, searchParams }: Pick<PageProps<"/padroncino/le-
           );
         })}
 
-        <Section title="Merce e servizi">
+        <Section title={job.porters ? "Cosa spostare" : "Merce e servizi"}>
           <dl className="space-y-2 text-sm">
-            <Row label="Merce">
+            <Row label={job.porters ? "Descrizione" : "Merce"}>
               <span className="whitespace-pre-line">{job.goodsDescription}</span>
               {job.goodsDimensionsNote ? <span className="mt-1 block whitespace-pre-line text-zinc-600">{job.goodsDimensionsNote}</span> : null}
             </Row>
@@ -172,7 +194,7 @@ async function Content({ params, searchParams }: Pick<PageProps<"/padroncino/le-
                 "Solo trasporto"
               )}
             </Row>
-            <Row label="Veicolo">{job.vehicle ? `${job.vehicle.vehicleTypeName} · ${job.vehicle.plate}` : job.vehicleTypeName}</Row>
+            {job.porters ? null : <Row label="Veicolo">{job.vehicle ? `${job.vehicle.vehicleTypeName} · ${job.vehicle.plate}` : job.vehicleTypeName}</Row>}
           </dl>
         </Section>
 
@@ -187,13 +209,20 @@ async function Content({ params, searchParams }: Pick<PageProps<"/padroncino/le-
         <Section title="Storico">
           <dl className="space-y-2 text-sm">
             {(
-              [
-                ["Accettata", job.times.assignedAt],
-                ["Ritirata", job.times.pickedUpAt],
-                ["In viaggio", job.times.inTransitAt],
-                ["Consegnata", job.times.deliveredAt],
-                ["Completata", job.times.completedAt],
-              ] as const
+              (job.porters
+                ? [
+                    ["Accettato", job.times.assignedAt],
+                    ["Lavoro iniziato", job.times.pickedUpAt],
+                    ["Lavoro concluso", job.times.deliveredAt],
+                    ["Completato", job.times.completedAt],
+                  ]
+                : [
+                    ["Accettata", job.times.assignedAt],
+                    ["Ritirata", job.times.pickedUpAt],
+                    ["In viaggio", job.times.inTransitAt],
+                    ["Consegnata", job.times.deliveredAt],
+                    ["Completata", job.times.completedAt],
+                  ]) as [string, string | null][]
             )
               .filter(([, t]) => t)
               .map(([label, t]) => (

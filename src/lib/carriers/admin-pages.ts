@@ -101,13 +101,15 @@ export type AdminCarrierDetail = AdminCarrierListRow & {
   hq_province: string | null;
   phone_verified_at: string | null;
   stripe_payouts_enabled: boolean;
+  offers_porters: boolean; // D152
+  porters_team_size: number | null;
   profiles: { email: string; first_name: string | null; last_name: string | null; phone: string | null; is_blocked: boolean } | null;
 };
 
 export async function loadAdminCarrier(db: SupabaseClient, id: string): Promise<AdminCarrierDetail | null> {
   const { data, error } = await db
     .from("carriers")
-    .select("profile_id, status, status_reason, submitted_at, decided_at, activated_at, created_at, company_name, vat_number, fiscal_code, pec, sdi_code, hq_street, hq_city, hq_postal_code, hq_province, phone_verified_at, stripe_payouts_enabled, profiles!carriers_profile_id_fkey(email, first_name, last_name, phone, is_blocked)")
+    .select("profile_id, status, status_reason, submitted_at, decided_at, activated_at, created_at, company_name, vat_number, fiscal_code, pec, sdi_code, hq_street, hq_city, hq_postal_code, hq_province, phone_verified_at, stripe_payouts_enabled, offers_porters, porters_team_size, profiles!carriers_profile_id_fkey(email, first_name, last_name, phone, is_blocked)")
     .eq("profile_id", id)
     .maybeSingle<AdminCarrierDetail>();
   if (error) throw fail("carrier", error.code);
@@ -163,4 +165,19 @@ export async function countActiveJobs(db: SupabaseClient, carrierId: string): Pr
     .in("status", [...ACTIVE_JOB_STATUSES]);
   if (error) throw fail("active jobs", error.code);
   return count ?? 0;
+}
+
+/** Porter jobs of the carrier in progress (assigned / work started) with their team size — D167 warning. */
+export async function loadPorterJobsInProgress(db: SupabaseClient, carrierId: string): Promise<{ id: string; order_number: string; persons: number }[]> {
+  const { data, error } = await db
+    .from("orders")
+    .select("id, order_number, order_porter_jobs(persons)")
+    .eq("carrier_id", carrierId)
+    .eq("service_type", "porters")
+    .in("status", ["assigned", "picked_up"]);
+  if (error) throw new Error(`porter jobs unavailable: ${error.code}`);
+  return (data ?? []).map((o) => {
+    const job = o.order_porter_jobs as unknown as { persons: number } | null;
+    return { id: o.id as string, order_number: o.order_number as string, persons: job?.persons ?? 0 };
+  });
 }

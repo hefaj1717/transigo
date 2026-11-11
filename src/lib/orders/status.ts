@@ -15,6 +15,21 @@ export const ORDER_STATUS_LABEL: Record<string, string> = {
   refunded: "Rimborsato",
 };
 
+/**
+ * Facchinaggio (D165): assigned → picked_up ("Lavoro iniziato") → delivered ("Lavoro concluso"), never in_transit.
+ * The same database statuses, other words. Every label shown for an order goes through these functions.
+ */
+const PORTERS_STATUS_LABEL: Record<string, string> = {
+  picked_up: "Lavoro iniziato",
+  delivered: "Lavoro concluso",
+  completed: "Lavoro concluso",
+};
+
+export function orderStatusLabel(status: string, serviceType?: string | null): string {
+  if (serviceType === "porters" && PORTERS_STATUS_LABEL[status]) return PORTERS_STATUS_LABEL[status];
+  return ORDER_STATUS_LABEL[status] ?? status;
+}
+
 export type PaymentState = "to_pay" | "overdue" | "review" | "paid" | "not_paid" | "refunded";
 
 export const PAYMENT_STATE_LABEL: Record<PaymentState, string> = {

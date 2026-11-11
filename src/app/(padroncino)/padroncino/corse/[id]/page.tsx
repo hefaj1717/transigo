@@ -76,7 +76,7 @@ async function Content({ params }: Pick<PageProps<"/padroncino/corse/[id]">, "pa
   const when = romeWindow(job.pickupWindowStart, job.pickupWindowEnd);
 
   return (
-    <CarrierShell title={`Corsa ${job.orderNumber}`} back={back}>
+    <CarrierShell title={job.porters ? `Facchinaggio ${job.orderNumber}` : `Corsa ${job.orderNumber}`} back={back}>
       <div className="space-y-4">
         <p className="text-sm text-zinc-600">
           Indirizzi completi, contatti e note del cliente sono visibili dopo l&apos;accettazione.
@@ -100,7 +100,14 @@ async function Content({ params }: Pick<PageProps<"/padroncino/corse/[id]">, "pa
         <JobAmount amount={job.amount} />
         <JobFacts job={job} />
 
-        {vehicles.length ? (
+        {job.porters ? (
+          <AcceptJob
+            orderId={job.orderId}
+            vehicles={[]}
+            porters={`${job.porters.persons} facchini · ${job.porters.hours} h`}
+            summary={{ orderNumber: job.orderNumber, route: routeLabel(job.stops), when, amount: formatCents(job.amount.totalCents) }}
+          />
+        ) : vehicles.length ? (
           <AcceptJob
             orderId={job.orderId}
             vehicles={vehicles.map((v) => ({ id: v.id, label: `${v.vehicleTypeName} · ${v.plate}` }))}

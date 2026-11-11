@@ -12,6 +12,7 @@ const server = vi.hoisted(() => ({
   reviewDocument: vi.fn(async () => ({ ok: true, message: "ok" })),
   approveVehicle: vi.fn(async () => ({ ok: true, message: "ok" })),
   setSuspension: vi.fn(async () => ({ ok: true, message: "ok" })),
+  setCarrierPorters: vi.fn(async () => ({ ok: true, message: "ok" })),
   updateCarrierCompany: vi.fn(async () => ({ ok: true, message: "ok", changed: [] })),
 }));
 
@@ -52,7 +53,7 @@ const NON_ADMINS: [string, AccountContext][] = [
 function form(): FormData {
   const fd = new FormData();
   // Includes fields an attacker might add: they must never become the admin id.
-  for (const [k, v] of Object.entries({ id: TARGET, carrierId: TARGET, decision: "approve", reason: "Motivo", adminId: OTHER_ID, p_admin_id: OTHER_ID })) fd.set(k, v);
+  for (const [k, v] of Object.entries({ id: TARGET, carrierId: TARGET, decision: "approve", reason: "Motivo", offers: "on", team: "3", adminId: OTHER_ID, p_admin_id: OTHER_ID })) fd.set(k, v);
   return fd;
 }
 
@@ -67,7 +68,7 @@ beforeEach(() => {
 describe("admin carrier Server Actions", () => {
   it("the file exports the expected actions (a new action is covered automatically)", () => {
     expect(exported.map(([name]) => name).sort()).toEqual([
-      "approveVehicleAction", "decideCarrierAction", "reviewDocumentAction", "setSuspensionAction", "updateCompanyAction",
+      "approveVehicleAction", "decideCarrierAction", "reviewDocumentAction", "setCarrierPortersAction", "setSuspensionAction", "updateCompanyAction",
     ]);
   });
 

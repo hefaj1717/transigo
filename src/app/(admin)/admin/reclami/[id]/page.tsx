@@ -9,7 +9,7 @@ import { requireArea } from "@/lib/auth/session";
 import { ADMIN_CLAIM_PATHS, CLAIM_NOTE_MAX } from "@/lib/claims/admin";
 import { CLAIM_CATEGORY_LABEL, CLAIM_STATUS_LABEL, type ClaimCategory } from "@/lib/claims/claims";
 import { ADMIN_ORDER_PATHS } from "@/lib/orders/dispatch";
-import { ORDER_STATUS_LABEL } from "@/lib/orders/status";
+import { orderStatusLabel } from "@/lib/orders/status";
 import { createClient } from "@/lib/supabase/server";
 import { closeClaimAction } from "../actions";
 
@@ -29,7 +29,7 @@ type Detail = {
   id: string; order_id: string; category: ClaimCategory; description: string; status: "open" | "closed";
   created_at: string; closed_at: string | null; closed_by: string | null; resolution_note: string | null;
   orders: {
-    order_number: string; status: string; delivered_at: string | null; carriers: { company_name: string } | null;
+    order_number: string; service_type: string; status: string; delivered_at: string | null; carriers: { company_name: string } | null;
     customers: { profiles: { first_name: string | null; last_name: string | null; email: string; phone: string | null } | null } | null;
   } | null;
   claim_photos: { id: string; storage_path: string; created_at: string }[];
@@ -45,7 +45,7 @@ async function Content({ params }: Pick<PageProps<"/admin/reclami/[id]">, "param
   const db = await createClient();
   const { data: c, error } = await db
     .from("claims")
-    .select("id, order_id, category, description, status, created_at, closed_at, closed_by, resolution_note, orders(order_number, status, delivered_at, carriers(company_name), customers(profiles(first_name, last_name, email, phone))), claim_photos(id, storage_path, created_at)")
+    .select("id, order_id, category, description, status, created_at, closed_at, closed_by, resolution_note, orders(order_number, service_type, status, delivered_at, carriers(company_name), customers(profiles(first_name, last_name, email, phone))), claim_photos(id, storage_path, created_at)")
     .eq("id", id)
     .maybeSingle<Detail>();
   if (error) throw new Error(`claim unavailable: ${error.code}`);
@@ -106,7 +106,7 @@ async function Content({ params }: Pick<PageProps<"/admin/reclami/[id]">, "param
             <dt className="text-zinc-500">Ordine</dt>
             <dd>
               <Link href={ADMIN_ORDER_PATHS.detail(c.order_id)} className="text-blue-700 hover:underline">{o?.order_number}</Link>
-              {o ? <div className="text-xs text-zinc-500">{ORDER_STATUS_LABEL[o.status] ?? o.status} · consegnato {rome(o.delivered_at)}</div> : null}
+              {o ? <div className="text-xs text-zinc-500">{orderStatusLabel(o.status, o.service_type)} · {o.service_type === "porters" ? "concluso" : "consegnato"} {rome(o.delivered_at)}</div> : null}
             </dd>
             <dt className="text-zinc-500">Padroncino</dt><dd>{o?.carriers?.company_name ?? "—"}</dd>
             <dt className="text-zinc-500">Cliente</dt>

@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { LogoLink } from "@/components/site/logo";
 import { SignOutButton } from "@/components/sign-out-button";
-import { CUSTOMER_STATUS_LABEL, statusTone, type StatusTone } from "@/lib/orders/customer-view";
+import { customerStatusLabel, statusTone, type StatusTone } from "@/lib/orders/customer-view";
 
 const AREA_LINKS = [
   { href: "/cliente", label: "I miei ordini" },
@@ -57,8 +57,8 @@ const TONE_CLASS: Record<StatusTone, string> = {
   muted: "bg-zinc-100 text-zinc-500",
 };
 
-export function StatusBadge({ status }: { status: string }) {
-  return <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${TONE_CLASS[statusTone(status)]}`}>{CUSTOMER_STATUS_LABEL[status] ?? status}</span>;
+export function StatusBadge({ status, serviceType }: { status: string; serviceType?: string | null }) {
+  return <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${TONE_CLASS[statusTone(status)]}`}>{customerStatusLabel(status, serviceType)}</span>;
 }
 
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {

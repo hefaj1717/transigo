@@ -8,6 +8,7 @@ import {
   approveVehicle,
   decideCarrier,
   reviewDocument,
+  setCarrierPorters,
   setSuspension,
   updateCarrierCompany,
   type AdminResult,
@@ -58,6 +59,12 @@ export async function approveVehicleAction(_prev: ActionResult, fd: FormData): P
 export async function setSuspensionAction(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
   const deps = await adminDeps();
   return respond("setSuspension", () => setSuspension(deps, formValues(fd)));
+}
+
+/** Offre facchinaggio + squadra (D152, D167). Form: id, offers ("on"), team (2–4). */
+export async function setCarrierPortersAction(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
+  const deps = await adminDeps();
+  return respond("setCarrierPorters", () => setCarrierPorters(deps, formValues(fd)));
 }
 
 /** Dati aziendali through admin_update_carrier_company() (D105). Form: carrierId + the company fields. */

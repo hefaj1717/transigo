@@ -21,6 +21,7 @@ import {
   loadAdminDocuments,
   loadAdminVehicles,
   loadMissing,
+  loadPorterJobsInProgress,
   type AdminDocumentRow,
   type AdminVehicleRow,
 } from "@/lib/carriers/admin-pages";
@@ -29,7 +30,7 @@ import { romeToday } from "@/lib/carriers/documents";
 import { signedDocumentUrls } from "@/lib/carriers/pages";
 import { vehicleApprovalState } from "@/lib/carriers/vehicles";
 import { createClient } from "@/lib/supabase/server";
-import { approveVehicleAction, decideCarrierAction, reviewDocumentAction, setSuspensionAction } from "../actions";
+import { approveVehicleAction, decideCarrierAction, reviewDocumentAction, setCarrierPortersAction, setSuspensionAction } from "../actions";
 
 export const metadata = { title: "Padroncino – Transigo" };
 
@@ -58,8 +59,8 @@ async function Content({ params }: Pick<PageProps<"/admin/padroncini/[id]">, "pa
   const db = await createClient(); // admin's session (RLS, storage policy)
   const carrier = await loadAdminCarrier(db, id);
   if (!carrier) notFound();
-  const [vehicles, documents, missing, activeJobs] = await Promise.all([
-    loadAdminVehicles(db, id), loadAdminDocuments(db, id), loadMissing(db, id), countActiveJobs(db, id),
+  const [vehicles, documents, missing, activeJobs, porterJobs] = await Promise.all([
+    loadAdminVehicles(db, id), loadAdminDocuments(db, id), loadMissing(db, id), countActiveJobs(db, id), loadPorterJobsInProgress(db, id),
   ]);
   const urls = await signedDocumentUrls(db, documents);
 
@@ -108,6 +109,8 @@ async function Content({ params }: Pick<PageProps<"/admin/padroncini/[id]">, "pa
       </section>
 
       <Decisions carrierId={id} tab={tab} activeJobs={activeJobs} pendingDocs={pendingDocs.length} complete={!missing.length} />
+
+      <PortersSettings carrierId={id} offers={carrier.offers_porters} team={carrier.porters_team_size} jobs={porterJobs} />
 
       <section className={section} aria-labelledby="company">
         <h2 id="company" className={h2}>Dati aziendali</h2>
@@ -324,5 +327,40 @@ function VehicleCard({ vehicle: v, types, docs, urls, reviewable }: { vehicle: A
         </ActionForm>
       ) : null}
     </li>
+  );
+}
+
+/**
+ * Facchinaggio (D152, D167): who may receive porter jobs and with which team. A change applies to new jobs only;
+ * jobs in progress stay with the carrier — the list warns about those that would need more persons than the team.
+ */
+function PortersSettings({ carrierId, offers, team, jobs }: { carrierId: string; offers: boolean; team: number | null; jobs: { id: string; order_number: string; persons: number }[] }) {
+  return (
+    <section className={section} aria-labelledby="porters">
+      <h2 id="porters" className={h2}>Facchinaggio</h2>
+      <p className="text-sm text-zinc-700">
+        {offers ? `Offre il facchinaggio con una squadra di ${team} persone: riceve i lavori fino a ${team} facchini.` : "Non offre il facchinaggio: non riceve lavori di facchinaggio."}
+      </p>
+      {jobs.length ? (
+        <p className="mt-2 rounded-md bg-amber-50 p-3 text-sm text-amber-900">
+          {jobs.length === 1 ? "1 lavoro di facchinaggio in corso" : `${jobs.length} lavori di facchinaggio in corso`}: restano al padroncino anche se cambi la squadra.{" "}
+          {jobs.map((j, i) => (
+            <span key={j.id}>{i ? ", " : ""}<Link href={`/admin/ordini/${j.id}`} className="underline">{j.order_number}</Link> ({j.persons} facchini)</span>
+          ))}
+        </p>
+      ) : null}
+      <ActionForm action={setCarrierPortersAction} submitLabel="Salva" className="mt-3 max-w-md rounded-md border border-zinc-200 p-3">
+        <input type="hidden" name="id" value={carrierId} />
+        <label className="flex items-center gap-2 text-sm text-zinc-800">
+          <input type="checkbox" name="offers" defaultChecked={offers} />
+          Offre facchinaggio
+        </label>
+        <label htmlFor="porters-team" className="mt-2 block text-sm font-medium text-zinc-800">Squadra (persone)</label>
+        <select id="porters-team" name="team" defaultValue={String(team ?? 2)} className="mt-1 block w-32 rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-900">
+          {[2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+        <p className="mt-1 text-xs text-zinc-500">Vale per i nuovi lavori. Senza la spunta la squadra non conta.</p>
+      </ActionForm>
+    </section>
   );
 }

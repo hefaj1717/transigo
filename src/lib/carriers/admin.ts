@@ -115,6 +115,14 @@ export const ADMIN_CARRIER_MSG = {
   vatTaken: "Questa partita IVA è già registrata da un altro padroncino.",
   forbidden: "Operazione non consentita.",
   generic: "Operazione non riuscita. Riprova.",
+  // Facchinaggio (D152, D167)
+  portersTeam: "Scegli la squadra: da 2 a 4 persone.",
+  portersSaved: "Facchinaggio aggiornato.",
+  portersUnchanged: "Nessuna modifica.",
+  portersTeamTooSmall: (n: number) =>
+    n === 1
+      ? "Attenzione: 1 lavoro di facchinaggio in corso richiede più persone di quante ne offre ora il padroncino. Resta assegnato: valuta se riassegnarlo (in «Ordini» è segnato «Squadra insufficiente»)."
+      : `Attenzione: ${n} lavori di facchinaggio in corso richiedono più persone di quante ne offre ora il padroncino. Restano assegnati: valuta se riassegnarli (in «Ordini» sono segnati «Squadra insufficiente»).`,
 } as const;
 
 const uuid = z.uuid();
@@ -136,6 +144,20 @@ export const suspensionSchema = z.discriminatedUnion("decision", [
 ]);
 
 export const idSchema = z.object({ id: uuid });
+
+/** "Offre facchinaggio" (D152): checkbox `offers` ("on") + team 2–4; without the checkbox the team is ignored. */
+export const portersSettingsSchema = z
+  .object({ id: uuid, offers: z.string().optional(), team: z.string().optional() })
+  .transform((v, ctx) => {
+    const offers = v.offers === "on";
+    if (!offers) return { id: v.id, offers, team: null };
+    const team = Number(v.team);
+    if (!Number.isInteger(team) || team < 2 || team > 4) {
+      ctx.addIssue({ code: "custom", message: ADMIN_CARRIER_MSG.portersTeam, path: ["team"] });
+      return z.NEVER;
+    }
+    return { id: v.id, offers, team };
+  });
 
 /** FormData → plain object of strings (files ignored). */
 export function formValues(fd: FormData): Record<string, string> {

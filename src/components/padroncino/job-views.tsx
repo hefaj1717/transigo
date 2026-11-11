@@ -57,11 +57,26 @@ export function JobListCard({ job, href }: { job: JobCard; href: string }) {
       </div>
       <p className="mt-3 text-sm text-zinc-800 first-letter:uppercase">{romeWindow(job.pickupWindowStart, job.pickupWindowEnd)}</p>
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-zinc-600">
-        <span>{formatKm(job.distanceM)}</span>
-        <span aria-hidden>·</span>
-        <span>{formatDuration(job.durationS)} di guida</span>
-        <span aria-hidden>·</span>
-        <span>{job.vehicleTypeName}</span>
+        {job.porters ? (
+          <>
+            <span className="rounded bg-violet-100 px-1.5 py-0.5 text-xs font-semibold text-violet-900">Facchinaggio</span>
+            <span>{job.porters.persons} facchini · {job.porters.hours} h</span>
+            {job.porters.floor ? (
+              <>
+                <span aria-hidden>·</span>
+                <span>{job.porters.floor}</span>
+              </>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <span>{formatKm(job.distanceM)}</span>
+            <span aria-hidden>·</span>
+            <span>{formatDuration(job.durationS)} di guida</span>
+            <span aria-hidden>·</span>
+            <span>{job.vehicleTypeName}</span>
+          </>
+        )}
         {job.isUrgent ? <UrgentBadge /> : null}
       </div>
       <div className="mt-3 flex items-center justify-between text-xs text-zinc-500">
@@ -83,6 +98,7 @@ export function Section({ title, children }: { title: string; children: ReactNod
 
 /** Route, legs (window, km, floors, porters), load and services — the same on both sides of "Accetta". */
 export function JobFacts({ job }: { job: JobCard }) {
+  if (job.porters) return <PortersFacts job={job} porters={job.porters} />;
   return (
     <>
       <Section title="Percorso">
@@ -131,6 +147,24 @@ export function JobFacts({ job }: { job: JobCard }) {
         </dl>
       </Section>
     </>
+  );
+}
+
+/** Facchinaggio (D164): one place, the work window, the team and the floor — no route, no vehicle. */
+function PortersFacts({ job, porters }: { job: JobCard; porters: NonNullable<JobCard["porters"]> }) {
+  return (
+    <Section title="Facchinaggio">
+      <dl className="space-y-2 text-sm">
+        <Fact label="Luogo"><RouteList stops={job.stops} /></Fact>
+        <Fact label="Inizio">
+          {capitalize(romeWindow(job.pickupWindowStart, job.pickupWindowEnd))}
+          {job.isUrgent ? <span className="ml-2 inline-block"><UrgentBadge /></span> : null}
+        </Fact>
+        <Fact label="Squadra">{porters.persons} facchini · {porters.hours} h di lavoro</Fact>
+        {porters.floor ? <Fact label="Piano">{porters.floor}</Fact> : null}
+        <Fact label="Veicolo">Non serve</Fact>
+      </dl>
+    </Section>
   );
 }
 

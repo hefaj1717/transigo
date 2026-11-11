@@ -16,7 +16,7 @@ import {
   renderCarrierRejectedEmail,
   renderCarrierSuspendedEmail,
 } from "@/lib/notifications/templates/carrier-decisions";
-import { ADMIN_CARRIER_MSG, adminCarrierDbError, decisionSchema, idSchema, suspensionSchema } from "./admin";
+import { ADMIN_CARRIER_MSG, adminCarrierDbError, decisionSchema, idSchema, portersSettingsSchema, suspensionSchema } from "./admin";
 import { documentTypeConfig, type CarrierDocumentType } from "./document-types";
 import { CARRIER_PATHS } from "./onboarding";
 
@@ -190,4 +190,23 @@ export async function updateCarrierCompany(deps: AdminDeps, carrierId: string, i
   }
   const changed = (data as string[] | null) ?? [];
   return { ok: true, changed, message: changed.length ? "Dati aziendali aggiornati." : "Nessuna modifica." };
+}
+
+/**
+ * "Offre facchinaggio" + team (D152, D167) through admin_set_carrier_porters (audit in the same transaction, only
+ * on a real change). Jobs already assigned stay with the carrier; a team now too small is reported to the admin.
+ */
+export async function setCarrierPorters(deps: AdminDeps, input: Record<string, string>): Promise<AdminResult> {
+  const parsed = portersSettingsSchema.safeParse(input);
+  if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? ADMIN_CARRIER_MSG.portersTeam);
+  const { id, offers, team } = parsed.data;
+  const { data, error } = await deps.serviceDb
+    .rpc("admin_set_carrier_porters", { p_carrier_id: id, p_admin_id: deps.admin.userId, p_offers: offers, p_team_size: team })
+    .single<{ jobs_in_progress: number; jobs_team_too_small: number }>();
+  if (error) {
+    if (error.code !== "22023") logDbError("admin_set_carrier_porters", error);
+    return fail(error.code === "42501" ? ADMIN_CARRIER_MSG.forbidden : error.details === "team" ? ADMIN_CARRIER_MSG.portersTeam : error.code === "22023" ? ADMIN_CARRIER_MSG.notFound : ADMIN_CARRIER_MSG.generic);
+  }
+  const warning = data.jobs_team_too_small > 0 ? ` ${ADMIN_CARRIER_MSG.portersTeamTooSmall(data.jobs_team_too_small)}` : "";
+  return { ok: true, message: `${ADMIN_CARRIER_MSG.portersSaved}${warning}` };
 }

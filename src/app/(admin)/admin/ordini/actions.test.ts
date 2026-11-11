@@ -10,11 +10,13 @@ const serviceAccess = vi.hoisted(() => ({ props: [] as string[] }));
 const server = vi.hoisted(() => ({
   assignJob: vi.fn(async () => ({ ok: true, message: "ok" })),
   assignHandover: vi.fn(async () => ({ ok: true, message: "ok" })),
+  assignPortersJob: vi.fn(async () => ({ ok: true, message: "ok" })),
   unassignJob: vi.fn(async () => ({ ok: true, message: "ok" })),
   advanceOrder: vi.fn(async () => ({ ok: true, message: "ok" })),
   revertLastStep: vi.fn(async () => ({ ok: true, message: "ok" })),
   allowEarlyStart: vi.fn(async () => ({ ok: true, message: "ok" })),
   loadCandidates: vi.fn(async () => []),
+  loadPorterCandidates: vi.fn(async () => []),
 }));
 const refunds = vi.hoisted(() => ({
   decideCancellation: vi.fn(async () => ({ ok: true, message: "ok" })),
@@ -62,7 +64,7 @@ const NON_ADMINS: [string, AccountContext][] = [
 function form(): FormData {
   const fd = new FormData();
   // Includes fields an attacker might add: they must never become the admin id.
-  for (const [k, v] of Object.entries({ orderId: TARGET, paymentId: TARGET, refundId: TARGET, refund: "10", carrier: "0", amount: "10", action: "refund", candidate: `${TARGET}:${TARGET}`, reason: "altro", to: "picked_up", leg: "0", step: "loaded", adminId: OTHER_ID, p_admin_id: OTHER_ID })) fd.set(k, v);
+  for (const [k, v] of Object.entries({ orderId: TARGET, paymentId: TARGET, refundId: TARGET, refund: "10", carrier: "0", amount: "10", action: "refund", candidate: `${TARGET}:${TARGET}`, carrierId: TARGET, reason: "altro", to: "picked_up", leg: "0", step: "loaded", adminId: OTHER_ID, p_admin_id: OTHER_ID })) fd.set(k, v);
   return fd;
 }
 
@@ -77,7 +79,7 @@ beforeEach(() => {
 describe("admin dispatch Server Actions", () => {
   it("the file exports the expected actions (a new action is covered automatically)", () => {
     expect(exported.map(([name]) => name).sort()).toEqual([
-      "advanceOrderAction", "allowEarlyStartAction", "assignHandoverAction", "assignJobAction", "decideCancellationAction",
+      "advanceOrderAction", "allowEarlyStartAction", "assignHandoverAction", "assignJobAction", "assignPortersJobAction", "decideCancellationAction",
       "refundOrderAction", "resolvePaymentReviewAction", "retryRefundAction", "revertLastStepAction", "unassignJobAction",
     ]);
   });

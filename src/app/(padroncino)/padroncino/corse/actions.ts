@@ -6,6 +6,7 @@ import { formDataToObject } from "@/lib/auth/schemas";
 import {
   acceptFormError,
   acceptJobForm,
+  acceptPorterJobForm,
   canAcceptJobs,
   canReleaseJobs,
   releaseJobForm,
@@ -14,7 +15,7 @@ import {
 } from "@/lib/carriers/job-actions";
 import { jobNotifyDeps } from "@/lib/carriers/job-deps";
 import { JOB_MSG, JOB_PATHS, myJobsHref } from "@/lib/carriers/jobs";
-import { acceptJob, releaseJob } from "@/lib/carriers/jobs-server";
+import { acceptJob, acceptPorterJob, releaseJob } from "@/lib/carriers/jobs-server";
 import { CARRIER_PATHS } from "@/lib/carriers/onboarding";
 import { createClient } from "@/lib/supabase/server";
 
@@ -27,20 +28,27 @@ import { createClient } from "@/lib/supabase/server";
 // form. Only Italian JOB_MSG texts go back to the browser — never database / Supabase errors.
 // Tested in actions.test.ts ("every export as a non-carrier").
 
-/** Accetta la Corsa: form orderId + vehicleId. On success the UI goes to `href` (Le mie corse → the job). */
+/**
+ * Accetta la Corsa: form orderId + vehicleId — or orderId + kind=porters for Facchinaggio (D164, no vehicle).
+ * On success the UI goes to `href` (Le mie corse → the job).
+ */
 export async function acceptJobAction(_prev: AcceptJobActionState | null, fd: FormData): Promise<AcceptJobActionState> {
   const ctx = await requireArea("padroncino", JOB_PATHS.available);
   const at = Date.now();
   if (!canAcceptJobs(ctx.carrierStatus)) return { ok: false, error: JOB_MSG.notEligible, refreshList: true, at };
 
   const input = formDataToObject(fd);
-  const parsed = acceptJobForm.safeParse(input);
-  if (!parsed.success) return { ok: false, ...acceptFormError(input), at };
-  const { orderId, vehicleId } = parsed.data;
+  const porters = acceptPorterJobForm.safeParse(input);
+  const parsed = porters.success ? null : acceptJobForm.safeParse(input);
+  if (!porters.success && !parsed?.success) return { ok: false, ...acceptFormError(input), at };
+  const orderId = porters.success ? porters.data.orderId : parsed!.data!.orderId;
 
   let result: Awaited<ReturnType<typeof acceptJob>>;
   try {
-    result = await acceptJob(await createClient(), ctx.userId, orderId, vehicleId, jobNotifyDeps());
+    const db = await createClient();
+    result = porters.success
+      ? await acceptPorterJob(db, ctx.userId, orderId, jobNotifyDeps())
+      : await acceptJob(db, ctx.userId, orderId, parsed!.data!.vehicleId, jobNotifyDeps());
   } catch (e) {
     console.error("[jobs] acceptJobAction:", e instanceof Error ? e.message : e);
     return { ok: false, error: JOB_MSG.generic, refreshList: false, at };

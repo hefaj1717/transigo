@@ -5,7 +5,7 @@ import type { ActionResult } from "@/lib/admin/action-result";
 import { adminDeps } from "@/lib/admin/deps";
 import { formValues } from "@/lib/carriers/admin";
 import { ADMIN_ORDER_PATHS, DISPATCH_MSG } from "@/lib/orders/dispatch";
-import { advanceOrder, allowEarlyStart, assignHandover, assignJob, revertLastStep, unassignJob, type DispatchResult } from "@/lib/orders/dispatch-server";
+import { advanceOrder, allowEarlyStart, assignHandover, assignJob, assignPortersJob, revertLastStep, unassignJob, type DispatchResult } from "@/lib/orders/dispatch-server";
 import { decideCancellation, refundOrder, resolvePaymentReview, retryRefund } from "@/lib/orders/admin-refunds-server";
 
 // Admin dispatch actions (D122, D123). EVERY action starts with adminDeps(): the DAL checks the session
@@ -30,6 +30,12 @@ async function respond(where: string, fn: () => Promise<DispatchResult>): Promis
 export async function assignJobAction(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
   const deps = await adminDeps(ADMIN_ORDER_PATHS.list);
   return respond("assignJob", () => assignJob(deps, formValues(fd)));
+}
+
+/** Assegna facchini (D164): form orderId + carrierId — no vehicle. */
+export async function assignPortersJobAction(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
+  const deps = await adminDeps(ADMIN_ORDER_PATHS.list);
+  return respond("assignPortersJob", () => assignPortersJob(deps, formValues(fd)));
 }
 
 /** Rimuovi padroncino: form orderId + reason (code). */

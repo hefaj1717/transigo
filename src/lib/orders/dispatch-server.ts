@@ -1,8 +1,8 @@
 import "server-only";
 import type { AdminDeps } from "@/lib/admin/deps";
 import { sendOrderAssignedEmail, sendOrderDeliveredEmail } from "./customer-emails";
-import { ORDER_STATUS_LABEL } from "./status";
-import { advanceSchema, assignSchema, DISPATCH_MSG, dispatchDbError, handoverSchema, unassignSchema } from "./dispatch";
+import { orderStatusLabel } from "./status";
+import { advanceSchema, assignPortersSchema, assignSchema, DISPATCH_MSG, dispatchDbError, handoverSchema, unassignSchema } from "./dispatch";
 import { earlyStartSchema, EXEC_ADMIN_MSG, execAdminDbError, formError, revertSchema, stepTitle } from "./execution-view";
 
 // Admin dispatch (D122, D123). Called by the Server Actions in src/app/(admin)/admin/ordini/actions.ts AFTER the
@@ -50,6 +50,32 @@ export async function assignJob(deps: AdminDeps, input: Record<string, string>):
   }
   await notifyCustomer("order_assigned", () => sendOrderAssignedEmail(deps.serviceDb, orderId, deps.appUrl));
   return { ok: true, message: DISPATCH_MSG.assigned };
+}
+
+export type PortersCandidate = { carrier_id: string; company_name: string; porters_team_size: number };
+
+/** Carriers that may take the porter job now: active, offering facchinaggio, team ≥ persons (D152, D164). */
+export async function loadPorterCandidates(deps: AdminDeps, orderId: string): Promise<PortersCandidate[]> {
+  const { data, error } = await deps.serviceDb.rpc("admin_porter_candidates", { p_order_id: orderId, p_admin_id: deps.admin.userId });
+  if (error) {
+    log("admin_porter_candidates", error);
+    throw new Error("porter candidates unavailable");
+  }
+  return (data ?? []) as PortersCandidate[];
+}
+
+/** "Assegna facchini": no vehicle (D164); the customer gets order_assigned with the porters' wording (6b). */
+export async function assignPortersJob(deps: AdminDeps, input: Record<string, string>): Promise<DispatchResult> {
+  const parsed = assignPortersSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: DISPATCH_MSG.chooseTeam };
+  const { orderId, carrierId } = parsed.data;
+  const { error } = await deps.serviceDb.rpc("admin_assign_porter_job", { p_order_id: orderId, p_carrier_id: carrierId, p_admin_id: deps.admin.userId });
+  if (error) {
+    if (!expected(error)) log("admin_assign_porter_job", error);
+    return { ok: false, error: dispatchDbError(error) };
+  }
+  await notifyCustomer("order_assigned", () => sendOrderAssignedEmail(deps.serviceDb, orderId, deps.appUrl));
+  return { ok: true, message: DISPATCH_MSG.portersAssigned };
 }
 
 /** "Da gestire": assign a carrier directly with the current address of the goods and an internal reason. */
@@ -105,7 +131,8 @@ export async function advanceOrder(deps: AdminDeps, input: Record<string, string
   if (parsed.data.to === "delivered") {
     await notifyCustomer("order_delivered", () => sendOrderDeliveredEmail(deps.serviceDb, parsed.data.orderId, deps.appUrl));
   }
-  const label = ORDER_STATUS_LABEL[parsed.data.to] ?? parsed.data.to;
+  const { data: svc } = await deps.serviceDb.from("orders").select("service_type").eq("id", parsed.data.orderId).maybeSingle<{ service_type: string }>();
+  const label = orderStatusLabel(parsed.data.to, svc?.service_type);
   return {
     ok: true,
     message: parsed.data.to === "delivered" ? `${DISPATCH_MSG.advanced(label)} ${DISPATCH_MSG.deliveredWithoutPod}` : DISPATCH_MSG.advanced(label),

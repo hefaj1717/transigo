@@ -118,7 +118,7 @@ async function Content({ searchParams }: Pick<PageProps<"/cliente">, "searchPara
                     <p className="mt-1 text-xs text-zinc-500">Ordine {o.order_number}</p>
                   </div>
                   <div className="text-right">
-                    <StatusBadge status={o.status} />
+                    <StatusBadge status={o.status} serviceType={o.service_type} />
                     <p className="mt-2 font-semibold text-zinc-900">{o.order_charges ? formatCents(o.order_charges.total_cents) : "—"}</p>
                     {pay !== "paid" ? <p className="text-xs text-zinc-500">{PAYMENT_STATE_LABEL[pay]}</p> : null}
                   </div>

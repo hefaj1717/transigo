@@ -3,8 +3,8 @@ import Link from "next/link";
 import { Loading } from "@/components/panel-shell";
 import { AdminShell } from "@/components/admin/admin-nav";
 import { requireArea } from "@/lib/auth/session";
-import { ADMIN_ORDER_PATHS, HANDOVER_BADGE, handoverKind, isHandoverPending, ORDER_FILTERS } from "@/lib/orders/dispatch";
-import { ORDER_STATUS_LABEL, PAYMENT_STATE_LABEL, paymentState } from "@/lib/orders/status";
+import { ADMIN_ORDER_PATHS, HANDOVER_BADGE, handoverKind, isHandoverPending, ORDER_FILTERS, teamTooSmall } from "@/lib/orders/dispatch";
+import { orderStatusLabel, PAYMENT_STATE_LABEL, paymentState } from "@/lib/orders/status";
 import { dispatchable, SERVICE_FILTERS, SERVICE_TYPE_LABEL, serviceFilter, serviceTypeOf } from "@/lib/orders/service-type";
 import { formatCents } from "@/lib/pricing/money";
 import { stripeDashboardPaymentUrl } from "@/lib/stripe/keys";
@@ -38,7 +38,8 @@ type Row = {
   order_charges: { total_cents: number; refunded_cents: number } | null;
   customers: { profiles: { first_name: string | null; last_name: string | null; email: string } | null } | null;
   payments: { status: string; stripe_payment_intent_id: string | null; review_reason: string | null; created_at: string }[];
-  carriers: { company_name: string } | null;
+  carriers: { company_name: string; offers_porters: boolean; porters_team_size: number | null } | null;
+  order_porter_jobs: { persons: number } | null;
 };
 
 const FILTERS = ORDER_FILTERS;
@@ -72,7 +73,7 @@ async function Content({ searchParams }: Pick<PageProps<"/admin/ordini">, "searc
   let q = db
     .from("orders")
     .select(
-      "id, order_number, service_type, status, created_at, pickup_window_start, payment_due_at, paid_at, handover_required_at, handover_leg_index, carrier_id, order_charges(total_cents, refunded_cents), customers(profiles(first_name, last_name, email)), payments(status, stripe_payment_intent_id, review_reason, created_at), carriers(company_name)",
+      "id, order_number, service_type, status, created_at, pickup_window_start, payment_due_at, paid_at, handover_required_at, handover_leg_index, carrier_id, order_charges(total_cents, refunded_cents), customers(profiles(first_name, last_name, email)), payments(status, stripe_payment_intent_id, review_reason, created_at), carriers(company_name, offers_porters, porters_team_size), order_porter_jobs(persons)",
     )
     .order(filter.unassigned ? "pickup_window_start" : "created_at", { ascending: !!filter.unassigned })
     .limit(100);
@@ -142,7 +143,10 @@ async function Content({ searchParams }: Pick<PageProps<"/admin/ordini">, "searc
                     <div className="text-xs text-zinc-500">{p?.email}</div>
                   </td>
                   <td className="py-2 pr-3 whitespace-nowrap">{type === "storage" ? `dal ${romeDay(o.pickup_window_start)}` : rome(o.pickup_window_start)}</td>
-                  <td className="py-2 pr-3">{ORDER_STATUS_LABEL[o.status] ?? o.status}</td>
+                  <td className="py-2 pr-3">
+                    {orderStatusLabel(o.status, o.service_type)}
+                    {teamTooSmall(o, o.order_porter_jobs?.persons, o.carriers) ? <span className="ml-1 rounded bg-red-100 px-1.5 py-0.5 text-xs text-red-900">Squadra insufficiente</span> : null}
+                  </td>
                   <td className="py-2 pr-3">
                     {isHandoverPending(o) ? (
                       <Link href={ADMIN_ORDER_PATHS.detail(o.id)} className="inline-block rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-900 underline">{HANDOVER_BADGE[handoverKind(o, (handoverSteps ?? []).filter((x) => x.order_id === o.id))]}</Link>

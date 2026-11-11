@@ -12,11 +12,12 @@ import { bigButton, bigButtonSecondary, stickyActionBar } from "./carrier-shell"
 //
 // Props are display strings prepared on the server from the JobCard — no street, phone or customer name (D119).
 // The carrier is the session's; the form sends only orderId + vehicleId (the Server Action validates both).
+// Facchinaggio (`porters`, D164): no vehicle — the form sends orderId + kind=porters; the sheet shows the team.
 
 export type AcceptVehicle = { id: string; label: string };
 export type AcceptSummary = { orderNumber: string; route: string; when: string; amount: string };
 
-export function AcceptJob({ orderId, vehicles, summary }: { orderId: string; vehicles: AcceptVehicle[]; summary: AcceptSummary }) {
+export function AcceptJob({ orderId, vehicles, summary, porters }: { orderId: string; vehicles: AcceptVehicle[]; summary: AcceptSummary; porters?: string }) {
   const router = useRouter();
   const [vehicleId, setVehicleId] = useState<string | null>(vehicles.length === 1 ? vehicles[0].id : null);
   const [open, setOpen] = useState(false);
@@ -45,7 +46,7 @@ export function AcceptJob({ orderId, vehicles, summary }: { orderId: string; veh
 
   function openConfirm() {
     setError(null);
-    if (!vehicle) {
+    if (!vehicle && !porters) {
       setError(JOB_MSG.chooseVehicle);
       return;
     }
@@ -53,12 +54,13 @@ export function AcceptJob({ orderId, vehicles, summary }: { orderId: string; veh
   }
 
   function confirm() {
-    if (sending.current || !vehicle) return;
+    if (sending.current || (!vehicle && !porters)) return;
     sending.current = true;
     startTransition(async () => {
       const fd = new FormData();
       fd.set("orderId", orderId);
-      fd.set("vehicleId", vehicle.id);
+      if (porters) fd.set("kind", "porters");
+      else if (vehicle) fd.set("vehicleId", vehicle.id);
       try {
         const r = await acceptJobAction(null, fd);
         if (r.ok) {
@@ -129,7 +131,7 @@ export function AcceptJob({ orderId, vehicles, summary }: { orderId: string; veh
         </button>
       </div>
 
-      {open && vehicle ? (
+      {open && (vehicle || porters) ? (
         <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/40 sm:items-center" onClick={() => !sending.current && setOpen(false)}>
           <div
             role="dialog"
@@ -139,20 +141,20 @@ export function AcceptJob({ orderId, vehicles, summary }: { orderId: string; veh
             className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:rounded-3xl"
           >
             <h2 id={titleId} className="text-xl font-semibold text-zinc-900">
-              Accetti la corsa {summary.orderNumber}?
+              {porters ? `Accetti il lavoro ${summary.orderNumber}?` : `Accetti la corsa ${summary.orderNumber}?`}
             </h2>
             <dl className="mt-4 space-y-3 text-sm">
               <div>
-                <dt className="text-zinc-500">Percorso</dt>
+                <dt className="text-zinc-500">{porters ? "Luogo" : "Percorso"}</dt>
                 <dd className="font-medium break-words text-zinc-900">{summary.route}</dd>
               </div>
               <div>
-                <dt className="text-zinc-500">Ritiro</dt>
+                <dt className="text-zinc-500">{porters ? "Inizio lavoro" : "Ritiro"}</dt>
                 <dd className="font-medium text-zinc-900 first-letter:uppercase">{summary.when}</dd>
               </div>
               <div>
-                <dt className="text-zinc-500">Veicolo</dt>
-                <dd className="font-medium break-words text-zinc-900">{vehicle.label}</dd>
+                <dt className="text-zinc-500">{porters ? "Squadra" : "Veicolo"}</dt>
+                <dd className="font-medium break-words text-zinc-900">{porters ?? vehicle?.label}</dd>
               </div>
               <div>
                 <dt className="text-zinc-500">Compenso per te</dt>
@@ -160,7 +162,9 @@ export function AcceptJob({ orderId, vehicles, summary }: { orderId: string; veh
               </div>
             </dl>
             <p className="mt-4 text-sm text-zinc-600">
-              Accettando ti impegni a effettuare la corsa. Dopo potrai rinunciare solo entro 15 minuti oppure fino a 48 ore prima del ritiro.
+              {porters
+                ? "Accettando ti impegni a presentarti con la squadra indicata. Dopo potrai rinunciare solo entro 15 minuti oppure fino a 48 ore prima dell'inizio."
+                : "Accettando ti impegni a effettuare la corsa. Dopo potrai rinunciare solo entro 15 minuti oppure fino a 48 ore prima del ritiro."}
             </p>
             <div className="mt-5 space-y-3">
               <button ref={confirmRef} type="button" onClick={confirm} disabled={pending} aria-busy={pending} className={bigButton}>

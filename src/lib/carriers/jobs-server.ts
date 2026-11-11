@@ -5,7 +5,8 @@ import { CARRIER_RELEASED_JOB_TEMPLATE, renderCarrierReleasedJobEmail } from "@/
 import { sendOrderAssignedEmail } from "@/lib/orders/customer-emails";
 import {
   acceptOutcome,
-  CARRIER_JOB_STATUS_LABEL,
+  busyLegsOf,
+  carrierJobStatusLabel,
   describeJobBlockers,
   JOB_MSG,
   jobDbError,
@@ -13,9 +14,10 @@ import {
   overlappingJobs,
   releaseInfo,
   toJobCard,
+  toPorterJobCard,
   type AvailableJobLeg,
   type AvailableJobRow,
-  type BusyLeg,
+  type AvailablePorterJobRow,
   type JobBlocker,
   type JobCard,
   type MyJobTab,
@@ -68,15 +70,23 @@ export async function loadEligibility(db: SupabaseClient): Promise<Eligibility> 
 
 export type AvailableJobsResult = { ok: true; jobs: JobCard[] } | { ok: false; blockers: JobBlocker[] };
 
-/** The list, or why the carrier gets none (the database refuses with 42501 + blocker codes). */
+/**
+ * The list — transport jobs matching a ready vehicle and Facchinaggio jobs matching the team (D152, D164), by start
+ * time — or why the carrier gets none (the database refuses with 42501 + blocker codes; the same blockers for both).
+ */
 export async function listAvailableJobs(db: SupabaseClient): Promise<AvailableJobsResult> {
-  const { data, error } = await db.rpc("list_available_jobs");
+  const [transport, porters] = await Promise.all([db.rpc("list_available_jobs"), db.rpc("list_available_porter_jobs")]);
+  const error = transport.error ?? porters.error;
   if (error) {
     if (error.code === "42501") return { ok: false, blockers: (await loadEligibility(db)).blockers };
-    logDbError("list_available_jobs", error);
+    logDbError(transport.error ? "list_available_jobs" : "list_available_porter_jobs", error);
     throw new Error("available jobs unavailable");
   }
-  return { ok: true, jobs: ((data ?? []) as AvailableJobRow[]).map(toJobCard) };
+  const jobs = [
+    ...((transport.data ?? []) as AvailableJobRow[]).map(toJobCard),
+    ...((porters.data ?? []) as AvailablePorterJobRow[]).map(toPorterJobCard),
+  ].sort((a, b) => a.pickupWindowStart.localeCompare(b.pickupWindowStart) || a.orderNumber.localeCompare(b.orderNumber));
+  return { ok: true, jobs };
 }
 
 export type JobVehicle = { id: string; plate: string; vehicleTypeName: string };
@@ -98,6 +108,18 @@ export async function loadAvailableJob(db: SupabaseClient, userId: string, order
   }
   const row = ((data ?? []) as AvailableJobRow[])[0];
   if (!row) {
+    // Facchinaggio (D164): no vehicle to choose; the overlap warning uses the work window + hours.
+    const { data: porterRows, error: porterError } = await db.rpc("list_available_porter_jobs", { p_order_id: orderId });
+    if (porterError) {
+      logDbError("list_available_porter_jobs(one)", porterError);
+      throw new Error("available job unavailable");
+    }
+    const porterRow = ((porterRows ?? []) as AvailablePorterJobRow[])[0];
+    if (porterRow) {
+      const job = toPorterJobCard(porterRow);
+      const myJobs = await loadMyJobs(db, userId);
+      return { kind: "available", job, vehicles: [], overlaps: overlappingJobs({ orderId: job.orderId, legs: busyLegsOf(job) }, myJobs) };
+    }
     const { data: mine } = await db.from("orders").select("id").eq("id", orderId).eq("carrier_id", userId).maybeSingle();
     return mine ? { kind: "mine" } : { kind: "unavailable" };
   }
@@ -118,20 +140,19 @@ export async function loadAvailableJob(db: SupabaseClient, userId: string, order
     plate: v.plate,
     vehicleTypeName: v.vehicle_types?.name_it ?? "—",
   }));
-  return { kind: "available", job, vehicles, overlaps: overlappingJobs({ orderId: job.orderId, legs: busyLegs(job) }, myJobs) };
+  return { kind: "available", job, vehicles, overlaps: overlappingJobs({ orderId: job.orderId, legs: busyLegsOf(job) }, myJobs) };
 }
-
-const busyLegs = (job: Pick<JobCard, "legs">): BusyLeg[] =>
-  job.legs.map((l) => ({ pickupWindowStart: l.pickupWindowStart, pickupWindowEnd: l.pickupWindowEnd, durationS: l.durationS }));
 
 // ---------------------------------------------------------------------------
 // "Le mie corse" — the carrier's own orders through RLS (orders_select_carrier)
 // ---------------------------------------------------------------------------
 
 const MY_JOB_COLUMNS = [
-  "id, order_number, status, assigned_at, picked_up_at, in_transit_at, delivered_at, completed_at, pickup_window_start",
+  "id, order_number, service_type, status, assigned_at, picked_up_at, in_transit_at, delivered_at, completed_at, pickup_window_start",
   "weight_kg, largest_item_length_cm, largest_item_width_cm, largest_item_height_cm, pallets_count, items_count, load_category",
   "packing_items_count, storage_type, storage_days, carrier_vehicle_id, vehicle_types(name_it)",
+  // Facchinaggio (D164): the job and the carrier's amount (FK to order_porter_jobs — nested under it)
+  "order_porter_jobs(city, province, job_date, window_start, window_end, persons, requested_hours, billed_hours, floor, has_elevator, is_urgent, order_porter_carrier_terms(carrier_amount_cents))",
 ].join(", ");
 
 const LEG_COLUMNS = [
@@ -151,8 +172,13 @@ type LegRow = Omit<AvailableJobLeg, "pickup_is_warehouse" | "delivery_is_warehou
   delivery_warehouse_id: string | null;
   order_leg_carrier_terms: Terms | null;
 };
+type PorterJobRow = Omit<AvailablePorterJobRow, "order_id" | "order_number" | "carrier_amount_cents"> & {
+  order_porter_carrier_terms: { carrier_amount_cents: number } | null;
+};
 type OrderRow = Omit<AvailableJobRow, "order_id" | "vehicle_type_name" | "legs" | "matching_vehicle_ids" | keyof Terms> & {
   id: string;
+  service_type: string;
+  order_porter_jobs: PorterJobRow | null;
   status: string;
   assigned_at: string | null;
   picked_up_at: string | null;
@@ -205,10 +231,20 @@ function asJobRow(o: OrderRow): AvailableJobRow {
 
 export type MyJobSummary = JobCard & { status: string; statusLabel: string; tab: MyJobTab; assignedAt: string | null };
 
+/** The card of an own order: transport from its legs, Facchinaggio from its job (D164). */
+function cardOf(o: OrderRow): JobCard {
+  const j = o.order_porter_jobs;
+  if (o.service_type === "porters" && j) {
+    const { order_porter_carrier_terms: terms, ...job } = j;
+    return toPorterJobCard({ ...job, order_id: o.id, order_number: o.order_number, carrier_amount_cents: terms?.carrier_amount_cents ?? 0 });
+  }
+  return toJobCard(asJobRow(o));
+}
+
 function toSummary(o: OrderRow): MyJobSummary | null {
   const tab = myJobTab(o.status);
   if (!tab) return null; // e.g. refunded after a cancellation: not shown to the carrier
-  return { ...toJobCard(asJobRow(o)), status: o.status, statusLabel: CARRIER_JOB_STATUS_LABEL[o.status] ?? o.status, tab, assignedAt: o.assigned_at };
+  return { ...cardOf(o), status: o.status, statusLabel: carrierJobStatusLabel(o.status, o.service_type), tab, assignedAt: o.assigned_at };
 }
 
 /** The carrier's jobs for "Le mie corse" (all tabs), by pickup time. Also for the overlap warning (D120). */
@@ -240,6 +276,8 @@ export type MyJobLegDetail = {
 };
 
 export type MyJobDetail = MyJobSummary & {
+  /** Facchinaggio: the full address of the job (after accepting, RLS); null for transport. */
+  portersPlace: { address: string; lat: number; lng: number } | null;
   release: ReleaseInfo;
   goodsDescription: string;
   goodsDimensionsNote: string | null;
@@ -256,7 +294,7 @@ export async function loadMyJob(db: SupabaseClient, userId: string, orderId: str
   if (!isUuid(orderId)) return null;
   const { data, error } = await db
     .from("orders")
-    .select(`${MY_JOB_COLUMNS}, ${PERSONAL_COLUMNS}, order_legs(${LEG_COLUMNS}, ${PERSONAL_LEG_COLUMNS})`)
+    .select(`${MY_JOB_COLUMNS}, ${PERSONAL_COLUMNS}, order_legs(${LEG_COLUMNS}, ${PERSONAL_LEG_COLUMNS}), porter_place:order_porter_jobs(address, lat, lng)`)
     .eq("id", orderId)
     .eq("carrier_id", userId)
     .maybeSingle();
@@ -266,6 +304,7 @@ export async function loadMyJob(db: SupabaseClient, userId: string, orderId: str
   }
   if (!data) return null;
   const o = data as unknown as OrderRow & {
+    porter_place: { address: string; lat: number; lng: number } | null;
     goods_description: string;
     goods_dimensions_note: string | null;
     customer_notes: string | null;
@@ -298,11 +337,12 @@ export async function loadMyJob(db: SupabaseClient, userId: string, orderId: str
   return {
     ...summary,
     release: releaseInfo({ status: o.status, assigned_at: o.assigned_at, pickup_window_start: o.pickup_window_start }, now),
+    portersPlace: o.porter_place ?? null,
     goodsDescription: o.goods_description,
     goodsDimensionsNote: o.goods_dimensions_note,
     customerNotes: o.customer_notes,
     pickupContact: { name: o.pickup_contact_name, phone: o.pickup_contact_phone },
-    deliveryContact: { name: o.delivery_contact_name, phone: o.delivery_contact_phone },
+    deliveryContact: { name: o.delivery_contact_name ?? "", phone: o.delivery_contact_phone ?? "" }, // none for Facchinaggio
     addresses: legs.map((l) => ({
       legIndex: l.leg_index,
       pickupAddress: l.pickup_address,
@@ -364,6 +404,32 @@ export async function acceptJob(db: SupabaseClient, userId: string, orderId: str
   return outcome;
 }
 
+/** "Accetta" for Facchinaggio (D164): accept_porter_job with the carrier's session — no vehicle. Same e-mail rule. */
+export async function acceptPorterJob(db: SupabaseClient, userId: string, orderId: string, notify: JobNotifyDeps): Promise<AcceptResult> {
+  if (!isUuid(orderId)) return { ok: false, error: JOB_MSG.notFound, refreshList: true };
+  const { data, error } = await db.rpc("accept_porter_job", { p_order_id: orderId });
+  if (error) {
+    if (error.code !== "55000" && error.code !== "42501" && error.code !== "22023") logDbError("accept_porter_job", error);
+    const view = jobDbError("accept", error);
+    return { ok: false, error: view.message, refreshList: view.refreshList };
+  }
+  const outcome = acceptOutcome(data);
+  if (!outcome.ok) {
+    logDbError("accept_porter_job: unexpected result", null);
+    return { ok: false, error: outcome.message, refreshList: true };
+  }
+  if (outcome.newlyAssigned) {
+    try {
+      const { data: assigned, error: readError } = await db.from("orders").select("id").eq("id", orderId).eq("carrier_id", userId).maybeSingle<{ id: string }>();
+      if (readError || !assigned) throw new Error("accepted order not readable with the carrier's session");
+      await sendOrderAssignedEmail(notify.serviceDb(), assigned.id, notify.appUrl);
+    } catch (e) {
+      logMailError("order_assigned", orderId, e);
+    }
+  }
+  return outcome;
+}
+
 /**
  * `tooLate`: release_job refused with too_late (the deadline passed meanwhile) or loaded (the load is on board) —
  * the UI shows "Contatta Transigo".
@@ -380,7 +446,7 @@ export async function releaseJob(db: SupabaseClient, userId: string, orderId: st
 
   const { data: before } = await db
     .from("orders")
-    .select("order_number, assigned_at, order_legs(leg_index, pickup_window_start, pickup_window_end)")
+    .select("order_number, assigned_at, order_legs(leg_index, pickup_window_start, pickup_window_end), order_porter_jobs(window_start, window_end)")
     .eq("id", orderId)
     .eq("carrier_id", userId)
     .maybeSingle();
@@ -404,6 +470,7 @@ type ReleaseSnapshot = {
   order_number: string;
   assigned_at: string | null;
   order_legs: { leg_index: number; pickup_window_start: string; pickup_window_end: string }[];
+  order_porter_jobs: { window_start: string; window_end: string } | null; // Facchinaggio: the work window
 };
 
 async function notifyAdminOfRelease(
@@ -419,7 +486,10 @@ async function notifyAdminOfRelease(
     return;
   }
   const { data: carrier } = await db.from("carriers").select("company_name").eq("profile_id", userId).single();
-  const first = [...(before?.order_legs ?? [])].sort((a, b) => a.leg_index - b.leg_index)[0];
+  const porterJob = before?.order_porter_jobs ?? null;
+  const first = porterJob
+    ? { pickup_window_start: porterJob.window_start, pickup_window_end: porterJob.window_end }
+    : [...(before?.order_legs ?? [])].sort((a, b) => a.leg_index - b.leg_index)[0];
   if (!first) throw new Error("pickup window not read before the release");
   const rendered = renderCarrierReleasedJobEmail({
     orderNumber: released.order_number,

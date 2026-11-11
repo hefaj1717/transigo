@@ -13,6 +13,18 @@ export const NEXT_STATUS: Partial<Record<string, { to: "picked_up" | "in_transit
   in_transit: { to: "delivered", label: "Segna come consegnato" },
 };
 
+/** Facchinaggio (D165): assigned → picked_up → delivered, without in_transit (admin_advance_order checks the same). */
+export const PORTERS_NEXT_STATUS: Partial<Record<string, { to: "picked_up" | "delivered"; label: string }>> = {
+  assigned: { to: "picked_up", label: "Segna lavoro iniziato" },
+  picked_up: { to: "delivered", label: "Segna lavoro concluso" },
+};
+
+/** The admin's next step for an order of this service; storage orders have none (no carrier). */
+export function nextStatusFor(status: string, serviceType?: string | null) {
+  if (serviceType === "storage") return undefined;
+  return serviceType === "porters" ? PORTERS_NEXT_STATUS[status] : NEXT_STATUS[status];
+}
+
 /** Reason codes of "Rimuovi padroncino" (written only to the audit log, D122). */
 export const UNASSIGN_REASONS = [
   { code: "errore_admin", label: "Errore nell'assegnazione" },
@@ -44,6 +56,11 @@ export const DISPATCH_MSG = {
   vehicleNotReady: "Il veicolo non è pronto (non approvato o documenti non approvati/scaduti).",
   vehicleNotSuitable: "Il veicolo non è adatto a questo ordine (tipo, portata, misure o pallet).",
   notAssigned: "L'ordine non è più assegnato (forse già ritirato). Ricarica la pagina.",
+  // Facchinaggio (D164–D167)
+  portersAssigned: "Facchini assegnati.",
+  chooseTeam: "Scegli un padroncino.",
+  teamNotSuitable: "Il padroncino non offre il facchinaggio o la sua squadra è più piccola di quella richiesta.",
+  workStarted: "Il lavoro è già iniziato: il padroncino non si può rimuovere. Usa «Segna lavoro concluso» con il motivo.",
   notNextStatus: "Lo stato è già cambiato. Ricarica la pagina.",
   notFound: "Elemento non trovato.",
   forbidden: "Operazione non consentita.",
@@ -116,6 +133,23 @@ export function isHandoverPending(o: { handover_required_at: string | null; carr
   return o.handover_required_at !== null && o.carrier_id === null && (o.status === "picked_up" || o.status === "in_transit");
 }
 
+/** "Assegna facchini": orderId + carrierId (no vehicle, D164). */
+export const assignPortersSchema = z.object({ orderId: uuid, carrierId: z.uuid({ error: DISPATCH_MSG.chooseTeam }) });
+
+/**
+ * "Squadra insufficiente" (D167): a porter job in progress whose carrier no longer offers facchinaggio or whose
+ * team became smaller than the persons of the job — the admin may reassign it. Mirrors admin_set_carrier_porters.
+ */
+export function teamTooSmall(
+  o: { service_type?: string | null; status: string; carrier_id: string | null },
+  persons: number | null | undefined,
+  carrier: { offers_porters: boolean; porters_team_size: number | null } | null | undefined,
+): boolean {
+  if (o.service_type !== "porters" || !o.carrier_id || !carrier || persons == null) return false;
+  if (o.status !== "assigned" && o.status !== "picked_up") return false;
+  return !carrier.offers_porters || (carrier.porters_team_size ?? 0) < persons;
+}
+
 export const unassignSchema = z.object({
   orderId: uuid,
   reason: z.enum(UNASSIGN_REASONS.map((r) => r.code) as [UnassignReason, ...UnassignReason[]], { error: DISPATCH_MSG.chooseReason }),
@@ -161,6 +195,10 @@ export function dispatchDbError(error: DbError): string {
           return DISPATCH_MSG.notHandover;
         case "all_unloaded":
           return DISPATCH_MSG.allUnloaded;
+        case "team_not_suitable":
+          return DISPATCH_MSG.teamNotSuitable;
+        case "work_started":
+          return DISPATCH_MSG.workStarted;
         default:
           return DISPATCH_MSG.notNextStatus; // admin_advance_order: detail = current status
       }
