@@ -70,7 +70,7 @@ const requiredPhone = z
     return e164 ?? v;
   });
 
-const optionalPhone = z
+export const optionalPhone = z
   .string()
   .optional()
   .transform((v, ctx) => {

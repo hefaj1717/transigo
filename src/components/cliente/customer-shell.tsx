@@ -11,10 +11,17 @@ export function CustomerShell({ title, subtitle, children }: { title: string; su
       <header className="border-b border-zinc-200 bg-white">
         <div className="mx-auto flex h-16 max-w-4xl items-center justify-between gap-3 px-4">
           <LogoLink />
-          <nav aria-label="Area cliente" className="flex items-center gap-2 sm:gap-4">
-            <Link href="/cliente" className="hidden text-sm font-medium text-zinc-700 hover:text-brand-800 sm:inline">I miei ordini</Link>
-            <Link href="/prenota" className="rounded-md bg-brand-800 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-900">Nuova prenotazione</Link>
-            <SignOutButton className="rounded-md px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100" />
+          <nav aria-label="Area cliente" className="flex items-center gap-3 sm:gap-4">
+            <Link href="/cliente" className="text-sm font-medium text-zinc-700 hover:text-brand-800">
+              <span className="sm:hidden">Ordini</span>
+              <span className="hidden sm:inline">I miei ordini</span>
+            </Link>
+            <Link href="/cliente/profilo" className="text-sm font-medium text-zinc-700 hover:text-brand-800">Profilo</Link>
+            <Link href="/prenota" className="whitespace-nowrap rounded-md bg-brand-800 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-900">
+              <span className="sm:hidden">Prenota</span>
+              <span className="hidden sm:inline">Nuova prenotazione</span>
+            </Link>
+            <SignOutButton className="rounded-md py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 sm:px-3" />
           </nav>
         </div>
       </header>
