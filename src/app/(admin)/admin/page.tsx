@@ -42,7 +42,7 @@ async function Content({ searchParams }: Pick<PageProps<"/admin">, "searchParams
   const head = { count: "exact" as const, head: true };
 
   const [
-    settings, cancellations, reviewPayments, openRefunds, claims, handover, paidOrders, requests, carriers, vehicles, documents, docs, monthOrders, statuses,
+    settings, cancellations, reviewPayments, openRefunds, claims, handover, paidOrders, requests, carriers, vehicles, documents, docs, monthOrders, statuses, invoiceErrors,
   ] = await Promise.all([
     db.from("settings").select("unassigned_alert_hours").single(),
     db.from("orders").select("id", head).eq("status", "cancellation_review"),
@@ -62,6 +62,7 @@ async function Content({ searchParams }: Pick<PageProps<"/admin">, "searchParams
       .gte("paid_at", month.start.toISOString()).lt("paid_at", month.end.toISOString())
       .returns<MonthOrder[]>(),
     db.from("orders").select("status").limit(10_000),
+    db.from("invoices").select("id", head).eq("status", "failed"),
   ]);
 
   const alertHours = settings.data?.unassigned_alert_hours ?? 4;
@@ -79,6 +80,7 @@ async function Content({ searchParams }: Pick<PageProps<"/admin">, "searchParams
     { label: "Rimborsi da completare", count: refundsToComplete, href: "/admin/ordini?filtro=rimborsi" },
     { label: "Ordini da gestire", count: handover.count, href: "/admin/ordini?filtro=da-gestire", hint: "padroncino rimosso con la merce" },
     { label: `Pagati senza padroncino da oltre ${alertHours} h`, count: unassignedTooLong(paidOrders.data ?? [], alertHours, now), href: "/admin/ordini?filtro=da-assegnare" },
+    { label: "Fatture in errore", count: invoiceErrors.count, href: "/admin/fatture" },
     { label: "Reclami aperti", count: claims.count, href: "/admin/reclami" },
     { label: "Richieste nuove", count: requests.count, href: "/admin/richieste" },
     { label: "Padroncini da verificare", count: carriersToReview, href: ADMIN_CARRIER_PATHS.tab("da-verificare") },
@@ -86,7 +88,7 @@ async function Content({ searchParams }: Pick<PageProps<"/admin">, "searchParams
     { label: "Documenti da verificare", count: documents.length, href: ADMIN_CARRIER_PATHS.tab("documenti") },
     { label: "Documenti in scadenza (30 giorni)", count: expiring.length, href: ADMIN_CARRIER_PATHS.tab("attivi"), hint: "padroncini attivi o sospesi" },
   ];
-  const loadErrors = [settings, cancellations, reviewPayments, openRefunds, claims, handover, paidOrders, requests, docs, monthOrders, statuses].filter((r) => r.error).length;
+  const loadErrors = [settings, cancellations, reviewPayments, openRefunds, claims, handover, paidOrders, requests, docs, monthOrders, statuses, invoiceErrors].filter((r) => r.error).length;
 
   const finance = monthFinance(
     (monthOrders.data ?? []).map((o): FinanceOrder => ({

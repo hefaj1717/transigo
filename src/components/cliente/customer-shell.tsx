@@ -7,11 +7,12 @@ import { CUSTOMER_STATUS_LABEL, statusTone, type StatusTone } from "@/lib/orders
 const AREA_LINKS = [
   { href: "/cliente", label: "I miei ordini" },
   { href: "/cliente/deposito", label: "Deposito" },
+  { href: "/cliente/fatture", label: "Fatture" },
   { href: "/cliente/reclami", label: "Reclami" },
   { href: "/cliente/profilo", label: "Profilo" },
 ] as const;
 
-// Frame of the customer area (spec 7): logo, area links (ordini, deposito, reclami, profilo), "Nuova prenotazione", "Esci".
+// Frame of the customer area (spec 7): logo, area links (ordini, deposito, fatture, reclami, profilo), "Nuova prenotazione", "Esci".
 export function CustomerShell({ title, subtitle, children }: { title: string; subtitle?: ReactNode; children: ReactNode }) {
   return (
     <div className="flex min-h-full flex-1 flex-col bg-zinc-50">

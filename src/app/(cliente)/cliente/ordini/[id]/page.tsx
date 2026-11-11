@@ -2,6 +2,8 @@ import { Suspense, type ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Card, CustomerShell, StatusBadge } from "@/components/cliente/customer-shell";
+import { CUSTOMER_DOC_COLUMNS, InvoiceList, type CustomerDoc } from "@/components/cliente/invoice-list";
+import { groupDocuments } from "@/lib/einvoice/view";
 import { Loading } from "@/components/panel-shell";
 import { requireArea } from "@/lib/auth/session";
 import { CUSTOMER_STATUS_LABEL, progressSteps, routeSummary, type ProgressStep } from "@/lib/orders/customer-view";
@@ -89,11 +91,13 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
 
   const supabase = await createClient();
-  const [{ data: o }, carrierRes] = await Promise.all([
+  const [{ data: o }, carrierRes, docsRes] = await Promise.all([
     supabase.from("orders").select(SELECT).eq("id", id).maybeSingle<OrderRow>(),
     supabase.rpc("customer_order_carrier", { p_order_id: id }),
+    supabase.from("invoices").select(CUSTOMER_DOC_COLUMNS).eq("order_id", id).returns<CustomerDoc[]>(),
   ]);
   if (!o) notFound();
+  const invoiceGroups = groupDocuments(docsRes.data ?? []);
   const carrier = ((carrierRes.data ?? []) as CarrierInfo[])[0] ?? null;
   const exec = await loadCustomerExecution(supabase, o);
 
@@ -303,6 +307,15 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
                 ) : null}
               </tfoot>
             </table>
+          </Card>
+        ) : null}
+
+        {/* Invoices (D144–D148) */}
+        {invoiceGroups.length ? (
+          <Card>
+            <H2>Fatture</H2>
+            <div className="mt-1"><InvoiceList groups={invoiceGroups} business={business} showOrder={false} /></div>
+            <p className="mt-2 text-xs text-zinc-500"><Link href="/cliente/fatture" className="underline">Tutte le fatture</Link></p>
           </Card>
         ) : null}
 

@@ -124,7 +124,7 @@ export function Money({ d }: { d: MoneyData }) {
           ) : (
             <p className="text-zinc-600">Nessun rimborso.</p>
           )}
-          <p className="mt-2 text-xs text-zinc-500">La nota di credito arriverà con la fatturazione elettronica.</p>
+          <p className="mt-2 text-xs text-zinc-500">Ogni rimborso riuscito genera una nota di credito (sezione «Fatture»), dopo l&apos;emissione della fattura.</p>
         </div>
       </div>
 

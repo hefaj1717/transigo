@@ -179,12 +179,13 @@ export async function issueDocumentNow(db: SupabaseClient, invoiceId: string, de
 export function catchUpSources(db: SupabaseClient): CatchUpSources {
   return {
     async paymentsWithoutInvoice() {
-      const pays = await must(db.from("payments").select("id, review_reason, review_outcome").eq("status", "succeeded").eq("purpose", "order").limit(500), "payments");
-      const candidates = pays.filter((p) => p.review_reason === null || p.review_outcome === "accepted").map((p) => p.id as string);
-      if (candidates.length === 0) return [];
-      const have = await must(db.from("invoices").select("payment_id").eq("kind", "invoice").in("payment_id", candidates), "invoices");
-      const done = new Set(have.map((r) => r.payment_id));
-      return candidates.filter((id) => !done.has(id));
+      // Anti-join in the query (payments without any invoices row), so the limit applies only to what is missing.
+      const pays = await must(
+        db.from("payments").select("id, review_reason, review_outcome, invoices(id)").eq("status", "succeeded").eq("purpose", "order")
+          .is("invoices", null).order("paid_at").limit(500),
+        "payments",
+      );
+      return pays.filter((p) => p.review_reason === null || p.review_outcome === "accepted").map((p) => p.id as string);
     },
     async openDocuments(before) {
       const pending = await must(db.from("invoices").select("id").eq("status", "pending").lt("updated_at", before.toISOString()).order("created_at").limit(200), "pending");
@@ -192,14 +193,18 @@ export function catchUpSources(db: SupabaseClient): CatchUpSources {
       return [...pending, ...failed].map((r) => r.id as string);
     },
     async refundsReadyForNote() {
-      const issued = await must(db.from("invoices").select("payment_id").eq("kind", "invoice").eq("status", "issued"), "issued");
-      const paymentIds = issued.map((r) => r.payment_id as string);
-      if (paymentIds.length === 0) return [];
-      const refunds = await must(db.from("refunds").select("id").eq("status", "succeeded").in("payment_id", paymentIds).limit(500), "refunds");
+      // Succeeded refunds without a credit note (anti-join), then only those whose payment has an ISSUED invoice.
+      const refunds = await must(
+        db.from("refunds").select("id, payment_id, invoices(id)").eq("status", "succeeded").is("invoices", null).order("updated_at").limit(500),
+        "refunds",
+      );
       if (refunds.length === 0) return [];
-      const notes = await must(db.from("invoices").select("refund_id").eq("kind", "credit_note").in("refund_id", refunds.map((r) => r.id)), "notes");
-      const done = new Set(notes.map((n) => n.refund_id));
-      return refunds.map((r) => r.id as string).filter((id) => !done.has(id));
+      const issued = await must(
+        db.from("invoices").select("payment_id").eq("kind", "invoice").eq("status", "issued").in("payment_id", [...new Set(refunds.map((r) => r.payment_id as string))]),
+        "issued",
+      );
+      const ready = new Set(issued.map((r) => r.payment_id));
+      return refunds.filter((r) => ready.has(r.payment_id)).map((r) => r.id as string);
     },
   };
 }

@@ -19,6 +19,7 @@ import { createClient } from "@/lib/supabase/server";
 import { advanceOrderAction, assignHandoverAction, assignJobAction, unassignJobAction } from "../actions";
 import { Execution } from "./execution";
 import { Money, type MoneyPayment, type MoneyRefund } from "./money";
+import { ADMIN_DOC_COLUMNS, AdminInvoiceTable, type AdminDoc, type DocTech } from "@/components/admin/invoice-table";
 
 export const metadata = { title: "Ordine – Transigo" };
 
@@ -118,11 +119,14 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
   const carrierAmount = legs.reduce((sum, l) => sum + (l.order_leg_carrier_terms?.carrier_amount_cents ?? 0), 0);
   const pay = paymentState({ ...o, refunded_cents: o.order_charges?.refunded_cents, total_cents: o.order_charges?.total_cents }, new Date());
   const assignable = (o.status === "paid" && !o.carrier_id) || isHandoverPending(o);
-  const [candidates, exec, settingsRes] = await Promise.all([
+  const [candidates, exec, settingsRes, docsRes, techRes] = await Promise.all([
     assignable ? loadCandidates(deps, o.id) : Promise.resolve([] as Candidate[]),
     loadAdminExecution(db, { id: o.id, order_legs: legs }),
     db.from("settings").select("free_cancellation_hours, late_cancellation_fee_bp").single(),
+    db.from("invoices").select(ADMIN_DOC_COLUMNS).eq("order_id", o.id).order("created_at").returns<AdminDoc[]>(),
+    db.rpc("admin_invoice_errors", { p_order_id: o.id }).returns<DocTech[]>(),
   ]);
+  const docTech = new Map(((techRes.data ?? []) as DocTech[]).map((t) => [t.invoice_id, t]));
   if (settingsRes.error || !settingsRes.data) throw new Error(`settings unavailable: ${settingsRes.error?.code}`);
 
   // Who changed the status, recorded a step or wrote a note (admins and carriers have profiles the admin can read).
@@ -174,6 +178,16 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
         refunds: o.refunds, decision: o.order_cancellation_decisions,
         settings: { freeHours: settingsRes.data.free_cancellation_hours, feeBp: settingsRes.data.late_cancellation_fee_bp },
       }} />
+
+      <section className={section} aria-labelledby="invoices">
+        <h2 id="invoices" className={h2}>Fatture</h2>
+        {docsRes.error || techRes.error ? <p className="text-sm text-red-700">Errore nel caricamento delle fatture.</p> : null}
+        {docsRes.data?.length ? (
+          <AdminInvoiceTable docs={docsRes.data} tech={docTech} showOrder={false} />
+        ) : (
+          <p className="text-sm text-zinc-600">Nessun documento (la fattura viene emessa dopo il pagamento confermato).</p>
+        )}
+      </section>
 
       <Execution orderId={o.id} status={o.status} legs={legs} exec={exec} actorName={actorName} />
 

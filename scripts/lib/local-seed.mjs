@@ -462,11 +462,16 @@ export async function order(customer, { from, to, daysAhead, window = "10-12", v
   const result = b.calculatePrice(b.priceInputFor({ state, legs, storageDays: plan.storageDays, storageBillingUnit: b.config.storageBillingUnit, vehicleTypeId: vehicleId, customerType: "private", now: new Date() }), b.config);
   if (!result.ok) throw new Error(`price (${goods.description}): ${JSON.stringify(result.error)}`);
   const at = new Date();
+  const person = await ok(service.from("profiles").select("first_name, last_name, email").eq("id", customer.id).single());
   const payload = b.buildOrderPayload({
     customerId: customer.id, state, vehicleTypeId: vehicleId, legs, storageDays: plan.storageDays, storageBillingUnit: b.config.storageBillingUnit,
     quote: result.quote, quotedAt: at, termsVersion: b.settings.terms_version, termsAcceptedAt: at,
     contacts: { pickupName: contacts[0], pickupPhone: "+393331234567", deliveryName: contacts[1], deliveryPhone: "+393337654321", notes },
-    billingDetails: { customer_type: "private", fiscal_code: "CNTGLI85M41F205X", street: "Via Dante 12", city: "Milano", postal_code: "20121", province: "MI" },
+    // The same snapshot as the wizard's billingDetails() (src/lib/booking/checkout.ts): person + fiscal code + address.
+    billingDetails: {
+      customer_type: "private", first_name: person.first_name, last_name: person.last_name, email: person.email,
+      fiscal_code: "CNTGLI85M41F205X", street: "Via Dante 12", city: "Milano", postal_code: "20121", province: "MI", country: "IT",
+    },
   });
   const created = await ok(service.rpc("create_order", { p: payload }));
   return { id: created.id, number: created.order_number, total: result.quote.totalCents };
