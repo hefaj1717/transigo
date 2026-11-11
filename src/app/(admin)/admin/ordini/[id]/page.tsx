@@ -15,6 +15,7 @@ import { formatCents } from "@/lib/pricing/money";
 import { createClient } from "@/lib/supabase/server";
 import { advanceOrderAction, assignHandoverAction, assignJobAction, unassignJobAction } from "../actions";
 import { Execution } from "./execution";
+import { Money, type MoneyPayment, type MoneyRefund } from "./money";
 
 export const metadata = { title: "Ordine – Transigo" };
 
@@ -52,8 +53,12 @@ type OrderDetail = {
   carrier_vehicles: { plate: string; vehicle_types: { name_it: string } | null } | null;
   customers: { customer_type: string; profiles: { first_name: string | null; last_name: string | null; email: string; phone: string | null } | null } | null;
   order_legs: Leg[];
-  order_charges: { total_cents: number; subtotal_cents: number; vat_cents: number; refunded_cents: number } | null;
-  order_lines: { sort_order: number; label_it: string; gross_cents: number }[];
+  order_charges: { total_cents: number; subtotal_cents: number; vat_cents: number; refunded_cents: number; cancellation_fee_cents: number | null } | null;
+  order_lines: { sort_order: number; label_it: string; line_type: string; gross_cents: number }[];
+  cancellation_requested_at: string | null; cancellation_reason: string | null;
+  payments: MoneyPayment[];
+  refunds: MoneyRefund[];
+  order_cancellation_decisions: { refund_cents: number; carrier_cents: number; decided_at: string } | null;
 };
 type HistoryRow = { id: number; from_status: string | null; to_status: string; source: string; changed_by: string | null; created_at: string };
 
@@ -65,8 +70,12 @@ const SELECT = [
   "vehicle_types(name_it), carriers(company_name), carrier_vehicles(plate, vehicle_types(name_it))",
   "customers(customer_type, profiles(first_name, last_name, email, phone))",
   "order_legs(leg_index, pickup_address, delivery_address, pickup_window_start, pickup_window_end, distance_m, duration_s, pickup_floor, pickup_has_elevator, delivery_floor, delivery_has_elevator, is_urgent, porters_count, porters_included_hours, pickup_warehouse_id, delivery_warehouse_id, early_start_allowed_at, porter_overtime_grace_minutes, order_leg_carrier_terms(carrier_amount_cents))",
-  "order_charges(total_cents, subtotal_cents, vat_cents, refunded_cents)",
-  "order_lines(sort_order, label_it, gross_cents)",
+  "order_charges(total_cents, subtotal_cents, vat_cents, refunded_cents, cancellation_fee_cents)",
+  "order_lines(sort_order, label_it, line_type, gross_cents)",
+  "cancellation_requested_at, cancellation_reason",
+  "payments(id, status, amount_cents, amount_received_cents, review_reason, reviewed_at, review_outcome, paid_at, created_at)",
+  "refunds(id, payment_id, kind, amount_cents, reason, status, stripe_refund_id, retry_of, created_at)",
+  "order_cancellation_decisions(refund_cents, carrier_cents, decided_at)",
 ].join(", ");
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -104,10 +113,12 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
   const carrierAmount = legs.reduce((sum, l) => sum + (l.order_leg_carrier_terms?.carrier_amount_cents ?? 0), 0);
   const pay = paymentState({ ...o, refunded_cents: o.order_charges?.refunded_cents, total_cents: o.order_charges?.total_cents }, new Date());
   const assignable = (o.status === "paid" && !o.carrier_id) || isHandoverPending(o);
-  const [candidates, exec] = await Promise.all([
+  const [candidates, exec, settingsRes] = await Promise.all([
     assignable ? loadCandidates(deps, o.id) : Promise.resolve([] as Candidate[]),
     loadAdminExecution(db, { id: o.id, order_legs: legs }),
+    db.from("settings").select("free_cancellation_hours, late_cancellation_fee_bp").single(),
   ]);
+  if (settingsRes.error || !settingsRes.data) throw new Error(`settings unavailable: ${settingsRes.error?.code}`);
 
   // Who changed the status, recorded a step or wrote a note (admins and carriers have profiles the admin can read).
   const actorIds = [...new Set([...history.map((h) => h.changed_by), ...exec.actorIds].filter((x): x is string => !!x))];
@@ -139,6 +150,14 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
       </div>
 
       <Dispatch o={o} legs={legs} steps={exec.steps.map((st) => ({ leg_index: st.legIndex, step: st.step, reverted_at: st.revertedAt }))} candidates={candidates} />
+
+      <Money d={{
+        orderId: o.id, status: o.status, pickupWindowStart: o.pickup_window_start, totalCents: o.order_charges?.total_cents ?? 0,
+        cancellationFeeCents: o.order_charges?.cancellation_fee_cents ?? null, cancellationRequestedAt: o.cancellation_requested_at,
+        cancellationReason: o.cancellation_reason, carrierAmountCents: carrierAmount, lines: o.order_lines, payments: o.payments,
+        refunds: o.refunds, decision: o.order_cancellation_decisions,
+        settings: { freeHours: settingsRes.data.free_cancellation_hours, feeBp: settingsRes.data.late_cancellation_fee_bp },
+      }} />
 
       <Execution orderId={o.id} status={o.status} legs={legs} exec={exec} actorName={actorName} />
 

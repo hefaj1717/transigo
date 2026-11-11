@@ -16,6 +16,12 @@ const server = vi.hoisted(() => ({
   allowEarlyStart: vi.fn(async () => ({ ok: true, message: "ok" })),
   loadCandidates: vi.fn(async () => []),
 }));
+const refunds = vi.hoisted(() => ({
+  decideCancellation: vi.fn(async () => ({ ok: true, message: "ok" })),
+  resolvePaymentReview: vi.fn(async () => ({ ok: true, message: "ok" })),
+  refundOrder: vi.fn(async () => ({ ok: true, message: "ok" })),
+  retryRefund: vi.fn(async () => ({ ok: true, message: "ok" })),
+}));
 
 vi.mock("next/server", () => ({ connection: async () => {} }));
 vi.mock("next/cache", () => ({ refresh: vi.fn(), revalidatePath: vi.fn() }));
@@ -29,6 +35,8 @@ vi.mock("@/lib/supabase/service", () => ({
     new Proxy({}, { get: (_t, prop) => { serviceAccess.props.push(String(prop)); return () => { throw new Error("service client used"); }; } }),
 }));
 vi.mock("@/lib/orders/dispatch-server", () => server);
+vi.mock("@/lib/orders/admin-refunds-server", () => refunds);
+const allServer = { ...server, ...refunds };
 
 const actions = await import("./actions");
 
@@ -54,7 +62,7 @@ const NON_ADMINS: [string, AccountContext][] = [
 function form(): FormData {
   const fd = new FormData();
   // Includes fields an attacker might add: they must never become the admin id.
-  for (const [k, v] of Object.entries({ orderId: TARGET, candidate: `${TARGET}:${TARGET}`, reason: "altro", to: "picked_up", leg: "0", step: "loaded", adminId: OTHER_ID, p_admin_id: OTHER_ID })) fd.set(k, v);
+  for (const [k, v] of Object.entries({ orderId: TARGET, paymentId: TARGET, refundId: TARGET, refund: "10", carrier: "0", amount: "10", action: "refund", candidate: `${TARGET}:${TARGET}`, reason: "altro", to: "picked_up", leg: "0", step: "loaded", adminId: OTHER_ID, p_admin_id: OTHER_ID })) fd.set(k, v);
   return fd;
 }
 
@@ -63,13 +71,14 @@ const exported = (Object.entries(actions) as [string, unknown][]).filter((e): e 
 
 beforeEach(() => {
   serviceAccess.props = [];
-  for (const fn of Object.values(server)) fn.mockClear();
+  for (const fn of Object.values(allServer)) fn.mockClear();
 });
 
 describe("admin dispatch Server Actions", () => {
   it("the file exports the expected actions (a new action is covered automatically)", () => {
     expect(exported.map(([name]) => name).sort()).toEqual([
-      "advanceOrderAction", "allowEarlyStartAction", "assignHandoverAction", "assignJobAction", "revertLastStepAction", "unassignJobAction",
+      "advanceOrderAction", "allowEarlyStartAction", "assignHandoverAction", "assignJobAction", "decideCancellationAction",
+      "refundOrderAction", "resolvePaymentReviewAction", "retryRefundAction", "revertLastStepAction", "unassignJobAction",
     ]);
   });
 
@@ -79,7 +88,7 @@ describe("admin dispatch Server Actions", () => {
         it(`${name}: redirected, nothing reaches the server code or the service role`, async () => {
           session.ctx = ctx;
           await expect(action({}, form())).rejects.toMatchObject({ digest: expect.stringMatching(/^NEXT_REDIRECT/) });
-          for (const fn of Object.values(server)) expect(fn).not.toHaveBeenCalled();
+          for (const fn of Object.values(allServer)) expect(fn).not.toHaveBeenCalled();
           expect(serviceAccess.props).toEqual([]);
         });
       }
@@ -91,7 +100,7 @@ describe("admin dispatch Server Actions", () => {
       it(`${name}: runs with the session's admin id, never the form's`, async () => {
         session.ctx = signedIn("admin");
         await action({}, form());
-        const calls = Object.values(server).flatMap((fn) => fn.mock.calls as unknown as [{ admin: { userId: string } }][]);
+        const calls = Object.values(allServer).flatMap((fn) => fn.mock.calls as unknown as [{ admin: { userId: string } }][]);
         expect(calls).toHaveLength(1);
         expect(calls[0][0].admin).toEqual({ userId: ADMIN_ID, email: "x@example.com" });
       });

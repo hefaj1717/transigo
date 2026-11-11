@@ -168,14 +168,19 @@ export function dispatchDbError(error: DbError): string {
   return DISPATCH_MSG.generic;
 }
 
-/** Orders list filters (status sets; "da-assegnare" also needs carrier_id null). */
-export const ORDER_FILTERS: { key: string; label: string; statuses: string[] | null; unassigned?: boolean; handover?: boolean }[] = [
+/**
+ * Orders list filters (status sets; "da-assegnare" also needs carrier_id null). `byIds`: the orders come from
+ * another table — payments still to check (D96: also a duplicate payment of a paid order) or refunds to complete.
+ */
+export const ORDER_FILTERS: { key: string; label: string; statuses: string[] | null; unassigned?: boolean; handover?: boolean; byIds?: "payment_review" | "refunds" }[] = [
   { key: "tutti", label: "Tutti", statuses: null },
   { key: "da-gestire", label: "Da gestire", statuses: ["picked_up", "in_transit"], unassigned: true, handover: true },
   { key: "da-assegnare", label: "Da assegnare", statuses: ["paid"], unassigned: true },
   { key: "in-corso", label: "In corso", statuses: ["assigned", "picked_up", "in_transit"] },
   { key: "consegnati", label: "Consegnati", statuses: ["delivered", "completed"] },
-  { key: "da-verificare", label: "Pagamento da verificare", statuses: ["payment_review"] },
+  { key: "annullamento", label: "Annullamento in revisione", statuses: ["cancellation_review"] },
+  { key: "da-verificare", label: "Pagamento da verificare", statuses: null, byIds: "payment_review" },
+  { key: "rimborsi", label: "Rimborsi da completare", statuses: null, byIds: "refunds" },
   { key: "in-attesa", label: "In attesa di pagamento", statuses: ["pending_payment"] },
   { key: "scaduti", label: "Scaduti", statuses: ["expired"] },
 ];

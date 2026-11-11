@@ -25,14 +25,18 @@
 //       20 delivered with POD yesterday, ~1 h 20 min of porter work (overtime) → customer: "Prova di consegna"; admin: POD, overtime
 //       21 warehouse: leg 1 done yesterday, leg 2 in 3 days → carrier: "In magazzino"; admin: "Consenti inizio anticipato"
 //       22 warehouse like 21, no porters                  → admin: "Rimuovi padroncino" → "Da gestire" (D136)
+//   * admin money decisions (D140–D142): 23 "Annullamento in revisione" (assigned to Ferri, the customer asked to
+//     cancel), 24 "Pagamento da verificare" (Stripe received 5 € more), 25 paid with a partial refund that failed
+//     ("Riprova"; on staging the failed row has a fake Stripe id, the retry makes a real test refund).
 // Delivered orders and the blocked-Rinuncia job are moved into the past with plain SQL in the local container.
+import { randomUUID } from "node:crypto";
 import {
   ADMIN_EMAIL, TARGET, approveCarrier, carrierAccount, companyDocs, completeDelivery, ensurePorterPackages, existingUserId, legsToTodaySql, localSql, ok, order,
   orderPhoto, pay, printOrders, printPasswordHint, privateCustomer, recordStep, seedAdmin, service, sqlUuid, stepTimesSql, user, vehicle,
 } from "./lib/local-seed.mjs";
 
 const EMAILS = { customer: "cliente@example.com", ferri: "padroncino@example.com", galli: "padroncino2@example.com" };
-const EXPECTED_ORDERS = 22;
+const EXPECTED_ORDERS = 25;
 // Orders 18–21 by their goods (unique in the seed), for the guide printed at the end and for tests/e2e.
 const EXECUTION_DEMO = {
   "Cucina componibile smontata": "admin: «Annulla ultimo passo» (solo «Sono arrivato al ritiro»)",
@@ -210,6 +214,16 @@ const j19 = await pay(await mk({ from: "como", to: "bergamo", daysAhead: 1, wind
 const j20 = await pay(await mk({ from: "milanoCentro", to: "monza", daysAhead: 2, window: "08-10", porters: "parcels", goods: { description: "10 scatoloni di libri e una cassettiera", items: 11, weightKg: 200, deliveryFloor: 3, deliveryElevator: false }, contacts: ["Giulia Conti", "Anna Conti"] }));
 const j21 = await pay(await mk({ from: "milanoNavigli", to: "bergamo", daysAhead: 1, window: "08-10", porters: "parcels", portersDelivery: "parcels", storage: { days: 4, pallets: 1 }, goods: { description: "Arredo ufficio: 2 scrivanie e 10 scatoloni", items: 12, weightKg: 220 }, contacts: ["Giulia Conti", "Studio Conti"] }));
 const j22 = await pay(await mk({ from: "milanoNavigli", to: "bergamo", daysAhead: 1, window: "10-12", storage: { days: 4, pallets: 1 }, goods: { description: "Scaffalature metalliche e 6 scatoloni di archivio", items: 10, weightKg: 260 }, contacts: ["Giulia Conti", "Archivio Conti"] }));
+
+// 23–25. Admin money decisions (D140–D142, plan docs/plany/panel-admina.md): a cancellation request on an assigned
+// job, a payment that does not match the order, a partial refund that Stripe refused ("Riprova").
+const m23 = await pay(await mk({ from: "monza", to: "como", daysAhead: 3, window: "10-12", goods: { description: "Divano letto e 2 poltrone", items: 3, weightKg: 140 }, contacts: ["Giulia Conti", "Anna Conti"] }));
+await assign(m23);
+await ok(service.rpc("customer_cancel_order", { p_order_id: m23.id, p_customer_id: customer.id, p_reason: "Ho trovato un passaggio da un amico." }));
+await pay(await mk({ from: "bergamo", to: "milanoNavigli", daysAhead: 4, window: "14-16", goods: { description: "Frigorifero americano", items: 1, weightKg: 120 }, contacts: ["Giulia Conti", "Paolo Conti"] }), { receivedDelta: 500 });
+const m25 = await pay(await mk({ from: "bergamo", to: "brescia", daysAhead: 5, window: "08-10", goods: { description: "Tapis roulant", items: 1, weightKg: 95 }, contacts: ["Giulia Conti", "Marta Conti"] }));
+const r25 = await ok(service.rpc("admin_refund_order", { p_order_id: m25.id, p_admin_id: admin.id, p_amount_cents: 2_000, p_reason_code: "goodwill" }).single());
+await ok(service.rpc("record_refund_result", { p_refund_id: r25.refund_id, p_stripe_refund_id: `re_demo_failed_${randomUUID()}`, p_status: "failed" }));
 for (const j of [j18, j19, j20, j21, j22]) await accept(ferri, j, ferriVan);
 // 18, 19 → today; 20 → yesterday; 21 → leg 1 yesterday, leg 2 in 3 days (storage 4 days kept).
 // Staging (no SQL): the pickups stay tomorrow / in 2 days; the admin allows the early start of leg 0 instead.

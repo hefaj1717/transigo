@@ -66,6 +66,7 @@ async function Content({ searchParams }: Pick<PageProps<"/admin/ordini">, "searc
   if (filter.statuses) q = q.in("status", filter.statuses);
   if (filter.unassigned) q = q.is("carrier_id", null);
   if (filter.handover) q = q.not("handover_required_at", "is", null);
+  if (filter.byIds) q = q.in("id", await orderIdsFor(db, filter.byIds));
   const { data: orders, error } = await q.returns<Row[]>();
   const now = new Date();
   // "Da gestire" badge: on board or in the warehouse (D136) — from the steps of those orders only
@@ -149,4 +150,17 @@ async function Content({ searchParams }: Pick<PageProps<"/admin/ordini">, "searc
       {orders && !orders.length ? <p className="mt-4 text-sm text-zinc-600">Nessun ordine.</p> : null}
     </AdminShell>
   );
+}
+
+/** Orders with a payment still to check (D96, D141) or a refund to complete (D142: pending, or failed and not retried). */
+async function orderIdsFor(db: Awaited<ReturnType<typeof createClient>>, kind: "payment_review" | "refunds"): Promise<string[]> {
+  if (kind === "payment_review") {
+    const { data, error } = await db.from("payments").select("order_id").eq("status", "succeeded").not("review_reason", "is", null).is("reviewed_at", null);
+    if (error) throw new Error(`payments unavailable: ${error.code}`);
+    return [...new Set(data.map((p) => p.order_id as string))];
+  }
+  const { data, error } = await db.from("refunds").select("id, order_id, status, retry_of").neq("status", "succeeded");
+  if (error) throw new Error(`refunds unavailable: ${error.code}`);
+  const retried = new Set(data.map((r) => r.retry_of).filter(Boolean));
+  return [...new Set(data.filter((r) => r.status === "pending" || !retried.has(r.id)).map((r) => r.order_id as string))];
 }

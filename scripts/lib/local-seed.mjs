@@ -477,14 +477,14 @@ let stripe;
  * Locally: fake Stripe ids (no network). On staging: a real Stripe TEST PaymentIntent paid with the test card
  * (pm_card_visa), so the demo orders can be refunded through Stripe later.
  */
-async function demoCharge(o) {
+async function demoCharge(o, amount = o.total) {
   if (TARGET === "local") return { pi: `pi_demo_${randomUUID()}`, charge: `ch_demo_${randomUUID()}` };
   if (!stripe) {
     const Stripe = require("stripe");
     stripe = new Stripe(STRIPE_KEY);
   }
   const pi = await stripe.paymentIntents.create({
-    amount: o.total, currency: "eur", payment_method: "pm_card_visa", confirm: true,
+    amount, currency: "eur", payment_method: "pm_card_visa", confirm: true,
     automatic_payment_methods: { enabled: true, allow_redirects: "never" },
     description: `Transigo demo (seed) ${o.number}`, metadata: { order_id: o.id, source: "demo_seed" },
   });
@@ -492,12 +492,16 @@ async function demoCharge(o) {
   return { pi: pi.id, charge: pi.latest_charge };
 }
 
-/** Pays the order the way the Stripe webhook does (start + confirm). */
-export async function pay(o) {
+/**
+ * Pays the order the way the Stripe webhook does (start + confirm). `receivedDelta` ≠ 0: Stripe received a different
+ * amount → the order goes to payment_review (D96, amount_mismatch).
+ */
+export async function pay(o, { receivedDelta = 0 } = {}) {
   const session = `cs_test_demo_${randomUUID()}`;
-  const { pi, charge } = await demoCharge(o);
+  const received = o.total + receivedDelta;
+  const { pi, charge } = await demoCharge(o, received);
   await ok(service.rpc("start_order_payment", { p_order_id: o.id, p_session_id: session, p_amount_cents: o.total, p_expires_at: new Date(Date.now() + 3_600_000).toISOString() }));
-  await ok(service.rpc("confirm_order_payment", { p_session_id: session, p_payment_intent_id: pi, p_charge_id: charge, p_amount_cents: o.total, p_currency: "eur" }));
+  await ok(service.rpc("confirm_order_payment", { p_session_id: session, p_payment_intent_id: pi, p_charge_id: charge, p_amount_cents: received, p_currency: "eur" }));
   return o;
 }
 

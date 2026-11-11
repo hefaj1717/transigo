@@ -6,6 +6,7 @@ import { adminDeps } from "@/lib/admin/deps";
 import { formValues } from "@/lib/carriers/admin";
 import { ADMIN_ORDER_PATHS, DISPATCH_MSG } from "@/lib/orders/dispatch";
 import { advanceOrder, allowEarlyStart, assignHandover, assignJob, revertLastStep, unassignJob, type DispatchResult } from "@/lib/orders/dispatch-server";
+import { decideCancellation, refundOrder, resolvePaymentReview, retryRefund } from "@/lib/orders/admin-refunds-server";
 
 // Admin dispatch actions (D122, D123). EVERY action starts with adminDeps(): the DAL checks the session
 // (anonymous, other roles and blocked accounts are redirected before anything else runs) and the admin id passed
@@ -59,4 +60,32 @@ export async function revertLastStepAction(_prev: ActionResult, fd: FormData): P
 export async function allowEarlyStartAction(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
   const deps = await adminDeps(ADMIN_ORDER_PATHS.list);
   return respond("allowEarlyStart", () => allowEarlyStart(deps, formValues(fd)));
+}
+
+// ---------------------------------------------------------------------------
+// Money (D140–D142): the database decides and writes the refund row, then Stripe.
+// ---------------------------------------------------------------------------
+
+/** Decisione su «Annullamento in revisione»: form orderId + refund (€) + carrier (€). */
+export async function decideCancellationAction(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
+  const deps = await adminDeps(ADMIN_ORDER_PATHS.list);
+  return respond("decideCancellation", () => decideCancellation(deps, formValues(fd)));
+}
+
+/** «Pagamento da verificare»: form paymentId + action (mark_paid | refund). */
+export async function resolvePaymentReviewAction(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
+  const deps = await adminDeps(ADMIN_ORDER_PATHS.list);
+  return respond("resolvePaymentReview", () => resolvePaymentReview(deps, formValues(fd)));
+}
+
+/** Rimborso manuale: form orderId + amount (€) + reason (code). */
+export async function refundOrderAction(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
+  const deps = await adminDeps(ADMIN_ORDER_PATHS.list);
+  return respond("refundOrder", () => refundOrder(deps, formValues(fd)));
+}
+
+/** Riprova rimborso: form refundId. */
+export async function retryRefundAction(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
+  const deps = await adminDeps(ADMIN_ORDER_PATHS.list);
+  return respond("retryRefund", () => retryRefund(deps, formValues(fd)));
 }
