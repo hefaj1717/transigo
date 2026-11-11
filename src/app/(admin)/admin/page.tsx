@@ -136,8 +136,8 @@ async function Content({ searchParams }: Pick<PageProps<"/admin">, "searchParams
         <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Stat label="Incassato (IVA inclusa)" value={formatCents(finance.grossCents)} note={`${finance.orders} ordini pagati${finance.refundedCents ? `, rimborsi ${formatCents(finance.refundedCents)}` : ""}`} />
           <Stat label="Ricavi netti (senza IVA)" value={formatCents(finance.netCents)} />
-          <Stat label="Quota padroncini (prevista)" value={formatCents(finance.carrierCents)} note="pagamenti automatici: fase successiva" />
-          <Stat label="Margine" value={formatCents(finance.marginCents)} note="ricavi netti − quota padroncini" />
+          <Stat label="Quota padroncini (stima)" value={formatCents(finance.carrierCents)} note="pagamenti automatici: fase successiva" />
+          <Stat label="Margine" value={formatCents(finance.marginCents)} note="ricavi netti − quota padroncini (stima)" />
         </dl>
         <p className="mt-2 text-xs text-zinc-500">Ordini con pagamento confermato nel mese (ora di Roma). Rimborsi: solo quelli già confermati da Stripe.</p>
       </section>
