@@ -5,7 +5,7 @@ import { isAuthorizedCron } from "@/lib/payments/cron-auth";
 import { getAppUrl } from "@/lib/supabase/env";
 import { createServiceClient } from "@/lib/supabase/service";
 
-// E-mail retries (D131): every 15 minutes (vercel.json). 1) delivered orders of the last ~75 min without an
+// E-mail retries (D131): every 15 minutes (scheduler to be decided — Vercel Hobby allows only daily crons, D131). 1) delivered orders of the last ~75 min without an
 // order_delivered e-mail get it queued; 2) every queued email_outbox row below 5 attempts gets one attempt
 // (claimed first — never sent twice); the 5th failure makes it "failed" for the admin list (/admin/email).
 // "Authorization: Bearer $CRON_SECRET" (Vercel Cron sends it); locally:
