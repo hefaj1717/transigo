@@ -90,11 +90,13 @@ export type NextAction =
   | { kind: "pod" } // every step done, status in_transit: "Conferma consegna"
   | { kind: "none" }; // not running (assigned to someone else, delivered, …)
 
+/** Statuses in which a job runs (steps, photos, admin corrections) — the one copy; the database checks the same. */
 const RUNNING = new Set(["assigned", "picked_up", "in_transit"]);
+export const isJobRunning = (status: string) => RUNNING.has(status);
 
 /** The one next action of the job — same rules as carrier_record_step (display only). */
 export function nextAction(input: { status: string; legs: readonly ExecLeg[]; steps: readonly StepRecord[]; now?: Date }): NextAction {
-  if (!RUNNING.has(input.status)) return { kind: "none" };
+  if (!isJobRunning(input.status)) return { kind: "none" };
   const done = new Set(input.steps.map((s) => `${s.legIndex}:${s.step}`));
   const legs = [...input.legs].sort((a, b) => a.legIndex - b.legIndex);
   for (const leg of legs) {

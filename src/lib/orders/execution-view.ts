@@ -2,13 +2,10 @@
 // admin's corrections: "Annulla ultimo passo" (admin_revert_last_step) and "Consenti inizio anticipato"
 // (admin_allow_early_start). Pure — tested in execution-view.test.ts.
 import { z } from "zod";
-import { LEG_STEPS, romeDateKey, STEP_DONE_LABEL, type LegStep, type PhotoKind } from "@/lib/carriers/execution";
+import { isJobRunning, LEG_STEPS, romeDateKey, STEP_DONE_LABEL, type LegStep, type PhotoKind } from "@/lib/carriers/execution";
 
-export { STEP_DONE_LABEL };
+export { isJobRunning, STEP_DONE_LABEL };
 
-/** Statuses in which the job runs (the admin functions accept only these). */
-const RUNNING = new Set(["assigned", "picked_up", "in_transit"]);
-export const isJobRunning = (status: string) => RUNNING.has(status);
 
 type StepLike = { leg_index: number; step: string; reverted_at: string | null };
 
@@ -101,6 +98,7 @@ export const ADMIN_NOTE_LABEL: Record<string, string> = {
   status_changed: "Cambio stato",
   step_reverted: "Passo annullato",
   early_start: "Inizio anticipato consentito",
+  handover: "Nuovo padroncino con carico da ritirare",
 };
 
 // ---------------------------------------------------------------------------

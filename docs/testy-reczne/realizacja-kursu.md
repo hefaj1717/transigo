@@ -1,4 +1,4 @@
-# Test ręczny: realizacja kursu w PWA przewoźnika (krok 4)
+# Test ręczny: realizacja kursu w PWA przewoźnika (kroki 4–6)
 
 Plan: `docs/plany/realizacja-kursu.md`. Decyzje: D69, D116, D117 (model A), D130, D132. Test na **lokalnej** bazie (Docker).
 Automatycznie to samo sprawdza `npm run test:e2e` (iPhone 13 / WebKit i Pixel 7 / Chromium, emulacja) — ten test ręczny
@@ -95,6 +95,34 @@ Każdy kurs da się przejść raz. Na powtórkę: krok 3 od nowa.
 | E1 | Tratta 1 do „Sono arrivato al magazzino” → zdjęcie → „Scarico in magazzino completato” → okno | Żółty komunikat „In magazzino: …”, przycisk „Sono arrivato al magazzino” (tratta 2). |
 | E2 | Tratta 2 do końca | Karta pokazuje „Ritiro · tratta 2” (magazyn), potem „Consegna · tratta 2” z kontaktem Marta Conti. |
 | E3 | „Conferma consegna” | Czas tragarzy **obu** tratt („Tratta 1”, „Tratta 2”) przed podpisem. Dostawa jak w D6. |
+
+## G. Klient — zlecenia 000019–000021 (komputer albo telefon, `cliente@example.com`)
+
+Dane z `npm run db:local:reset && npm run db:local:seed-demo` (na końcu seed wypisuje linki do 000018–000021).
+Tę część można robić na komputerze (`http://localhost:3000`), bez Wi-Fi.
+
+| # | Krok | Oczekiwany wynik |
+|---|---|---|
+| G1 | `/cliente` → 000019 („Trasloco bilocale…”, „In viaggio”) | Sekcja ze zdjęciami **z odbioru** (2), bez zdjęć z dostawy i bez „Prova di consegna”. „Tempo di lavoro dei facchini”: ok. 45 min, „in corso”, inclusi 2 h. **Bez kwot**. |
+| G2 | 000020 („10 scatoloni di libri…”, „Consegnato” wczoraj) | „Prova di consegna”: „Anna Conti”, godzina wczoraj ok. 10:20, podpis widoczny. Zdjęcia z odbioru (2) i z dostawy (1). Czas tragarzy 1 h 20 min, inclusi 1 h — **bez kwoty i bez słowa o dopłacie**. |
+| G3 | 000021 („Arredo ufficio…”, magazyn) | Zdjęcia z odbioru tratty 1 widoczne; zdjęcie z magazynu (dostawa tratty 1) **niewidoczne** do dostawy. |
+| G4 | 000018 („Cucina componibile…”, „Assegnato”) | Bez zdjęć i bez sekcji tragarzy. |
+| G5 | Na żadnym ekranie klienta | Brak „posizione” (pozycji przewoźnika) i powodów admina. |
+
+## H. Admin — zlecenia 000018–000021 (komputer, `admin@example.com`)
+
+| # | Krok | Oczekiwany wynik |
+|---|---|---|
+| H1 | `/admin/ordini/<000019>` → „Esecuzione” | 3 kroki z godzinami, „Marco Ferri” i link „posizione” (Google Maps, Como). „Facchini”: ok. 45 min su 2 h inclusi · in corso. Zdjęcia „Ritiro” (2). |
+| H2 | 000020 | 5 kroków z „posizione”, „Prova di consegna”: Anna Conti + podpis + „posizione”. „Facchini”: 1 h 20 min (80 min) su 1 h inclusi, żółty znacznik „straordinario: 1 h a persona”. Brak przycisku „Annulla ultimo passo” (dostarczone). |
+| H3 | 000018 → „Annulla ultimo passo” bez powodu | Przeglądarka wymaga pola „Motivo”. |
+| H4 | 000018 → powód „test” → „Annulla ultimo passo” | Krok „Arrivato al ritiro” przekreślony, „— annullato … da Anna Admin”; w „Note interne”: „Passo annullato” + powód. Przewoźnik (Ferri, telefon) znowu widzi „Sono arrivato al ritiro”, **bez powodu**. Klient nic nie widzi. Brak maila do przewoźnika. |
+| H5 | Dwie karty z 000019: w pierwszej przewoźnik (telefon) zapisuje następny krok („Sono arrivato alla consegna”), w drugiej admin klika „Annulla ultimo passo” z powodem na starej stronie | „Nel frattempo il padroncino ha registrato un altro passo. Ricarica la pagina.” — nic nie zostaje cofnięte. |
+| H6 | 000021 → przewoźnik (telefon): „In magazzino”, przycisk „Sono arrivato al magazzino” nieaktywny, „Potrai iniziare da …” | Zgodnie z dniem odbioru tratty 2 (za 3 dni). |
+| H7 | 000021 → admin: „Tratta 2: il padroncino potrà iniziare prima…” → powód → „Consenti inizio anticipato” | „Inizio anticipato consentito (tratta 2) il …”, powód w „Note interne”. Przewoźnik po odświeżeniu może kliknąć „Sono arrivato al magazzino”. |
+| H8 | `/admin/ordini/<000007>` (dostarczone przez admina) | „Note interne”: „Consegnato senza firma e foto” z powodem „Consegna demo (seed)” i datą sprzed ok. 11 dni. |
+
+H4 i H7 sprawdza też `npm run test:e2e` (projekt `desktop`, `tests/e2e/admin-correzioni.spec.ts`).
 
 ## F. Uwagi do zgłoszenia
 

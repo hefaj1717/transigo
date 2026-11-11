@@ -19,7 +19,7 @@ import {
   romeWindow,
   type RouteStop,
 } from "@/lib/carriers/jobs";
-import { EXEC_MSG } from "@/lib/carriers/execution";
+import { EXEC_MSG, isJobRunning } from "@/lib/carriers/execution";
 import { googleMapsUrl } from "@/lib/carriers/execution-ui";
 import { loadJobExecution, type ExecutionView } from "@/lib/carriers/execution-server";
 import { loadMyJob, type MyJobDetail } from "@/lib/carriers/jobs-server";
@@ -43,7 +43,6 @@ export default function Page({ params, searchParams }: PageProps<"/padroncino/le
 
 const ESITO: Record<string, string> = { accettata: JOB_MSG.accepted, "gia-tua": JOB_MSG.alreadyMine, consegnata: EXEC_MSG.delivered };
 
-const RUNNING = new Set(["assigned", "picked_up", "in_transit"]);
 
 
 
@@ -81,7 +80,7 @@ async function Content({ params, searchParams }: Pick<PageProps<"/padroncino/le-
   // Running (or delivered) job: the execution state, read with the carrier's session (D130).
   let execution: ExecutionView | null = null;
   let executionFailed = false;
-  if (RUNNING.has(job.status) || job.status === "delivered" || job.status === "completed") {
+  if (isJobRunning(job.status) || job.status === "delivered" || job.status === "completed") {
     try {
       execution = await loadJobExecution(await createClient(), ctx.userId, id, { serviceDb: () => createServiceClient() });
     } catch {
@@ -107,7 +106,7 @@ async function Content({ params, searchParams }: Pick<PageProps<"/padroncino/le-
             </div>
           </div>
         ) : null}
-        {execution && RUNNING.has(execution.status) ? (
+        {execution && isJobRunning(execution.status) ? (
           <JobExecution view={execution} stops={legStops(job)} podHref={JOB_PATHS.my_job_delivery(job.orderId)} />
         ) : null}
         {execution?.proof ? (

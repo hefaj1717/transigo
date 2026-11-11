@@ -18,9 +18,10 @@ export function SignaturePad({ ref, onChange, disabled }: { ref?: Ref<SignatureP
   const drawing = useRef<number | null>(null);
   const [empty, setEmpty] = useState(true);
 
-  const redraw = useCallback(() => {
+  /** 2D context in CSS pixels with the pen style (canvas resized to the screen first when needed). */
+  const pen = useCallback((): { ctx: CanvasRenderingContext2D; width: number } | null => {
     const c = canvas.current;
-    if (!c) return;
+    if (!c) return null;
     const dpr = window.devicePixelRatio || 1;
     const width = c.clientWidth;
     if (c.width !== Math.round(width * dpr) || c.height !== Math.round(HEIGHT * dpr)) {
@@ -28,20 +29,38 @@ export function SignaturePad({ ref, onChange, disabled }: { ref?: Ref<SignatureP
       c.height = Math.round(HEIGHT * dpr);
     }
     const ctx = c.getContext("2d");
-    if (!ctx) return;
+    if (!ctx) return null;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, width, HEIGHT);
     ctx.lineWidth = 2.5;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.strokeStyle = "#111827";
+    return { ctx, width };
+  }, []);
+
+  /** Full redraw — only on resize / rotation, clear and a new stroke; moves draw just the new segment. */
+  const redraw = useCallback(() => {
+    const p = pen();
+    if (!p) return;
+    const { ctx, width } = p;
+    ctx.clearRect(0, 0, width, HEIGHT);
     for (const s of strokes.current) {
       ctx.beginPath();
       s.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
       if (s.length === 1) ctx.lineTo(s[0].x + 0.1, s[0].y + 0.1);
       ctx.stroke();
     }
-  }, []);
+  }, [pen]);
+
+  /** The points added to the current stroke since `from` (its previous last point) — constant work per move. */
+  const drawSegment = useCallback((from: Point, added: readonly Point[]) => {
+    const p = pen();
+    if (!p || !added.length) return;
+    p.ctx.beginPath();
+    p.ctx.moveTo(from.x, from.y);
+    for (const pt of added) p.ctx.lineTo(pt.x, pt.y);
+    p.ctx.stroke();
+  }, [pen]);
 
   useEffect(() => {
     redraw();
@@ -95,10 +114,11 @@ export function SignaturePad({ ref, onChange, disabled }: { ref?: Ref<SignatureP
             if (drawing.current !== e.pointerId) return;
             const events = typeof e.nativeEvent.getCoalescedEvents === "function" ? e.nativeEvent.getCoalescedEvents() : [];
             const last = strokes.current[strokes.current.length - 1];
+            const from = last[last.length - 1];
             const r = e.currentTarget.getBoundingClientRect();
-            if (events.length) for (const ev of events) last.push({ x: ev.clientX - r.left, y: ev.clientY - r.top });
-            else last.push(point(e));
-            redraw();
+            const added = events.length ? events.map((ev) => ({ x: ev.clientX - r.left, y: ev.clientY - r.top })) : [point(e)];
+            last.push(...added);
+            drawSegment(from, added);
           }}
           onPointerUp={(e) => {
             if (drawing.current !== e.pointerId) return;

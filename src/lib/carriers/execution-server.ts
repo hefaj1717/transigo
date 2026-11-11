@@ -162,8 +162,10 @@ export async function deletePhoto(db: SupabaseClient, input: unknown, deps: Exec
 /**
  * complete_delivery writes POD, porter minutes and `delivered` in one transaction. After it succeeded — also on a
  * repeated confirmation (newly_delivered = false) — the order_delivered e-mail is queued: email_outbox allows ONE
- * per order (D129), so a repeat never sends a second e-mail but does re-send one whose first attempt failed.
- * An e-mail error never undoes the delivery; it is logged with the order id so it can be sent again.
+ * per order (D129), so a repeat never sends a second e-mail. A repeat helps only when the first time the row never
+ * reached the outbox (error before the insert); a row that is already queued is NOT sent again here — its failed
+ * attempts are retried by /api/cron/send-emails and "Invia di nuovo" in /admin/email (D131).
+ * An e-mail error never undoes the delivery; it is logged with the order id (the cron also queues missing rows).
  */
 export async function completeDelivery(db: SupabaseClient, input: unknown, deps: ExecutionDeps): Promise<CompleteDeliveryResult> {
   const parsed = completeDeliveryInput.safeParse(input);
@@ -184,7 +186,7 @@ export async function completeDelivery(db: SupabaseClient, input: unknown, deps:
   try {
     await sendOrderDeliveredEmail(deps.serviceDb(), orderId, deps.appUrl);
   } catch (e) {
-    console.error("[execution] order_delivered e-mail failed — repeat the confirmation or resend", {
+    console.error("[execution] order_delivered e-mail failed — queued again by the cron, or /admin/email", {
       orderId,
       error: e instanceof Error ? e.message : String(e),
     });

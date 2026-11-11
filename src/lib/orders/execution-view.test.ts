@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ADMIN_NOTE_LABEL,
   customerVisiblePhotos,
   earlyStartLegs,
   EXEC_ADMIN_MSG,
@@ -125,5 +126,13 @@ describe("forms and errors", () => {
     expect(stepTitle(1, "loaded", 2)).toBe("Tratta 2 · Carico completato");
     expect(positionUrl(45.1, 9.2)).toBe("https://www.google.com/maps/search/?api=1&query=45.1,9.2");
     expect(positionUrl(null, null)).toBeNull();
+  });
+});
+
+describe("ADMIN_NOTE_LABEL", () => {
+  it("has an Italian label for every note kind the database allows (order_admin_notes_kind_check)", () => {
+    for (const kind of ["delivered_without_pod", "status_changed", "step_reverted", "early_start", "handover"]) {
+      expect(ADMIN_NOTE_LABEL[kind], kind).toBeTruthy();
+    }
   });
 });

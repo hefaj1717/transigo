@@ -12,6 +12,8 @@ import { sendOrderDeliveredEmail } from "./customer-emails";
 // the outbox; the e-mail is queued with the normal sender (one per order, D129), so a repeat never duplicates.
 // Service-role client only.
 
+const ID_CHUNK = 100;
+
 export type MissingDeliveredEmail = { orderId: string; orderNumber: string; deliveredAt: string };
 
 export async function findDeliveredWithoutEmail(db: SupabaseClient, since: Date, until: Date, limit = 500): Promise<MissingDeliveredEmail[]> {
@@ -26,14 +28,18 @@ export async function findDeliveredWithoutEmail(db: SupabaseClient, since: Date,
     .returns<{ id: string; order_number: string; delivered_at: string }[]>();
   if (error) throw new Error(`delivered orders: ${error.message}`);
   if (!orders?.length) return [];
-  const { data: mails, error: mailError } = await db
-    .from("email_outbox")
-    .select("order_id")
-    .eq("template_code", ORDER_DELIVERED_TEMPLATE)
-    .in("order_id", orders.map((o) => o.id))
-    .returns<{ order_id: string }[]>();
-  if (mailError) throw new Error(`email_outbox: ${mailError.message}`);
-  const withMail = new Set((mails ?? []).map((m) => m.order_id));
+  // The ids go into the URL of a GET: in chunks, so 500 orders never exceed the gateway's URL limit (~37 chars each).
+  const withMail = new Set<string>();
+  for (let i = 0; i < orders.length; i += ID_CHUNK) {
+    const { data: mails, error: mailError } = await db
+      .from("email_outbox")
+      .select("order_id")
+      .eq("template_code", ORDER_DELIVERED_TEMPLATE)
+      .in("order_id", orders.slice(i, i + ID_CHUNK).map((o) => o.id))
+      .returns<{ order_id: string }[]>();
+    if (mailError) throw new Error(`email_outbox: ${mailError.message}`);
+    for (const m of mails ?? []) withMail.add(m.order_id);
+  }
   return orders.filter((o) => !withMail.has(o.id)).map((o) => ({ orderId: o.id, orderNumber: o.order_number, deliveredAt: o.delivered_at }));
 }
 
