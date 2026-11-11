@@ -7,7 +7,7 @@ import { ActionForm } from "@/components/admin/action-form";
 import { AdminShell, inputClass } from "@/components/admin/admin-nav";
 import { adminDeps } from "@/lib/admin/deps";
 import { ADMIN_CARRIER_PATHS } from "@/lib/carriers/admin";
-import { ADMIN_ORDER_PATHS, HANDOVER_BADGE, isHandoverPending, NEXT_STATUS, UNASSIGN_REASONS } from "@/lib/orders/dispatch";
+import { ADMIN_ORDER_PATHS, HANDOVER_BADGE, handoverKind, isHandoverPending, NEXT_STATUS, removalOutcome, UNASSIGN_REASONS } from "@/lib/orders/dispatch";
 import { loadCandidates, type Candidate } from "@/lib/orders/dispatch-server";
 import { loadAdminExecution } from "@/lib/orders/execution-read";
 import { ORDER_STATUS_LABEL, PAYMENT_STATE_LABEL, paymentState } from "@/lib/orders/status";
@@ -138,7 +138,7 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
         ) : null}
       </div>
 
-      <Dispatch o={o} candidates={candidates} />
+      <Dispatch o={o} legs={legs} steps={exec.steps.map((st) => ({ leg_index: st.legIndex, step: st.step, reverted_at: st.revertedAt }))} candidates={candidates} />
 
       <Execution orderId={o.id} status={o.status} legs={legs} exec={exec} actorName={actorName} />
 
@@ -222,11 +222,16 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function Dispatch({ o, candidates }: { o: OrderDetail; candidates: Candidate[] }) {
+type StepRef = { leg_index: number; step: string; reverted_at: string | null };
+type LegRef = OrderDetail["order_legs"][number];
+
+function Dispatch({ o, legs, steps, candidates }: { o: OrderDetail; legs: LegRef[]; steps: StepRef[]; candidates: Candidate[] }) {
   const next = NEXT_STATUS[o.status];
   const windowPassed = new Date(o.pickup_window_start) <= new Date();
-  // the load is on board from leg 1 "Carico completato" (status picked_up) on — release_job refuses, only the admin removes
+  // from leg 1 "Carico completato" (status picked_up) on, release_job refuses — only the admin removes the carrier;
+  // the order then never goes back to the list (D130, D136): "da gestire", or refused when everything is unloaded
   const loaded = o.status === "picked_up" || o.status === "in_transit";
+  const outcome = removalOutcome(o.status, legs, steps);
 
   if (o.status === "paid" && !o.carrier_id) {
     return (
@@ -257,7 +262,7 @@ function Dispatch({ o, candidates }: { o: OrderDetail; candidates: Candidate[] }
     );
   }
 
-  if (isHandoverPending(o)) return <Handover o={o} candidates={candidates} />;
+  if (isHandoverPending(o)) return <Handover o={o} legs={legs} steps={steps} candidates={candidates} />;
 
   if (!o.carrier_id) return null;
   return (
@@ -296,7 +301,16 @@ function Dispatch({ o, candidates }: { o: OrderDetail; candidates: Candidate[] }
               <option value="" disabled>Scegli…</option>
               {UNASSIGN_REASONS.map((r) => <option key={r.code} value={r.code}>{r.label}</option>)}
             </select>
-            {loaded ? (
+            {outcome === "in_warehouse" ? (
+              <p className="mt-1 text-sm font-medium text-red-800">
+                La merce è in magazzino: l&apos;ordine passa in «Da gestire». Il cliente continua a vedere «{ORDER_STATUS_LABEL[o.status]}»;
+                dovrai assegnare tu un nuovo padroncino per la tratta successiva (ritiro in magazzino).
+              </p>
+            ) : outcome === "all_unloaded" ? (
+              <p className="mt-1 text-sm font-medium text-amber-900">
+                La merce è già stata scaricata a destinazione: il padroncino non si può rimuovere. Usa «Segna come consegnato» con il motivo.
+              </p>
+            ) : loaded || outcome === "on_board" ? (
               <p className="mt-1 text-sm font-medium text-red-800">
                 Attenzione: il carico è già a bordo del padroncino. Dopo la rimozione l&apos;ordine diventa «da gestire»: non torna tra le corse
                 disponibili e dovrai assegnarlo tu a un padroncino (con l&apos;indirizzo dove si trova la merce) o chiuderlo come consegnato.
@@ -312,13 +326,16 @@ function Dispatch({ o, candidates }: { o: OrderDetail; candidates: Candidate[] }
 }
 
 /** "Da gestire": the admin removed the carrier with the load on board — assign directly or close without POD. */
-function Handover({ o, candidates }: { o: OrderDetail; candidates: Candidate[] }) {
+function Handover({ o, legs, steps, candidates }: { o: OrderDetail; legs: LegRef[]; steps: StepRef[]; candidates: Candidate[] }) {
   const next = NEXT_STATUS[o.status];
+  const kind = handoverKind(o, steps);
+  // goods in the warehouse: the leg to take over starts there — its pickup address, editable (D136)
+  const warehouseAddress = kind === "in_warehouse" ? (legs.find((l) => l.leg_index === o.handover_leg_index)?.pickup_address ?? "") : "";
   return (
     <section className={section} aria-labelledby="handover">
       <h2 id="handover" className={h2}>Da gestire</h2>
       <p className="rounded-md bg-red-50 p-3 text-sm font-medium text-red-900">
-        {HANDOVER_BADGE}
+        {HANDOVER_BADGE[kind]}
         {o.handover_leg_index !== null && o.order_legs.length > 1 ? ` (tratta ${o.handover_leg_index + 1})` : ""} — dal {rome(o.handover_required_at)}.
         <span className="mt-1 block font-normal">L&apos;ordine non è visibile ai padroncini. Il cliente vede ancora «{ORDER_STATUS_LABEL[o.status]}».</span>
       </p>
@@ -336,7 +353,7 @@ function Handover({ o, candidates }: { o: OrderDetail; candidates: Candidate[] }
               ))}
             </select>
             <label htmlFor="handover-address" className="mt-2 block text-sm font-medium text-zinc-800">Dove si trova ora la merce (obbligatorio)</label>
-            <textarea id="handover-address" name="address" required maxLength={500} rows={2} className={`${inputClass} mt-1 w-full`} />
+            <textarea id="handover-address" name="address" required maxLength={500} rows={2} defaultValue={warehouseAddress} className={`${inputClass} mt-1 w-full`} />
             <p className="mt-1 text-xs text-zinc-500">Lo vede solo il nuovo padroncino (non il cliente): ritirerà la merce qui.</p>
             <label htmlFor="handover-reason" className="mt-2 block text-sm font-medium text-zinc-800">Motivo (obbligatorio)</label>
             <textarea id="handover-reason" name="reason" required maxLength={1000} rows={2} className={`${inputClass} mt-1 w-full`} />

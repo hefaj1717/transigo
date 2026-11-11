@@ -3,7 +3,7 @@ import type { AdminDeps } from "@/lib/admin/deps";
 import { sendOrderAssignedEmail, sendOrderDeliveredEmail } from "./customer-emails";
 import { ORDER_STATUS_LABEL } from "./status";
 import { advanceSchema, assignSchema, DISPATCH_MSG, dispatchDbError, handoverSchema, unassignSchema } from "./dispatch";
-import { earlyStartSchema, EXEC_ADMIN_MSG, execAdminDbError, formError, lastLiveStep, revertSchema, stepTitle } from "./execution-view";
+import { earlyStartSchema, EXEC_ADMIN_MSG, execAdminDbError, formError, revertSchema, stepTitle } from "./execution-view";
 
 // Admin dispatch (D122, D123). Called by the Server Actions in src/app/(admin)/admin/ordini/actions.ts AFTER the
 // admin check in the session (adminDeps); `admin.userId` always comes from that session, never from the form.
@@ -85,7 +85,9 @@ export async function unassignJob(deps: AdminDeps, input: Record<string, string>
     if (!expected(error)) log("admin_unassign_job", error);
     return { ok: false, error: dispatchDbError(error) };
   }
-  return { ok: true, message: DISPATCH_MSG.unassigned };
+  // load on board / goods in the warehouse → "da gestire" (D130, D136): the status stayed, the flag is set
+  const { data: after } = await deps.serviceDb.from("orders").select("handover_required_at").eq("id", parsed.data.orderId).maybeSingle<{ handover_required_at: string | null }>();
+  return { ok: true, message: after?.handover_required_at ? DISPATCH_MSG.unassignedHandover : DISPATCH_MSG.unassigned };
 }
 
 export async function advanceOrder(deps: AdminDeps, input: Record<string, string>): Promise<DispatchResult> {
@@ -119,19 +121,10 @@ export async function revertLastStep(deps: AdminDeps, input: Record<string, stri
   if (!parsed.success) return { ok: false, error: formError(parsed.error.issues) };
   const { orderId, leg, step, reason } = parsed.data;
 
-  const { data: rows, error: readError } = await deps.serviceDb
-    .from("order_leg_steps").select("leg_index, step, reverted_at").eq("order_id", orderId).is("reverted_at", null)
-    .returns<{ leg_index: number; step: string; reverted_at: string | null }[]>();
-  if (readError) {
-    log("order_leg_steps", readError);
-    return { ok: false, error: EXEC_ADMIN_MSG.generic };
-  }
-  const last = lastLiveStep(rows ?? []);
-  if (!last) return { ok: false, error: EXEC_ADMIN_MSG.noStep };
-  if (last.legIndex !== leg || last.step !== step) return { ok: false, error: EXEC_ADMIN_MSG.changed };
-
+  // The step the admin SAW goes to the database, which compares it with the last step under the order's row lock
+  // (D136): another step in the meantime → 'changed' ("Ricarica la pagina"), nothing reverted.
   const { data, error } = await deps.serviceDb
-    .rpc("admin_revert_last_step", { p_order_id: orderId, p_admin_id: deps.admin.userId, p_reason: reason })
+    .rpc("admin_revert_last_step", { p_order_id: orderId, p_admin_id: deps.admin.userId, p_leg_index: leg, p_step: step, p_reason: reason })
     .single<{ leg_index: number; step: string; order_status: string }>();
   if (error) {
     if (!expected(error)) log("admin_revert_last_step", error);

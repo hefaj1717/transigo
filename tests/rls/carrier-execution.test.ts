@@ -12,9 +12,19 @@ let admin: TestUser;
 let customer: TestUser;
 let otherCustomer: TestUser;
 
-const revert = (orderId: string, reason: string | null, adminId = admin.id) =>
-  service.rpc("admin_revert_last_step", { p_order_id: orderId, p_admin_id: adminId, p_reason: reason })
+const STEP_ORDER = ["arrived_pickup", "loaded", "departed", "arrived_delivery", "unloaded"];
+/** The last live step as the admin's page shows it (leg, then step order). */
+async function lastStep(orderId: string): Promise<{ leg: number; step: string }> {
+  const rows = await check(service.from("order_leg_steps").select("leg_index, step").eq("order_id", orderId).is("reverted_at", null));
+  const last = [...rows].sort((a, b) => a.leg_index - b.leg_index || STEP_ORDER.indexOf(a.step) - STEP_ORDER.indexOf(b.step)).at(-1);
+  return last ? { leg: last.leg_index, step: last.step } : { leg: 0, step: "arrived_pickup" };
+}
+/** admin_revert_last_step with the step the admin saw (D136) — by default the real last step. */
+const revert = async (orderId: string, reason: string | null, adminId = admin.id, saw?: { leg: number; step: string }) => {
+  const s = saw ?? (await lastStep(orderId));
+  return service.rpc("admin_revert_last_step", { p_order_id: orderId, p_admin_id: adminId, p_leg_index: s.leg, p_step: s.step, p_reason: reason })
     .single<{ leg_index: number; step: string; order_status: string }>();
+};
 
 beforeAll(async () => {
   ({ admin, customer } = await setupJobContext());
@@ -423,7 +433,7 @@ describe("immutability and undo", () => {
     expect((await order(orderId)).status).toBe("in_transit");
 
     for (const client of [u.client, customer.client, admin.client, anon]) {
-      expect((await client.rpc("admin_revert_last_step", { p_order_id: orderId, p_admin_id: admin.id, p_reason: "x" })).error).not.toBeNull();
+      expect((await client.rpc("admin_revert_last_step", { p_order_id: orderId, p_admin_id: admin.id, p_leg_index: 0, p_step: "departed", p_reason: "x" })).error).not.toBeNull();
     }
     for (const reason of [null, "", "   ", "x".repeat(1001)]) {
       expect((await revert(orderId, reason)).error).toMatchObject({ code: "22023", details: "reason" });
@@ -626,5 +636,36 @@ describe("TypeScript and database agree", () => {
     const buckets = sql("select id || '=' || file_size_limit from storage.buckets where id in ('order-photos', 'pod-signatures') order by id;");
     expect(buckets).toContain(`order-photos=${PHOTO_MAX_BYTES}`);
     expect(buckets).toContain(`pod-signatures=${SIGNATURE_MAX_BYTES}`);
+  });
+});
+
+describe("«Annulla ultimo passo» — the step the admin saw, status only when that step moved it (D136)", () => {
+  it("another last step than the one the admin saw → 'changed', nothing reverted", async () => {
+    const { orderId, c } = await runningJob();
+    await run(step(c.user, orderId, 0, "arrived_pickup"));
+    // the admin's page still shows arrived_pickup; the carrier records loaded in the meantime
+    await photo(c.user, orderId, 0, "pickup");
+    await run(step(c.user, orderId, 0, "loaded"));
+    expect((await revert(orderId, "Arrivo per errore", admin.id, { leg: 0, step: "arrived_pickup" })).error).toMatchObject({ code: "55000", details: "changed" });
+    expect((await revert(orderId, "x", admin.id, { leg: 1, step: "loaded" })).error).toMatchObject({ code: "55000", details: "changed" });
+    expect((await order(orderId)).status).toBe("picked_up");
+    expect(await check(service.from("order_leg_steps").select("id").eq("order_id", orderId).not("reverted_at", "is", null))).toHaveLength(0);
+    expect(await check(service.from("order_admin_notes").select("id").eq("order_id", orderId))).toHaveLength(0);
+    for (const saw of [{ leg: null, step: "loaded" }, { leg: 0, step: null }]) {
+      const r = await service.rpc("admin_revert_last_step", { p_order_id: orderId, p_admin_id: admin.id, p_leg_index: saw.leg, p_step: saw.step, p_reason: "x" });
+      expect(r.error).toMatchObject({ code: "22023", details: "leg" });
+    }
+    // the step it really is → reverted
+    expect((await revert(orderId, "Carico non completo", admin.id, { leg: 0, step: "loaded" })).data).toEqual({ leg_index: 0, step: "loaded", order_status: "assigned" });
+  });
+
+  it("status set by the admin without steps: undoing the carrier's later 'loaded' does not lower it", async () => {
+    const { orderId, c } = await runningJob();
+    await run(service.rpc("admin_advance_order", { p_order_id: orderId, p_admin_id: admin.id, p_to_status: "picked_up", p_note: null }));
+    await run(step(c.user, orderId, 0, "arrived_pickup"));
+    await photo(c.user, orderId, 0, "pickup");
+    expect((await step(c.user, orderId, 0, "loaded")).data?.order_status).toBe("picked_up"); // already picked_up: no change
+    expect((await revert(orderId, "Carico registrato due volte")).data).toEqual({ leg_index: 0, step: "loaded", order_status: "picked_up" });
+    expect((await order(orderId)).picked_up_at).toBeTruthy();
   });
 });

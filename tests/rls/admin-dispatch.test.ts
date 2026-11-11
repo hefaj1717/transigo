@@ -137,7 +137,7 @@ describe("admin_unassign_job (D39, D122)", () => {
     expect((await unassign(orderId, "richiesta_padroncino")).error).toBeNull();
     expect(await orderRow(orderId)).toMatchObject({ status: "paid", carrier_id: null, carrier_vehicle_id: null, assigned_at: null });
     expect((await history(orderId)).at(-1)).toEqual({ from_status: "assigned", to_status: "paid", changed_by: admin.id, source: "admin_panel" });
-    expect((await lastAudit(orderId)).data).toEqual({ carrier_id: c.user.id, vehicle_id: c.vehicleId, reason_code: "richiesta_padroncino", from: "assigned", goods_loaded: false, handover_leg_index: null, pickup_window_passed: false });
+    expect((await lastAudit(orderId)).data).toEqual({ carrier_id: c.user.id, vehicle_id: c.vehicleId, reason_code: "richiesta_padroncino", from: "assigned", goods_loaded: false, handover_leg_index: null, handover_reason: null, pickup_window_passed: false });
     expect((await check(candidates(orderId))).map((r: { vehicle_id: string }) => r.vehicle_id)).toContain(c.vehicleId);
   });
 

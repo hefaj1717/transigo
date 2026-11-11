@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { advanceSchema, assignSchema, DISPATCH_MSG, dispatchDbError, handoverSchema, isHandoverPending, NEXT_STATUS, ORDER_FILTERS, unassignSchema, UNASSIGN_REASONS } from "./dispatch";
+import { advanceSchema, assignSchema, DISPATCH_MSG, dispatchDbError, HANDOVER_BADGE, handoverKind, handoverSchema, isHandoverPending, removalOutcome, NEXT_STATUS, ORDER_FILTERS, unassignSchema, UNASSIGN_REASONS } from "./dispatch";
 
 const O = "11111111-1111-4111-8111-111111111111";
 const C = "22222222-2222-4222-8222-222222222222";
@@ -75,3 +75,40 @@ describe("da gestire (handover)", () => {
   });
 });
 
+describe("«Rimuovi padroncino» outcome and «Da gestire» kind (D130, D136)", () => {
+  const legs2 = [{ leg_index: 0 }, { leg_index: 1 }];
+  const live = (leg: number, ...steps: string[]) => steps.map((step) => ({ leg_index: leg, step, reverted_at: null }));
+  const leg0Done = live(0, "arrived_pickup", "loaded", "departed", "arrived_delivery", "unloaded");
+
+  it("assigned, nothing loaded → back to the list", () => {
+    expect(removalOutcome("assigned", [{ leg_index: 0 }], [])).toBe("back_to_list");
+    expect(removalOutcome("assigned", [{ leg_index: 0 }], live(0, "arrived_pickup"))).toBe("back_to_list");
+  });
+  it("load on board (any leg), or a status moved by the admin without steps → on_board", () => {
+    expect(removalOutcome("picked_up", [{ leg_index: 0 }], live(0, "arrived_pickup", "loaded"))).toBe("on_board");
+    expect(removalOutcome("in_transit", legs2, [...leg0Done, ...live(1, "arrived_pickup", "loaded")])).toBe("on_board");
+    expect(removalOutcome("picked_up", [{ leg_index: 0 }], [])).toBe("on_board");
+  });
+  it("leg 1 finished, leg 2 not loaded → in_warehouse (also after arriving at the warehouse)", () => {
+    expect(removalOutcome("in_transit", legs2, leg0Done)).toBe("in_warehouse");
+    expect(removalOutcome("in_transit", legs2, [...leg0Done, ...live(1, "arrived_pickup")])).toBe("in_warehouse");
+  });
+  it("every leg unloaded, POD missing → all_unloaded (refused)", () => {
+    expect(removalOutcome("in_transit", [{ leg_index: 0 }], leg0Done)).toBe("all_unloaded");
+    expect(removalOutcome("in_transit", legs2, [...leg0Done, ...live(1, "arrived_pickup", "loaded", "departed", "arrived_delivery", "unloaded")])).toBe("all_unloaded");
+  });
+
+  it("handoverKind: the removal reverted the handover leg's loaded → on board; else warehouse", () => {
+    const at = "2026-11-11T10:00:00.000Z";
+    const o = { handover_required_at: at, handover_leg_index: 1 };
+    expect(handoverKind(o, leg0Done)).toBe("in_warehouse");
+    expect(handoverKind(o, [...leg0Done, { leg_index: 1, step: "arrived_pickup", reverted_at: at }])).toBe("in_warehouse");
+    expect(handoverKind(o, [...leg0Done, { leg_index: 1, step: "loaded", reverted_at: "2026-11-11T10:00:00+00:00" }])).toBe("on_board");
+    expect(handoverKind({ handover_required_at: at, handover_leg_index: 0 }, [])).toBe("on_board");
+    expect(HANDOVER_BADGE.in_warehouse).toBe("Da gestire: merce in magazzino, padroncino rimosso");
+  });
+
+  it("all_unloaded from the database → Italian message", () => {
+    expect(dispatchDbError({ code: "55000", details: "all_unloaded" })).toBe(DISPATCH_MSG.allUnloaded);
+  });
+});

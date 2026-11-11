@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Loading } from "@/components/panel-shell";
 import { AdminShell } from "@/components/admin/admin-nav";
 import { requireArea } from "@/lib/auth/session";
-import { ADMIN_ORDER_PATHS, HANDOVER_BADGE, isHandoverPending, ORDER_FILTERS } from "@/lib/orders/dispatch";
+import { ADMIN_ORDER_PATHS, HANDOVER_BADGE, handoverKind, isHandoverPending, ORDER_FILTERS } from "@/lib/orders/dispatch";
 import { ORDER_STATUS_LABEL, PAYMENT_STATE_LABEL, paymentState } from "@/lib/orders/status";
 import { formatCents } from "@/lib/pricing/money";
 import { stripeDashboardPaymentUrl } from "@/lib/stripe/keys";
@@ -24,6 +24,7 @@ export default function Page({ searchParams }: PageProps<"/admin/ordini">) {
 type Row = {
   id: string;
   handover_required_at: string | null;
+  handover_leg_index: number | null;
   carrier_id: string | null;
   order_number: string;
   status: string;
@@ -58,7 +59,7 @@ async function Content({ searchParams }: Pick<PageProps<"/admin/ordini">, "searc
   let q = db
     .from("orders")
     .select(
-      "id, order_number, status, created_at, pickup_window_start, payment_due_at, paid_at, handover_required_at, carrier_id, order_charges(total_cents, refunded_cents), customers(profiles(first_name, last_name, email)), payments(status, stripe_payment_intent_id, review_reason, created_at), carriers(company_name)",
+      "id, order_number, status, created_at, pickup_window_start, payment_due_at, paid_at, handover_required_at, handover_leg_index, carrier_id, order_charges(total_cents, refunded_cents), customers(profiles(first_name, last_name, email)), payments(status, stripe_payment_intent_id, review_reason, created_at), carriers(company_name)",
     )
     .order(filter.unassigned ? "pickup_window_start" : "created_at", { ascending: !!filter.unassigned })
     .limit(100);
@@ -67,6 +68,12 @@ async function Content({ searchParams }: Pick<PageProps<"/admin/ordini">, "searc
   if (filter.handover) q = q.not("handover_required_at", "is", null);
   const { data: orders, error } = await q.returns<Row[]>();
   const now = new Date();
+  // "Da gestire" badge: on board or in the warehouse (D136) — from the steps of those orders only
+  const handoverIds = (orders ?? []).filter(isHandoverPending).map((o) => o.id);
+  const { data: handoverSteps } = handoverIds.length
+    ? await db.from("order_leg_steps").select("order_id, leg_index, step, reverted_at").in("order_id", handoverIds)
+        .returns<{ order_id: string; leg_index: number; step: string; reverted_at: string | null }[]>()
+    : { data: [] };
 
   return (
     <AdminShell title="Ordini">
@@ -113,7 +120,7 @@ async function Content({ searchParams }: Pick<PageProps<"/admin/ordini">, "searc
                   <td className="py-2 pr-3">{ORDER_STATUS_LABEL[o.status] ?? o.status}</td>
                   <td className="py-2 pr-3">
                     {isHandoverPending(o) ? (
-                      <Link href={ADMIN_ORDER_PATHS.detail(o.id)} className="inline-block rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-900 underline">{HANDOVER_BADGE}</Link>
+                      <Link href={ADMIN_ORDER_PATHS.detail(o.id)} className="inline-block rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-900 underline">{HANDOVER_BADGE[handoverKind(o, (handoverSteps ?? []).filter((x) => x.order_id === o.id))]}</Link>
                     ) : o.carriers?.company_name ?? (o.status === "paid" ? <Link href={ADMIN_ORDER_PATHS.detail(o.id)} className="text-amber-800 underline">Da assegnare</Link> : <span className="text-zinc-400">—</span>)}
                   </td>
                   <td className="py-2 pr-3">

@@ -3,7 +3,8 @@ import { login, mainButton, serviceClient } from "./helpers";
 
 // The admin's corrections on a running job (plan docs/plany/realizacja-kursu.md, krok 6), on the demo seed's jobs
 // of Ferri (scripts/seed-demo.mjs): «Annulla ultimo passo» on the job with only «Sono arrivato al ritiro», and
-// «Consenti inizio anticipato» for leg 2 of the warehouse job. The admin works on a desktop browser, the carrier on
+// «Consenti inizio anticipato» for leg 2 of the warehouse job, «Rimuovi padroncino» with the goods in the warehouse
+// (D136: «Da gestire», never back to «paid»). The admin works on a desktop browser, the carrier on
 // a phone (Pixel 7) in a second context. The reasons are internal: «Note interne» for the admin only.
 // LOCAL database only (D64).
 
@@ -75,5 +76,39 @@ test.describe("Correzioni dell'admin sulla corsa", () => {
     await mainButton(carrier, "Sono arrivato al magazzino").click();
     await expect(mainButton(carrier, "Carico completato")).toBeVisible();
     await carrier.context().close();
+  });
+
+  test("«Rimuovi padroncino» con la merce in magazzino: «Da gestire», nuovo padroncino ritira in magazzino (D136)", async ({ page, browser }) => {
+    const orderId = await orderByGoods("Scaffalature metalliche e 6 scatoloni di archivio");
+
+    await login(page, `/admin/ordini/${orderId}`, "admin@example.com");
+    const removal = page.locator("form", { has: page.getByRole("button", { name: "Rimuovi padroncino" }) });
+    await expect(removal.getByText(/La merce è in magazzino: l'ordine passa in «Da gestire»/)).toBeVisible();
+    await removal.getByLabel("Motivo", { exact: true }).selectOption("padroncino_non_disponibile");
+    await removal.getByRole("button", { name: "Rimuovi padroncino" }).click();
+
+    await expect(page.getByRole("heading", { name: "Da gestire" })).toBeVisible();
+    await expect(page.getByText("Da gestire: merce in magazzino, padroncino rimosso")).toBeVisible();
+    const address = page.getByLabel("Dove si trova ora la merce (obbligatorio)");
+    await expect(address).toHaveValue(/Via Toffetti 20/); // the warehouse = pickup of leg 2
+    const galli = await page.locator("#handover-candidate option", { hasText: "Galli Logistica" }).first().getAttribute("value");
+    await page.locator("#handover-candidate").selectOption(galli!);
+    await page.getByLabel("Motivo (obbligatorio)").first().fill("Ferri non disponibile (prova e2e).");
+    await page.getByRole("button", { name: "Assegna padroncino" }).click();
+    await expect(page.getByRole("heading", { name: "Da gestire" })).toHaveCount(0);
+    await expect(page.getByText("Galli Logistica Srl").first()).toBeVisible();
+
+    // The database: status never went back, no history row the customer could see.
+    const { data: o } = await service.from("orders").select("status, handover_required_at").eq("id", orderId).single();
+    expect(o).toEqual({ status: "in_transit", handover_required_at: null });
+    const { data: hist } = await service.from("order_status_history").select("to_status").eq("order_id", orderId).order("id");
+    expect(hist!.map((h) => h.to_status)).toEqual(["pending_payment", "paid", "assigned", "picked_up", "in_transit"]); // nothing after «In viaggio»
+
+    // Galli (phone) picks the goods up at the warehouse.
+    const ctx = await browser.newContext({ ...devices["Pixel 7"], locale: "it-IT", timezoneId: "Europe/Rome" });
+    const carrier = await ctx.newPage();
+    await login(carrier, `/padroncino/le-mie-corse/${orderId}`, "padroncino2@example.com");
+    await expect(carrier.getByText("Ritiro merce presso:")).toContainText("Via Toffetti 20");
+    await ctx.close();
   });
 });

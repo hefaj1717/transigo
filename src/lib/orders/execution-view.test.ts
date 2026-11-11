@@ -114,6 +114,8 @@ describe("forms and errors", () => {
   it("database errors", () => {
     expect(execAdminDbError({ code: "42501" })).toBe(EXEC_ADMIN_MSG.forbidden);
     expect(execAdminDbError({ code: "22023", details: "reason" })).toBe(EXEC_ADMIN_MSG.reasonRequired);
+    expect(execAdminDbError({ code: "55000", details: "changed" })).toBe(EXEC_ADMIN_MSG.changed); // D136: checked under the row lock
+    expect(execAdminDbError({ code: "55000", details: "something_new" })).toBe(EXEC_ADMIN_MSG.generic);
     expect(execAdminDbError({ code: "22023", details: "leg" })).toBe(EXEC_ADMIN_MSG.notFound);
     expect(execAdminDbError({ code: "55000", details: "no_step" })).toBe(EXEC_ADMIN_MSG.noStep);
     expect(execAdminDbError({ code: "55000", details: "already_started" })).toBe(EXEC_ADMIN_MSG.alreadyStarted);

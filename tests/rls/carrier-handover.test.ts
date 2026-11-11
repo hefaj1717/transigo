@@ -207,19 +207,77 @@ describe("two legs: a finished leg stays when the carrier changes", () => {
     expect(legs.map((l) => l.porters_worked_minutes)).toEqual([0, 0]);
   });
 
-  it("removed while the goods are in the warehouse (leg 1 unloaded, leg 2 not loaded): back to paid, leg 1 kept", async () => {
+  it("removed while the goods are in the warehouse (leg 1 unloaded, leg 2 not loaded): da gestire on leg 2, never back to paid (D136)", async () => {
     const orderId = await paidOrder({ hoursAhead: 72, storage: true });
     const a = await activeCarrier();
     await check(accept(a.user, orderId, a.vehicleId));
     pickupToday(orderId);
     await doLeg(a.user, orderId, 0);
     await run(step(a.user, orderId, 1, "arrived_pickup"));
+    const historyBefore = await check(customer.client.from("order_status_history").select("from_status, to_status").eq("order_id", orderId));
+    const customerBefore = await check(customer.client.from("orders").select("status, picked_up_at, in_transit_at").eq("id", orderId).single());
+
     await run(unassign(orderId));
-    expect(await flags(orderId)).toMatchObject({ status: "paid", handover_required_at: null });
+    expect(await flags(orderId)).toMatchObject({ status: "in_transit", carrier_id: null, handover_leg_index: 1 });
+    // the customer sees exactly the same: no status going back, no history row
+    expect(await check(customer.client.from("orders").select("status, picked_up_at, in_transit_at").eq("id", orderId).single())).toEqual(customerBefore);
+    expect(await check(customer.client.from("order_status_history").select("from_status, to_status").eq("order_id", orderId))).toEqual(historyBefore);
+    // leg 1 kept, leg 2's arrival reverted; audit says why, without free text
     const live = await check(service.from("order_leg_steps").select("leg_index, step").eq("order_id", orderId).is("reverted_at", null));
     expect(live.every((s) => s.leg_index === 0)).toBe(true);
     expect(live).toHaveLength(5);
-    // (nobody can accept it while the leg 1 window is past — D122 TODO)
+    const audit = await check(service.from("audit_log").select("data").eq("entity_id", orderId).eq("action", "order.unassigned"));
+    expect(audit.at(-1)?.data).toMatchObject({ handover_reason: "in_warehouse", handover_leg_index: 1, goods_loaded: false, from: "in_transit" });
+    // not on the list, not acceptable
+    const c = await activeCarrier();
+    expect(await listedIds(c.user)).not.toContain(orderId);
+
+    // the admin assigns a new carrier with the warehouse address; it starts leg 2 (from its pickup day — today here)
+    const b = await activeCarrier();
+    await run(handover(orderId, b.user.id, b.vehicleId, "Magazzino Transigo, Via Toffetti 20, Milano", "Padroncino in malattia"));
+    expect((await step(b.user, orderId, 1, "loaded")).error).toMatchObject({ details: "wrong_step:1:arrived_pickup" });
+    await doLeg(b.user, orderId, 1);
+    expect((await complete(b.user, orderId, "Lucia", await signature(b.user, orderId))).error).toBeNull();
+    expect((await flags(orderId)).status).toBe("delivered");
+  });
+
+  it("every leg unloaded but no POD: «Rimuovi padroncino» refused (all_unloaded), nothing changes", async () => {
+    const { orderId, c } = await runningJob();
+    await doLeg(c.user, orderId, 0);
+    expect((await unassign(orderId)).error).toMatchObject({ code: "55000", details: "all_unloaded" });
+    expect(await flags(orderId)).toMatchObject({ status: "in_transit", carrier_id: c.user.id, handover_required_at: null });
+    // the carrier can still confirm the delivery
+    expect((await complete(c.user, orderId, "Lucia", await signature(c.user, orderId))).error).toBeNull();
+  });
+
+  it("load on board: audit handover_reason 'on_board' (unchanged behaviour)", async () => {
+    const { orderId } = await loadedJob();
+    await run(unassign(orderId));
+    const audit = await check(service.from("audit_log").select("data").eq("entity_id", orderId).eq("action", "order.unassigned"));
+    expect(audit.at(-1)?.data).toMatchObject({ handover_reason: "on_board", handover_leg_index: 0, goods_loaded: true });
+  });
+
+  it("after a takeover on leg 2: undoing the new carrier's loaded / departed never lowers the status (D136)", async () => {
+    const orderId = await paidOrder({ hoursAhead: 72, storage: true });
+    const a = await activeCarrier();
+    await check(accept(a.user, orderId, a.vehicleId));
+    pickupToday(orderId);
+    await doLeg(a.user, orderId, 0);
+    await run(unassign(orderId));
+    const b = await activeCarrier();
+    await run(handover(orderId, b.user.id, b.vehicleId, "Magazzino Transigo", "Cambio padroncino"));
+    await run(step(b.user, orderId, 1, "arrived_pickup"));
+    await photo(b.user, orderId, 1, "pickup");
+    await run(step(b.user, orderId, 1, "loaded"));
+    await run(step(b.user, orderId, 1, "departed"));
+    const before = await flags(orderId);
+    const revert = (s: string) => service.rpc("admin_revert_last_step", { p_order_id: orderId, p_admin_id: admin.id, p_leg_index: 1, p_step: s, p_reason: "Errore" })
+      .single<{ order_status: string }>();
+    expect((await revert("departed")).data?.order_status).toBe("in_transit");
+    expect((await revert("loaded")).data?.order_status).toBe("in_transit");
+    expect(await flags(orderId)).toMatchObject({ status: "in_transit", picked_up_at: before.picked_up_at });
+    // no status history row from these undos
+    expect((await historyRows(orderId)).filter((r) => r.source === "admin_panel" && r.to_status !== "paid")).toHaveLength(0);
   });
 });
 

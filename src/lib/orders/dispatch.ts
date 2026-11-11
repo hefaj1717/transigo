@@ -26,6 +26,8 @@ export type UnassignReason = (typeof UNASSIGN_REASONS)[number]["code"];
 export const DISPATCH_MSG = {
   assigned: "Padroncino assegnato.",
   unassigned: "Padroncino rimosso: l'ordine è di nuovo da assegnare.",
+  unassignedHandover: "Padroncino rimosso: l'ordine è «da gestire». Assegna un nuovo padroncino qui sotto.",
+  allUnloaded: "La merce è già stata scaricata a destinazione: usa «Segna come consegnato» con il motivo.",
   advanced: (label: string) => `Stato aggiornato: ${label}.`,
   deliveredWithoutPod: "Consegna registrata senza firma e foto: il pagamento al padroncino non partirà in automatico.",
   chooseCandidate: "Scegli un padroncino e un veicolo.",
@@ -63,8 +65,44 @@ export const assignSchema = z.object({
   }),
 });
 
-/** "Da gestire" (load on board of a removed carrier): direct assignment with the current address of the goods. */
-export const HANDOVER_BADGE = "Da gestire: carico a bordo del padroncino rimosso";
+/** "Da gestire" (D130, D136): the carrier was removed with the load on board, or while the goods are in the warehouse. */
+export const HANDOVER_BADGE = {
+  on_board: "Da gestire: carico a bordo del padroncino rimosso",
+  in_warehouse: "Da gestire: merce in magazzino, padroncino rimosso",
+} as const;
+export type HandoverKind = keyof typeof HANDOVER_BADGE;
+
+type LegLike = { leg_index: number };
+type StepLike = { leg_index: number; step: string; reverted_at: string | null };
+const live = (steps: readonly StepLike[], leg: number, step: string) => steps.some((s) => s.leg_index === leg && s.step === step && !s.reverted_at);
+
+/**
+ * What "Rimuovi padroncino" will do — mirrors admin_unassign_job (the database decides; this only picks the text):
+ *   back_to_list  — nothing loaded (assigned): back to 'paid' and to the carriers' list;
+ *   on_board      — a leg loaded and not unloaded (or the status moved by the admin without steps) → da gestire;
+ *   in_warehouse  — a leg finished, the next one not loaded → da gestire on the next leg (D136);
+ *   all_unloaded  — every leg unloaded, POD missing → refused ("Consegnato" with a reason).
+ */
+export function removalOutcome(status: string, legs: readonly LegLike[], steps: readonly StepLike[]): "back_to_list" | HandoverKind | "all_unloaded" {
+  const sorted = [...legs].sort((a, b) => a.leg_index - b.leg_index);
+  if (sorted.some((l) => live(steps, l.leg_index, "loaded") && !live(steps, l.leg_index, "unloaded"))) return "on_board";
+  if (status !== "picked_up" && status !== "in_transit") return "back_to_list";
+  if (!steps.some((s) => !s.reverted_at)) return "on_board"; // moved by the admin without any step
+  const unfinished = sorted.filter((l) => !live(steps, l.leg_index, "unloaded"));
+  return unfinished.length ? "in_warehouse" : "all_unloaded";
+}
+
+/**
+ * Kind of a pending "da gestire" order, from its steps: the removal reverted the 'loaded' of the handover leg (same
+ * transaction, reverted_at = handover_required_at) → on board; otherwise the leg before it was finished → warehouse.
+ */
+export function handoverKind(o: { handover_required_at: string | null; handover_leg_index: number | null }, steps: readonly StepLike[]): HandoverKind {
+  const leg = o.handover_leg_index;
+  if (leg === null || leg === 0 || !o.handover_required_at) return "on_board";
+  const at = new Date(o.handover_required_at).getTime();
+  const loadedOnBoard = steps.some((s) => s.leg_index === leg && s.step === "loaded" && s.reverted_at && new Date(s.reverted_at).getTime() === at);
+  return !loadedOnBoard && live(steps, leg - 1, "unloaded") ? "in_warehouse" : "on_board";
+}
 
 export const handoverSchema = z.object({
   orderId: uuid,
@@ -121,6 +159,8 @@ export function dispatchDbError(error: DbError): string {
           return DISPATCH_MSG.notAssigned;
         case "not_handover":
           return DISPATCH_MSG.notHandover;
+        case "all_unloaded":
+          return DISPATCH_MSG.allUnloaded;
         default:
           return DISPATCH_MSG.notNextStatus; // admin_advance_order: detail = current status
       }

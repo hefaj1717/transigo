@@ -11,13 +11,14 @@
 //   * a job accepted by Ferri with pickup in ≥ 48 h ("Rinuncia" allowed);
 //   * two jobs accepted by Ferri with pickup TODAY, to run on the phone (docs/testy-reczne/realizacja-kursu.md):
 //     one leg with porters, and one with warehouse (2 legs, porters at pickup and delivery; both legs today);
-//   * four jobs of Ferri already under way (krok 6 of docs/plany/realizacja-kursu.md), recorded by his session through
+//   * five jobs of Ferri already under way (krok 6 of docs/plany/realizacja-kursu.md), recorded by his session through
 //     the real database functions, with photos (tests/e2e/fixtures/foto.jpg) and a generated signature; the step
 //     times are then moved back in the local container so the porter time is realistic:
 //       18 accepted, only "Sono arrivato al ritiro"      → admin: "Annulla ultimo passo"
 //       19 "In viaggio" with porters, pickup photos       → customer: pickup photos, porter time "in corso"; admin: steps with "posizione"
 //       20 delivered with POD yesterday, ~1 h 20 min of porter work (overtime) → customer: "Prova di consegna"; admin: POD, overtime
 //       21 warehouse: leg 1 done yesterday, leg 2 in 3 days → carrier: "In magazzino"; admin: "Consenti inizio anticipato"
+//       22 warehouse like 21, no porters                  → admin: "Rimuovi padroncino" → "Da gestire" (D136)
 // Delivered orders and the blocked-Rinuncia job are moved into the past with plain SQL in the local container.
 import {
   ADMIN_EMAIL, approveCarrier, carrierAccount, companyDocs, completeDelivery, ensurePorterPackages, existingUserId, legsToTodaySql, localSql, ok, order,
@@ -25,13 +26,14 @@ import {
 } from "./lib/local-seed.mjs";
 
 const EMAILS = { customer: "cliente@example.com", ferri: "padroncino@example.com", galli: "padroncino2@example.com" };
-const EXPECTED_ORDERS = 21;
+const EXPECTED_ORDERS = 22;
 // Orders 18–21 by their goods (unique in the seed), for the guide printed at the end and for tests/e2e.
 const EXECUTION_DEMO = {
   "Cucina componibile smontata": "admin: «Annulla ultimo passo» (solo «Sono arrivato al ritiro»)",
   "Trasloco bilocale: armadio, letto e 15 scatoloni": "cliente: foto del ritiro, facchini «in corso»; admin: passi con «posizione»",
   "10 scatoloni di libri e una cassettiera": "cliente: «Prova di consegna»; admin: firma, foto, straordinario facchini",
   "Arredo ufficio: 2 scrivanie e 10 scatoloni": "padroncino: «In magazzino»; admin: «Consenti inizio anticipato» (tratta 2)",
+  "Scaffalature metalliche e 6 scatoloni di archivio": "admin: «Rimuovi padroncino» con la merce in magazzino → «Da gestire» (D136)",
 };
 
 function printLogins() {
@@ -186,7 +188,7 @@ const shiftBooking = (id, hours) => `
   update public.payments set created_at = created_at - interval '${hours} hours' where order_id = ${sqlUuid(id)};`;
 
 // ---------------------------------------------------------------------------
-// 18–21. Jobs under way (krok 6, docs/plany/realizacja-kursu.md): accepted by Ferri, moved to their pickup day,
+// 18–22. Jobs under way (krok 6, docs/plany/realizacja-kursu.md): accepted by Ferri, moved to their pickup day,
 // steps / photos / POD with Ferri's session like the app, then realistic step times (local container SQL).
 // ---------------------------------------------------------------------------
 const POS = { navigli: { lat: 45.4516, lng: 9.1693 }, como: { lat: 45.8112, lng: 9.0853 }, bergamo: { lat: 45.6947, lng: 9.6693 }, centro: { lat: 45.4668, lng: 9.1856 }, monza: { lat: 45.5845, lng: 9.2744 }, warehouse: { lat: 45.4398, lng: 9.2237 } };
@@ -194,13 +196,15 @@ const j18 = await pay(await mk({ from: "milanoNavigli", to: "monza", daysAhead: 
 const j19 = await pay(await mk({ from: "como", to: "bergamo", daysAhead: 1, window: "08-10", porters: "monolocale", goods: { description: "Trasloco bilocale: armadio, letto e 15 scatoloni", items: 17, weightKg: 450, pickupFloor: 2, pickupElevator: false }, contacts: ["Giulia Conti", "Marta Conti"] }));
 const j20 = await pay(await mk({ from: "milanoCentro", to: "monza", daysAhead: 2, window: "08-10", porters: "parcels", goods: { description: "10 scatoloni di libri e una cassettiera", items: 11, weightKg: 200, deliveryFloor: 3, deliveryElevator: false }, contacts: ["Giulia Conti", "Anna Conti"] }));
 const j21 = await pay(await mk({ from: "milanoNavigli", to: "bergamo", daysAhead: 1, window: "08-10", porters: "parcels", portersDelivery: "parcels", storage: { days: 4, pallets: 1 }, goods: { description: "Arredo ufficio: 2 scrivanie e 10 scatoloni", items: 12, weightKg: 220 }, contacts: ["Giulia Conti", "Studio Conti"] }));
-for (const j of [j18, j19, j20, j21]) await accept(ferri, j, ferriVan);
+const j22 = await pay(await mk({ from: "milanoNavigli", to: "bergamo", daysAhead: 1, window: "10-12", storage: { days: 4, pallets: 1 }, goods: { description: "Scaffalature metalliche e 6 scatoloni di archivio", items: 10, weightKg: 260 }, contacts: ["Giulia Conti", "Archivio Conti"] }));
+for (const j of [j18, j19, j20, j21, j22]) await accept(ferri, j, ferriVan);
 // 18, 19 → today; 20 → yesterday; 21 → leg 1 yesterday, leg 2 in 3 days (storage 4 days kept).
 localSql(`set local session_replication_role = replica;
 ${shiftDays(j18.id, 1)}
 ${shiftDays(j19.id, 1)}
 ${shiftDays(j20.id, 3)}
-${shiftDays(j21.id, 2)}`);
+${shiftDays(j21.id, 2)}
+${shiftDays(j22.id, 2)}`);
 
 await recordStep(ferri, j18.id, 0, "arrived_pickup", POS.navigli);
 
@@ -221,6 +225,7 @@ const fullLeg = async (j, leg, from, to, pickupPhotos = 1) => {
 };
 await fullLeg(j20, 0, POS.centro, POS.monza, 2);
 await fullLeg(j21, 0, POS.navigli, POS.warehouse);
+await fullLeg(j22, 0, POS.navigli, POS.warehouse);
 
 // Step times: 19 this morning (45 min of loading so far); 20 yesterday, 45 + 35 = 80 min of porter work (package
 // "parcels": 1 h included + 15 min grace → overtime); 21 leg 1 yesterday, 35 + 20 = 55 min.
@@ -228,11 +233,13 @@ const legStart = (j, leg = 0) => (min) => `((select pickup_window_start from pub
 const ago = (min) => `(now() - interval '${min} minutes')`;
 const a20 = legStart(j20);
 const a21 = legStart(j21);
+const a22 = legStart(j22);
 localSql(`set local session_replication_role = replica;
 update public.order_leg_steps set created_at = ${ago(25)} where order_id = ${sqlUuid(j18.id)};
 ${stepTimesSql(j19.id, { "0:arrived_pickup": ago(110), "0:loaded": ago(65), "0:departed": ago(60) })}
 ${stepTimesSql(j20.id, { "0:arrived_pickup": a20(10), "0:loaded": a20(55), "0:departed": a20(60), "0:arrived_delivery": a20(95), "0:unloaded": a20(130) })}
-${stepTimesSql(j21.id, { "0:arrived_pickup": a21(5), "0:loaded": a21(40), "0:departed": a21(45), "0:arrived_delivery": a21(70), "0:unloaded": a21(90) })}`);
+${stepTimesSql(j21.id, { "0:arrived_pickup": a21(5), "0:loaded": a21(40), "0:departed": a21(45), "0:arrived_delivery": a21(70), "0:unloaded": a21(90) })}
+${stepTimesSql(j22.id, { "0:arrived_pickup": a22(5), "0:loaded": a22(30), "0:departed": a22(35), "0:arrived_delivery": a22(60), "0:unloaded": a22(75) })}`);
 
 // 20: POD after the shifted steps, so complete_delivery stores the real porter minutes; then the delivery to yesterday.
 await completeDelivery(ferri, j20.id, "Anna Conti", POS.monza);

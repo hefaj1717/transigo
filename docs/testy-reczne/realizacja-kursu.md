@@ -98,7 +98,7 @@ Każdy kurs da się przejść raz. Na powtórkę: krok 3 od nowa.
 
 ## G. Klient — zlecenia 000019–000021 (komputer albo telefon, `cliente@example.com`)
 
-Dane z `npm run db:local:reset && npm run db:local:seed-demo` (na końcu seed wypisuje linki do 000018–000021).
+Dane z `npm run db:local:reset && npm run db:local:seed-demo` (na końcu seed wypisuje linki do 000018–000022).
 Tę część można robić na komputerze (`http://localhost:3000`), bez Wi-Fi.
 
 | # | Krok | Oczekiwany wynik |
@@ -120,9 +120,12 @@ Tę część można robić na komputerze (`http://localhost:3000`), bez Wi-Fi.
 | H5 | Dwie karty z 000019: w pierwszej przewoźnik (telefon) zapisuje następny krok („Sono arrivato alla consegna”), w drugiej admin klika „Annulla ultimo passo” z powodem na starej stronie | „Nel frattempo il padroncino ha registrato un altro passo. Ricarica la pagina.” — nic nie zostaje cofnięte. |
 | H6 | 000021 → przewoźnik (telefon): „In magazzino”, przycisk „Sono arrivato al magazzino” nieaktywny, „Potrai iniziare da …” | Zgodnie z dniem odbioru tratty 2 (za 3 dni). |
 | H7 | 000021 → admin: „Tratta 2: il padroncino potrà iniziare prima…” → powód → „Consenti inizio anticipato” | „Inizio anticipato consentito (tratta 2) il …”, powód w „Note interne”. Przewoźnik po odświeżeniu może kliknąć „Sono arrivato al magazzino”. |
+| H9 | 000022 („Scaffalature metalliche…”, magazyn) → „Rimuovi padroncino” | Nad przyciskiem: „La merce è in magazzino: l'ordine passa in «Da gestire»”. Po usunięciu: sekcja „Da gestire”, znacznik „Da gestire: merce in magazzino, padroncino rimosso” (też na `/admin/ordini`), pole adresu wypełnione adresem magazynu. Klient (`cliente@example.com`) dalej widzi „In viaggio”, bez nowego wpisu w historii. |
+| H10 | 000022 → wybierz Galli, powód → „Assegna padroncino” | Galli (`padroncino2@example.com`, telefon) widzi „Ritiro merce presso: …Via Toffetti 20…”; tratta 2 od dnia odbioru. |
+| H11 | 000016 po „Carico completato”, „Inizia il viaggio”, „Sono arrivato alla consegna”, „Scarico completato” (bez podpisu) → „Rimuovi padroncino” | Ostrzeżenie „La merce è già stata scaricata a destinazione…”; po kliknięciu błąd z tym samym tekstem, nic się nie zmienia. |
 | H8 | `/admin/ordini/<000007>` (dostarczone przez admina) | „Note interne”: „Consegnato senza firma e foto” z powodem „Consegna demo (seed)” i datą sprzed ok. 11 dni. |
 
-H4 i H7 sprawdza też `npm run test:e2e` (projekt `desktop`, `tests/e2e/admin-correzioni.spec.ts`).
+H4, H7, H9 i H10 sprawdza też `npm run test:e2e` (projekt `desktop`, `tests/e2e/admin-correzioni.spec.ts`).
 
 ## F. Uwagi do zgłoszenia
 

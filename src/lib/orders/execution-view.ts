@@ -152,7 +152,8 @@ export function execAdminDbError(error: DbError): string {
       if (detail === "no_step") return EXEC_ADMIN_MSG.noStep;
       if (detail === "already_started") return EXEC_ADMIN_MSG.alreadyStarted;
       if (detail === "not_in_progress") return EXEC_ADMIN_MSG.notInProgress;
-      return EXEC_ADMIN_MSG.changed;
+      if (detail === "changed") return EXEC_ADMIN_MSG.changed;
+      return EXEC_ADMIN_MSG.generic;
   }
   return EXEC_ADMIN_MSG.generic;
 }

@@ -100,12 +100,15 @@ Każdy odcinek ma te same kroki, w tej kolejności (przycisk na dole ekranu kurs
 
 Poprawione w kroku 6 (bez zmian w bazie, z testami): etykieta notatki `handover` w „Note interne”; zapytanie o maile `order_delivered` w paczkach po 100 id (`/admin/email` przy wielu dostawach); podpis rysuje tylko nowy odcinek linii (słabe telefony); jedna definicja statusów „kurs w toku” (`isJobRunning`); poprawiony komentarz i log `completeDelivery` (powtórne „Conferma consegna” nie wysyła ponownie maila już zapisanego w outboxie — robi to cron / „Invia di nuovo”).
 
-Wymagają zmian w bazie albo decyzji (propozycja w nawiasie):
-1. **„Rimuovi padroncino”, gdy towar jest w magazynie** (odcinek 1 rozładowany, odcinek 2 nierozpoczęty): `admin_unassign_job` zwraca zlecenie do `paid` (klient widzi cofnięcie statusu), a okno odbioru odcinka 1 minęło → nikt go nie przyjmie (`too_late`). (Traktować jak „Da gestire” z adresem magazynu: status zostaje, znacznik `handover_required_at` na odcinku 2 — migracja + test.)
-2. **„Annulla ultimo passo” — wyścig**: serwer porównuje krok widziany przez admina z ostatnim krokiem, ale `admin_revert_last_step` cofa ostatni krok w chwili wywołania; gdy przewoźnik zapisze krok dokładnie pomiędzy, cofnięty zostanie inny krok. (Przekazać `p_leg_index`/`p_step` do funkcji i porównać pod blokadą wiersza — mała migracja + test.)
-3. **Cofnięcie kroku a status na odcinku 2**: od migracji `carrier_handover` `loaded`/`departed` na dowolnym odcinku przesuwa status do przodu, a `admin_revert_last_step` cofa status tylko dla odcinka 1. Dotyczy tylko zleceń przejętych po „Rimuovi padroncino”. (Poprawić razem z p. 2.)
-4. **Zdjęcia dla klienta**: zasada „z odbioru od załadunku, reszta po dostawie” działa w aplikacji, RLS pozwala klientowi czytać wszystkie zdjęcia własnego zlecenia przez API. (Zostawić — to jego towar; ewentualnie zaostrzyć w bazie razem z p. 2.)
-5. **Mail w tej samej odpowiedzi**: przy `EMAIL_TRANSPORT=resend` `sendEmail()` czeka na Resend (do 15 s) — także w webhooku Stripe i w „Conferma consegna”. (Zapisać do outboxu od razu, wysyłkę zrobić po odpowiedzi przez `after()` z Next — bez zmian w bazie, osobny mały krok.)
+Decyzje właściciela (2026-11-11) i wykonanie:
+1. **„Rimuovi padroncino”, gdy towar jest w magazynie** — zrobione (D136): „Da gestire” na następnym odcinku, adres magazynu w formularzu, zlecenie nigdy nie wraca z `picked_up`/`in_transit` do `paid`; wszystkie odcinki rozładowane bez POD → odmowa `all_unloaded`. Migracja `20261111130000_handover_warehouse_revert_guard.sql` (**lokalnie; staging po zgodzie**).
+2. **„Annulla ultimo passo” — wyścig** — zrobione (D136): `admin_revert_last_step(..., p_leg_index, p_step, ...)` porównuje pod blokadą wiersza → `changed`.
+3. **Cofnięcie kroku a status na odcinku 2** — zrobione w tej samej migracji: status cofa się tylko, gdy zmienił go cofany krok (dowolny odcinek).
+4. **Zdjęcia klienta przez API** — zostają (D135, świadoma decyzja).
+5. **Mail po odpowiedzi** — zrobione (D134): `after()` w webhooku Stripe i „Conferma consegna”, wiersz w outboxie zapisany przed odpowiedzią.
+6. **Seed czeka na gotowość bazy** po resecie (retry co 1 s, maks. 60 s).
+
+Testy: RLS `carrier-handover.test.ts` (magazyn → „Da gestire”, `all_unloaded`, `on_board` w audycie, cofnięcie na odcinku 2 po przejęciu), `carrier-execution.test.ts` (niezgodny krok → `changed`, status ustawiony przez admina nie spada); jednostkowe `dispatch.test.ts` (`removalOutcome`, `handoverKind`), `execution-view.test.ts`; e2e `admin-correzioni.spec.ts` na zleceniu demo 22.
 
 ## Pytania do właściciela (proponowana odpowiedź w nawiasie)
 
