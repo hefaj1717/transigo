@@ -5,6 +5,8 @@ import { Card, CustomerShell, StatusBadge } from "@/components/cliente/customer-
 import { Loading } from "@/components/panel-shell";
 import { requireArea } from "@/lib/auth/session";
 import { CUSTOMER_STATUS_LABEL, progressSteps, routeSummary, type ProgressStep } from "@/lib/orders/customer-view";
+import { loadCustomerExecution, type CustomerExecutionView } from "@/lib/orders/execution-read";
+import { groupPhotos, PHOTO_KIND_LABEL } from "@/lib/orders/execution-view";
 import { paymentState } from "@/lib/orders/status";
 import { formatCents } from "@/lib/pricing/money";
 import { PORTER_PACKAGE_LABEL } from "@/lib/pricing/rule-meta";
@@ -15,7 +17,9 @@ import { CancelUnpaidButton, PaymentPending, PayNowButton } from "../order-actio
 export const metadata = { title: "Ordine – Transigo" };
 
 // Order page of the customer (spec 7): progress, carrier (customer_order_carrier — first name, company,
-// vehicle, plate only), price breakdown (D3), route with floors and contacts, goods, services, history.
+// vehicle, plate only), proof of delivery (recipient, time, signature, photos — signed URLs of 5 min made with the
+// customer's session; pickup photos already after loading) and porter working time, price breakdown (D3), route
+// with floors and contacts, goods, services, history.
 // Return URL of Stripe Checkout: ?pagamento=ok only shows "Pagamento in verifica" — the status changes only
 // through the webhook (D89). Everything is read with the customer's own session (RLS, D77).
 export default function Page({ params, searchParams }: PageProps<"/cliente/ordini/[id]">) {
@@ -81,6 +85,7 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
   ]);
   if (!o) notFound();
   const carrier = ((carrierRes.data ?? []) as CarrierInfo[])[0] ?? null;
+  const exec = await loadCustomerExecution(supabase, o);
 
   const now = new Date();
   const legs = [...o.order_legs].sort((a, b) => a.leg_index - b.leg_index);
@@ -163,6 +168,8 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
             <p className="mt-2 text-sm text-zinc-600">Stiamo assegnando il trasporto a uno dei nostri trasportatori verificati. Ti avviseremo appena è confermato.</p>
           </Card>
         ) : null}
+
+        <Execution exec={exec} multiLeg={o.order_legs.length > 1} />
 
         {/* Route */}
         <Card>
@@ -284,6 +291,72 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
         </Card>
       </div>
     </CustomerShell>
+  );
+}
+
+/** "Prova di consegna" after the delivery; before it only the pickup photos (once loaded) and the porter time. */
+function Execution({ exec, multiLeg }: { exec: CustomerExecutionView; multiLeg: boolean }) {
+  if (!exec.proof && !exec.photos.length && !exec.porters.length) return null;
+  return (
+    <Card>
+      <H2>{exec.proof ? "Prova di consegna" : "Ritiro della merce"}</H2>
+      {exec.proof ? (
+        <div className="mt-3 flex flex-wrap items-start gap-4">
+          <dl className="grid gap-2 text-sm">
+            <Row k="Ricevuto da" v={exec.proof.recipientName} />
+            <Row k="Firmato il" v={`${rome(exec.proof.signedAt, { day: "numeric", month: "long", year: "numeric" })}, ${time(exec.proof.signedAt)}`} />
+          </dl>
+          {exec.proof.signatureUrl ? (
+            <figure className="rounded-lg border border-zinc-200 bg-white p-2">
+              {/* eslint-disable-next-line @next/next/no-img-element -- short-lived signed URL, no optimizer */}
+              <img src={exec.proof.signatureUrl} alt={`Firma di ${exec.proof.recipientName}`} className="h-24 w-auto max-w-full" />
+              <figcaption className="mt-1 text-xs text-zinc-500">Firma del destinatario</figcaption>
+            </figure>
+          ) : (
+            <p className="text-sm text-zinc-500">La firma non è visualizzabile in questo momento. Ricarica la pagina.</p>
+          )}
+        </div>
+      ) : null}
+
+      {exec.porters.length ? (
+        <div className="mt-4">
+          <h3 className="text-sm font-semibold text-zinc-800">Tempo di lavoro dei facchini</h3>
+          <ul className="mt-1 space-y-1 text-sm text-zinc-900">
+            {exec.porters.map((p) => (
+              <li key={p.legIndex}>
+                {multiLeg ? (p.legIndex === 0 ? "Ritiro: " : "Consegna: ") : ""}
+                <span className="font-medium">{p.workedLabel}</span>
+                <span className="text-zinc-600"> ({p.includedLabel} incluse nel prezzo){p.complete ? "" : " · in corso"}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1 text-xs text-zinc-500">Misurato dall&apos;arrivo al termine del carico e dall&apos;arrivo al termine dello scarico, senza il viaggio.</p>
+        </div>
+      ) : null}
+
+      {groupPhotos(exec.photos).map((g) => (
+        <div key={`${g.legIndex}-${g.kind}`} className="mt-4">
+          <h3 className="text-sm font-semibold text-zinc-800">
+            Foto {PHOTO_KIND_LABEL[g.kind].toLowerCase()}{multiLeg ? (g.legIndex === 0 ? " · tratta verso il deposito" : " · tratta dal deposito") : ""}
+          </h3>
+          <ul className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-5">
+            {g.photos.map((p) => (
+              <li key={p.id}>
+                {p.url ? (
+                  <a href={p.url} target="_blank" rel="noopener noreferrer" className="block aspect-square overflow-hidden rounded-md border border-zinc-200">
+                    {/* eslint-disable-next-line @next/next/no-img-element -- short-lived signed URL, no optimizer */}
+                    <img src={p.url} alt={`Foto ${PHOTO_KIND_LABEL[p.kind].toLowerCase()}, ${time(p.createdAt)}`} className="size-full object-cover" />
+                  </a>
+                ) : (
+                  <span className="flex aspect-square items-center justify-center rounded-md border border-dashed border-zinc-300 p-1 text-center text-xs text-zinc-500">Non disponibile</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+      {exec.photos.length ? <p className="mt-2 text-xs text-zinc-500">Tocca una foto per aprirla. I link scadono dopo 5 minuti: ricarica la pagina per vederle di nuovo.</p> : null}
+    </Card>
   );
 }
 

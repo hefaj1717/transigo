@@ -9,15 +9,18 @@ import { adminDeps } from "@/lib/admin/deps";
 import { ADMIN_CARRIER_PATHS } from "@/lib/carriers/admin";
 import { ADMIN_ORDER_PATHS, HANDOVER_BADGE, isHandoverPending, NEXT_STATUS, UNASSIGN_REASONS } from "@/lib/orders/dispatch";
 import { loadCandidates, type Candidate } from "@/lib/orders/dispatch-server";
+import { loadAdminExecution } from "@/lib/orders/execution-read";
 import { ORDER_STATUS_LABEL, PAYMENT_STATE_LABEL, paymentState } from "@/lib/orders/status";
 import { formatCents } from "@/lib/pricing/money";
 import { createClient } from "@/lib/supabase/server";
 import { advanceOrderAction, assignHandoverAction, assignJobAction, unassignJobAction } from "../actions";
+import { Execution } from "./execution";
 
 export const metadata = { title: "Ordine – Transigo" };
 
 // One order for the admin (D122, D123): route, goods, contacts, customer price, carrier amount, payment, history,
-// and dispatch — Assegna (candidates by the D120 rules), Rimuovi padroncino (reason code), next status.
+// and dispatch — Assegna (candidates by the D120 rules), Rimuovi padroncino (reason code), next status — plus the
+// job execution (steps, photos, POD, porter time, "Annulla ultimo passo", "Consenti inizio anticipato", internal notes).
 // Reads with the admin's session (RLS; the status history through admin_order_status_history, D128); candidates through the service role after the session check.
 export default function Page({ params }: PageProps<"/admin/ordini/[id]">) {
   return (
@@ -32,6 +35,7 @@ type Leg = {
   distance_m: number; duration_s: number | null; pickup_floor: number; pickup_has_elevator: boolean; delivery_floor: number;
   delivery_has_elevator: boolean; is_urgent: boolean; porters_count: number; porters_included_hours: number | null;
   pickup_warehouse_id: string | null; delivery_warehouse_id: string | null;
+  early_start_allowed_at: string | null; porter_overtime_grace_minutes: number | null;
   order_leg_carrier_terms: { carrier_amount_cents: number } | null;
 };
 type OrderDetail = {
@@ -60,7 +64,7 @@ const SELECT = [
   "carrier_id, assigned_at, picked_up_at, in_transit_at, delivered_at, delivered_without_pod, handover_required_at, handover_leg_index",
   "vehicle_types(name_it), carriers(company_name), carrier_vehicles(plate, vehicle_types(name_it))",
   "customers(customer_type, profiles(first_name, last_name, email, phone))",
-  "order_legs(leg_index, pickup_address, delivery_address, pickup_window_start, pickup_window_end, distance_m, duration_s, pickup_floor, pickup_has_elevator, delivery_floor, delivery_has_elevator, is_urgent, porters_count, porters_included_hours, pickup_warehouse_id, delivery_warehouse_id, order_leg_carrier_terms(carrier_amount_cents))",
+  "order_legs(leg_index, pickup_address, delivery_address, pickup_window_start, pickup_window_end, distance_m, duration_s, pickup_floor, pickup_has_elevator, delivery_floor, delivery_has_elevator, is_urgent, porters_count, porters_included_hours, pickup_warehouse_id, delivery_warehouse_id, early_start_allowed_at, porter_overtime_grace_minutes, order_leg_carrier_terms(carrier_amount_cents))",
   "order_charges(total_cents, subtotal_cents, vat_cents, refunded_cents)",
   "order_lines(sort_order, label_it, gross_cents)",
 ].join(", ");
@@ -100,10 +104,13 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
   const carrierAmount = legs.reduce((sum, l) => sum + (l.order_leg_carrier_terms?.carrier_amount_cents ?? 0), 0);
   const pay = paymentState({ ...o, refunded_cents: o.order_charges?.refunded_cents, total_cents: o.order_charges?.total_cents }, new Date());
   const assignable = (o.status === "paid" && !o.carrier_id) || isHandoverPending(o);
-  const candidates = assignable ? await loadCandidates(deps, o.id) : [];
+  const [candidates, exec] = await Promise.all([
+    assignable ? loadCandidates(deps, o.id) : Promise.resolve([] as Candidate[]),
+    loadAdminExecution(db, { id: o.id, order_legs: legs }),
+  ]);
 
-  // Who changed the status (admins and carriers have profiles the admin can read).
-  const actorIds = [...new Set(history.map((h) => h.changed_by).filter((x): x is string => !!x))];
+  // Who changed the status, recorded a step or wrote a note (admins and carriers have profiles the admin can read).
+  const actorIds = [...new Set([...history.map((h) => h.changed_by), ...exec.actorIds].filter((x): x is string => !!x))];
   const { data: actors } = actorIds.length ? await db.from("profiles").select("id, email, first_name, last_name").in("id", actorIds) : { data: [] };
   const actorName = (uid: string | null) => {
     const a = actors?.find((p) => p.id === uid);
@@ -132,6 +139,8 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
       </div>
 
       <Dispatch o={o} candidates={candidates} />
+
+      <Execution orderId={o.id} status={o.status} legs={legs} exec={exec} actorName={actorName} />
 
       <section className={section} aria-labelledby="route">
         <h2 id="route" className={h2}>Percorso</h2>

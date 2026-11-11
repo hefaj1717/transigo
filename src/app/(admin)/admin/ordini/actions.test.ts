@@ -12,6 +12,8 @@ const server = vi.hoisted(() => ({
   assignHandover: vi.fn(async () => ({ ok: true, message: "ok" })),
   unassignJob: vi.fn(async () => ({ ok: true, message: "ok" })),
   advanceOrder: vi.fn(async () => ({ ok: true, message: "ok" })),
+  revertLastStep: vi.fn(async () => ({ ok: true, message: "ok" })),
+  allowEarlyStart: vi.fn(async () => ({ ok: true, message: "ok" })),
   loadCandidates: vi.fn(async () => []),
 }));
 
@@ -52,7 +54,7 @@ const NON_ADMINS: [string, AccountContext][] = [
 function form(): FormData {
   const fd = new FormData();
   // Includes fields an attacker might add: they must never become the admin id.
-  for (const [k, v] of Object.entries({ orderId: TARGET, candidate: `${TARGET}:${TARGET}`, reason: "altro", to: "picked_up", adminId: OTHER_ID, p_admin_id: OTHER_ID })) fd.set(k, v);
+  for (const [k, v] of Object.entries({ orderId: TARGET, candidate: `${TARGET}:${TARGET}`, reason: "altro", to: "picked_up", leg: "0", step: "loaded", adminId: OTHER_ID, p_admin_id: OTHER_ID })) fd.set(k, v);
   return fd;
 }
 
@@ -67,7 +69,7 @@ beforeEach(() => {
 describe("admin dispatch Server Actions", () => {
   it("the file exports the expected actions (a new action is covered automatically)", () => {
     expect(exported.map(([name]) => name).sort()).toEqual([
-      "advanceOrderAction", "assignHandoverAction", "assignJobAction", "unassignJobAction",
+      "advanceOrderAction", "allowEarlyStartAction", "assignHandoverAction", "assignJobAction", "revertLastStepAction", "unassignJobAction",
     ]);
   });
 

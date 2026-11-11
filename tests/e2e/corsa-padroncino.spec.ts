@@ -9,7 +9,8 @@ import { localSupabase } from "./local-supabase";
 // krok 4. Ferri (demo seed) runs a job accepted by him with every leg today: steps, camera photos (file chooser),
 // an upload that fails once and «Riprova», removing a photo, in-app confirmations, porter time before the
 // signature, finger signature with «Cancella», «Conferma consegna». Then the database: delivered with POD,
-// positions saved, exactly one order_delivered e-mail. LOCAL database only (D64).
+// positions saved, exactly one order_delivered e-mail; krok 5: the customer's «Prova di consegna» and the admin's
+// «Esecuzione» load the signature and photos. LOCAL database only (D64).
 
 const PHOTO = path.join(__dirname, "fixtures", "foto.jpg");
 const sb = localSupabase();
@@ -26,9 +27,9 @@ function jobs(project: string): { single: string; storage: string } {
   return JSON.parse(readFileSync(JOBS_FILE, "utf8"))[project];
 }
 
-async function login(page: Page, next: string) {
+async function login(page: Page, next: string, email = "padroncino@example.com") {
   await page.goto(`/accedi?next=${encodeURIComponent(next)}`);
-  await page.getByLabel("E-mail").fill("padroncino@example.com");
+  await page.getByLabel("E-mail").fill(email);
   await page.getByLabel("Password").fill(password());
   await page.getByRole("button", { name: "Accedi" }).click();
   await page.waitForURL((u) => u.pathname === next);
@@ -110,6 +111,34 @@ async function checkDatabase(orderId: string, recipient: string) {
   expect(legs?.every((l) => l.porters_worked_minutes !== null)).toBe(true);
 }
 
+/** The image really loaded (signed URL accepted by Storage). */
+async function expectLoaded(page: Page, name: string | RegExp) {
+  const img = page.getByRole("img", { name }).first();
+  await expect(img).toBeVisible();
+  await expect.poll(() => img.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+}
+
+/** Krok 5: the customer (e2e@example.com) and the admin see the POD, the photos and the porter time. */
+async function checkProofScreens(page: Page, orderId: string, recipient: string) {
+  await page.context().clearCookies();
+  await login(page, `/cliente/ordini/${orderId}`, "e2e@example.com");
+  await expect(page.getByRole("heading", { name: "Prova di consegna" })).toBeVisible();
+  await expect(page.getByText(recipient, { exact: true })).toBeVisible();
+  await expectLoaded(page, `Firma di ${recipient}`);
+  await expectLoaded(page, /^Foto ritiro/);
+  await expectLoaded(page, /^Foto consegna/);
+  await expect(page.getByText("Tempo di lavoro dei facchini")).toBeVisible();
+
+  await page.context().clearCookies();
+  await login(page, `/admin/ordini/${orderId}`, "admin@example.com");
+  await expect(page.getByRole("heading", { name: "Esecuzione" })).toBeVisible();
+  await expect(page.getByText("Scarico completato").first()).toBeVisible();
+  await expectLoaded(page, `Firma di ${recipient}`);
+  // positions only on localhost (secure context) — see checkDatabase
+  if (!process.env.E2E_HOST) await expect(page.getByRole("link", { name: "posizione" }).first()).toHaveAttribute("href", /google\.com\/maps/);
+  await expect(page.getByRole("button", { name: "Annulla ultimo passo" })).toHaveCount(0); // delivered: nothing to undo
+}
+
 test.describe("Corsa del padroncino sul telefono", () => {
   test("una tratta con facchini: dal ritiro alla consegna con firma", async ({ page }, info) => {
     const orderId = jobs(info.project.name).single;
@@ -154,6 +183,7 @@ test.describe("Corsa del padroncino sul telefono", () => {
 
     await confirmDelivery(page, "Paolo Prova");
     await checkDatabase(orderId, "Paolo Prova");
+    await checkProofScreens(page, orderId, "Paolo Prova");
   });
 
   test("con magazzino: due tratte, «In magazzino», poi consegna", async ({ page }, info) => {

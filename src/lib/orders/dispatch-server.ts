@@ -3,6 +3,7 @@ import type { AdminDeps } from "@/lib/admin/deps";
 import { sendOrderAssignedEmail, sendOrderDeliveredEmail } from "./customer-emails";
 import { ORDER_STATUS_LABEL } from "./status";
 import { advanceSchema, assignSchema, DISPATCH_MSG, dispatchDbError, handoverSchema, unassignSchema } from "./dispatch";
+import { earlyStartSchema, EXEC_ADMIN_MSG, execAdminDbError, formError, lastLiveStep, revertSchema, stepTitle } from "./execution-view";
 
 // Admin dispatch (D122, D123). Called by the Server Actions in src/app/(admin)/admin/ordini/actions.ts AFTER the
 // admin check in the session (adminDeps); `admin.userId` always comes from that session, never from the form.
@@ -107,4 +108,49 @@ export async function advanceOrder(deps: AdminDeps, input: Record<string, string
     ok: true,
     message: parsed.data.to === "delivered" ? `${DISPATCH_MSG.advanced(label)} ${DISPATCH_MSG.deliveredWithoutPod}` : DISPATCH_MSG.advanced(label),
   };
+}
+
+/**
+ * "Annulla ultimo passo": the form carries the step the admin SAW. When the carrier recorded another step since,
+ * nothing is undone (the admin reloads and decides again). The reason goes only to order_admin_notes.
+ */
+export async function revertLastStep(deps: AdminDeps, input: Record<string, string>): Promise<DispatchResult> {
+  const parsed = revertSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: formError(parsed.error.issues) };
+  const { orderId, leg, step, reason } = parsed.data;
+
+  const { data: rows, error: readError } = await deps.serviceDb
+    .from("order_leg_steps").select("leg_index, step, reverted_at").eq("order_id", orderId).is("reverted_at", null)
+    .returns<{ leg_index: number; step: string; reverted_at: string | null }[]>();
+  if (readError) {
+    log("order_leg_steps", readError);
+    return { ok: false, error: EXEC_ADMIN_MSG.generic };
+  }
+  const last = lastLiveStep(rows ?? []);
+  if (!last) return { ok: false, error: EXEC_ADMIN_MSG.noStep };
+  if (last.legIndex !== leg || last.step !== step) return { ok: false, error: EXEC_ADMIN_MSG.changed };
+
+  const { data, error } = await deps.serviceDb
+    .rpc("admin_revert_last_step", { p_order_id: orderId, p_admin_id: deps.admin.userId, p_reason: reason })
+    .single<{ leg_index: number; step: string; order_status: string }>();
+  if (error) {
+    if (!expected(error)) log("admin_revert_last_step", error);
+    return { ok: false, error: execAdminDbError(error) };
+  }
+  const { count } = await deps.serviceDb.from("order_legs").select("leg_index", { count: "exact", head: true }).eq("order_id", orderId);
+  return { ok: true, message: EXEC_ADMIN_MSG.reverted(stepTitle(data.leg_index, data.step as typeof step, count ?? 1)) };
+}
+
+/** "Consenti inizio anticipato" for one leg (reason → order_admin_notes only). */
+export async function allowEarlyStart(deps: AdminDeps, input: Record<string, string>): Promise<DispatchResult> {
+  const parsed = earlyStartSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: formError(parsed.error.issues) };
+  const { data, error } = await deps.serviceDb
+    .rpc("admin_allow_early_start", { p_order_id: parsed.data.orderId, p_leg_index: parsed.data.leg, p_admin_id: deps.admin.userId, p_reason: parsed.data.reason })
+    .single<{ allowed_at: string; newly_allowed: boolean }>();
+  if (error) {
+    if (!expected(error)) log("admin_allow_early_start", error);
+    return { ok: false, error: execAdminDbError(error) };
+  }
+  return { ok: true, message: data.newly_allowed ? EXEC_ADMIN_MSG.earlyStartAllowed : EXEC_ADMIN_MSG.earlyStartAlready };
 }

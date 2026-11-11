@@ -5,7 +5,7 @@ import type { ActionResult } from "@/lib/admin/action-result";
 import { adminDeps } from "@/lib/admin/deps";
 import { formValues } from "@/lib/carriers/admin";
 import { ADMIN_ORDER_PATHS, DISPATCH_MSG } from "@/lib/orders/dispatch";
-import { advanceOrder, assignHandover, assignJob, unassignJob, type DispatchResult } from "@/lib/orders/dispatch-server";
+import { advanceOrder, allowEarlyStart, assignHandover, assignJob, revertLastStep, unassignJob, type DispatchResult } from "@/lib/orders/dispatch-server";
 
 // Admin dispatch actions (D122, D123). EVERY action starts with adminDeps(): the DAL checks the session
 // (anonymous, other roles and blocked accounts are redirected before anything else runs) and the admin id passed
@@ -47,4 +47,16 @@ export async function advanceOrderAction(_prev: ActionResult, fd: FormData): Pro
 export async function assignHandoverAction(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
   const deps = await adminDeps(ADMIN_ORDER_PATHS.list);
   return respond("assignHandover", () => assignHandover(deps, formValues(fd)));
+}
+
+/** Annulla ultimo passo: form orderId + leg + step (what the admin saw) + reason (internal). */
+export async function revertLastStepAction(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
+  const deps = await adminDeps(ADMIN_ORDER_PATHS.list);
+  return respond("revertLastStep", () => revertLastStep(deps, formValues(fd)));
+}
+
+/** Consenti inizio anticipato: form orderId + leg + reason (internal). */
+export async function allowEarlyStartAction(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
+  const deps = await adminDeps(ADMIN_ORDER_PATHS.list);
+  return respond("allowEarlyStart", () => allowEarlyStart(deps, formValues(fd)));
 }
