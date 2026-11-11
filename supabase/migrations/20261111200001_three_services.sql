@@ -1,4 +1,3 @@
--- SZKIC (krok 5a planu docs/plany/tre-servizi.md) — do akceptacji właściciela. Nie jest w supabase/migrations.
 -- Three services (D151–D157) / migration 2a, part 2: orders of every service type, porter jobs, warehouse
 -- capacity and bookings, carriers offering porters.
 --
