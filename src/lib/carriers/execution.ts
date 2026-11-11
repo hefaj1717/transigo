@@ -215,7 +215,23 @@ export function isAlreadyUploaded(error: { statusCode?: string | number; message
   return String(error.statusCode) === "409" || /already exists|duplicate/i.test(error.message ?? "");
 }
 
-export const recipientNameSchema = z.string().trim().min(1, "Scrivi il nome di chi riceve la merce.").max(200, "Massimo 200 caratteri.");
+type StorageError = { statusCode?: string | number; status?: number; message?: string; name?: string } | null | undefined;
+
+/**
+ * Result of a direct upload to Storage (signed upload URL) as the carrier sees it. `null` = the file is there
+ * (uploaded now, or by an earlier attempt — "Riprova"). The bucket enforces size and type: 413 = too big.
+ */
+export function uploadErrorMessage(error: StorageError, what: "photo" | "signature"): ExecErrorView | null {
+  if (!error || isAlreadyUploaded(error)) return null;
+  const code = String(error.statusCode ?? "");
+  if (code === "413") return { message: what === "photo" ? EXEC_MSG.photoTooBig : EXEC_MSG.signature, refresh: false };
+  if (code === "403") return { message: EXEC_MSG.notInProgress, refresh: true };
+  if (code === "400" || code === "415" || code === "422") return { message: what === "photo" ? EXEC_MSG.photoInvalid : EXEC_MSG.signature, refresh: false };
+  // No status = the request never got an answer (offline, timeout): the same file stays on screen for "Riprova".
+  return { message: EXEC_MSG.network, refresh: false };
+}
+
+export const recipientNameSchema =z.string().trim().min(1, "Scrivi il nome di chi riceve la merce.").max(200, "Massimo 200 caratteri.");
 
 // ---------------------------------------------------------------------------
 // Database errors → Italian messages

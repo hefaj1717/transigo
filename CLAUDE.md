@@ -113,7 +113,8 @@ Stan:
   - [x] Krok 1: migracja `20261111100000_carrier_job_execution.sql` (**na stagingu od 2026-11-11**) — `order_admin_notes` (powody admina, tylko admin), `admin_allow_early_start`, `release_job` → `loaded` po załadunku, `admin_unassign_job` też w `picked_up`/`in_transit`, `order_leg_steps`, `order_photos`, `delivery_proofs`, buckety `order-photos`/`pod-signatures`, `carrier_record_step`, `register_order_photo`, `delete_order_photo`, `complete_delivery`, `order_porters_worked_minutes`, `admin_revert_last_step`, `admin_order_execution`, `admin_delivery_proof`; `admin_advance_order` z `p_note` (powód wymagany przy „Consegnato”). Testy `tests/rls/carrier-execution.test.ts`.
   - [x] Krok 2: czysta logika `src/lib/carriers/execution.ts` (+ testy).
   - [x] „Da gestire” (migracja `20261111120000_carrier_handover.sql`, **na stagingu od 2026-11-11**): zdjęcie przewoźnika z towarem na pokładzie → znacznik `handover_required_at` (status bez zmian, poza listą kursów), `admin_assign_handover` z adresem towaru (`order_handovers`) i powodem; znacznik i filtr na `/admin/ordini`. Testy `tests/rls/carrier-handover.test.ts`.
-  - [ ] Kroki 3–6: serwer i akcje, ekran kursu, POD u klienta i admina, seed i przegląd.
+  - [x] Krok 3 (2026-11-11, bez zmian w bazie): `src/lib/carriers/execution-server.ts` + `execution-actions.ts`, akcje `src/app/(padroncino)/padroncino/le-mie-corse/[id]/actions.ts` (krok, podpisany URL do wgrania zdjęcia/podpisu, rejestracja i usuwanie zdjęcia, POD). Pliki idą z przeglądarki prosto do Storage; klucz serwisowy tylko po udanym RPC (usunięcie pliku, mail `order_delivered` — jeden na zlecenie, błąd maila tylko w logu). Testy `actions.test.ts` i `tests/rls/carrier-execution-server.test.ts`.
+  - [ ] Kroki 4–6: ekran kursu, POD u klienta i admina, seed i przegląd.
 - Dalej (bez zmian): GPS (Etap 5), „Segnala un problema” (D39), Stripe Connect, SMS.
 
 ## Struktura folderów (docelowa)

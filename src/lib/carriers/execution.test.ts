@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   EXEC_MSG, executionDbError, formatWorkedMinutes, isAlreadyUploaded, isInWarehouse, isPhotoPath, isSignaturePath, LEG_STEPS,
   liveSteps, nextAction, photoKindForStep, photoPath, porterSummaries, recipientNameSchema, romeDateKey, scaledSize,
-  signaturePath, stepButtonLabel, type ExecLeg, type LegStep, type StepRecord,
+  signaturePath, stepButtonLabel, uploadErrorMessage, type ExecLeg, type LegStep, type StepRecord,
 } from "./execution";
 
 const O = "7d0e6f3a-1b2c-4d5e-8f90-a1b2c3d4e5f6";
@@ -139,6 +139,18 @@ describe("photos and signature", () => {
     expect(isAlreadyUploaded({ message: "The resource already exists" })).toBe(true);
     expect(isAlreadyUploaded({ statusCode: 403, message: "new row violates row-level security policy" })).toBe(false);
     expect(isAlreadyUploaded(null)).toBe(false);
+  });
+
+  it("upload errors (codes as the local Storage answers them)", () => {
+    expect(uploadErrorMessage(null, "photo")).toBeNull();
+    expect(uploadErrorMessage({ statusCode: "409", message: "The resource already exists" }, "photo")).toBeNull();
+    expect(uploadErrorMessage({ statusCode: "413", message: "The object exceeded the maximum allowed size" }, "photo"))
+      .toEqual({ message: EXEC_MSG.photoTooBig, refresh: false });
+    expect(uploadErrorMessage({ statusCode: "413" }, "signature")).toEqual({ message: EXEC_MSG.signature, refresh: false });
+    expect(uploadErrorMessage({ statusCode: "403", message: "new row violates row-level security policy" }, "photo"))
+      .toEqual({ message: EXEC_MSG.notInProgress, refresh: true });
+    expect(uploadErrorMessage({ statusCode: "415" }, "photo")).toEqual({ message: EXEC_MSG.photoInvalid, refresh: false });
+    expect(uploadErrorMessage({ name: "StorageUnknownError", message: "fetch failed" }, "photo")).toEqual({ message: EXEC_MSG.network, refresh: false });
   });
 
   it("recipient name is required", () => {
