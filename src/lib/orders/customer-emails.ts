@@ -1,6 +1,6 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { sendEmail } from "@/lib/notifications/email";
+import { sendEmail, type SendOptions } from "@/lib/notifications/email";
 import {
   ORDER_ASSIGNED_TEMPLATE,
   ORDER_DELIVERED_TEMPLATE,
@@ -62,7 +62,7 @@ export async function sendOrderAssignedEmail(db: SupabaseClient, orderId: string
   });
 }
 
-export async function sendOrderDeliveredEmail(db: SupabaseClient, orderId: string, appUrl: string): Promise<void> {
+export async function sendOrderDeliveredEmail(db: SupabaseClient, orderId: string, appUrl: string, opts: SendOptions = {}): Promise<void> {
   const { o, profile, legs } = await loadOrder(db, orderId);
   const rendered = renderOrderDeliveredEmail({
     firstName: profile.first_name,
@@ -72,5 +72,5 @@ export async function sendOrderDeliveredEmail(db: SupabaseClient, orderId: strin
     orderUrl: `${appUrl}/cliente/ordini/${o.id}`,
     deliveredAt: new Date(o.delivered_at ?? Date.now()),
   });
-  await sendEmail(db, { ...rendered, templateCode: ORDER_DELIVERED_TEMPLATE, to: profile.email, recipientId: o.customer_id, orderId: o.id });
+  await sendEmail(db, { ...rendered, templateCode: ORDER_DELIVERED_TEMPLATE, to: profile.email, recipientId: o.customer_id, orderId: o.id }, opts);
 }

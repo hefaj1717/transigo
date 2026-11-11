@@ -9,6 +9,9 @@ import type { RenderedEmail } from "./templates/common";
 //   outbox (default) — development: the e-mail stays in email_outbox as "captured_dev", nothing is sent;
 //   resend           — Resend API (needs RESEND_API_KEY, RESEND_FROM_EMAIL and the verified domain, D79): first attempt
 //                      right here, retries by the cron /api/cron/send-emails, max 5, then "failed" (D131).
+// `defer` (owner 2026-11-11): the row is ALWAYS written before sendEmail returns — so a failed or lost attempt is
+// retried by the cron / "Invia di nuovo" — but the Resend call itself can run after the response (Next `after()`),
+// so the Stripe webhook and "Conferma consegna" never wait for the provider (up to 15 s).
 // Logs carry only ids and the template code — never addresses or content.
 
 export type EmailTransport = "outbox" | "resend";
@@ -26,8 +29,15 @@ export type OutgoingEmail = RenderedEmail & {
   eventKey?: string;
 };
 
-/** Queues and (depending on the transport) sends an e-mail. Returns false when it was already queued before. */
-export async function sendEmail(db: SupabaseClient, email: OutgoingEmail): Promise<boolean> {
+/** Runs a task later (after the response) — `after` from next/server in a request; tests pass their own. */
+export type Defer = (task: () => Promise<void>) => void;
+export type SendOptions = { defer?: Defer };
+
+/**
+ * Queues and (depending on the transport) sends an e-mail. Returns false when it was already queued before.
+ * With `defer` the first delivery attempt is scheduled there instead of awaited; the queued row exists either way.
+ */
+export async function sendEmail(db: SupabaseClient, email: OutgoingEmail, opts: SendOptions = {}): Promise<boolean> {
   const transport = emailTransport();
   const { data, error } = await db
     .from("email_outbox")
@@ -59,9 +69,13 @@ export async function sendEmail(db: SupabaseClient, email: OutgoingEmail): Promi
     console.warn("[email] Resend not configured (RESEND_API_KEY / RESEND_FROM_EMAIL); e-mail left queued", { id: row.id, template: email.templateCode });
     return true;
   }
-  // A failed attempt stays queued for the cron — it never throws to the caller.
-  await deliverOutboxRow(supabaseOutboxStore(db), sender, row).catch((e) =>
-    console.error("[email] first attempt error", { id: row.id, error: e instanceof Error ? e.message : String(e) }),
-  );
+  // A failed attempt stays queued for the cron — it never throws to the caller (nor inside `defer`).
+  const attempt = () =>
+    deliverOutboxRow(supabaseOutboxStore(db), sender, row).then(
+      () => undefined,
+      (e) => console.error("[email] first attempt error", { id: row.id, error: e instanceof Error ? e.message : String(e) }),
+    );
+  if (opts.defer) opts.defer(attempt);
+  else await attempt();
   return true;
 }

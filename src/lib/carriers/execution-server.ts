@@ -1,6 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Defer } from "@/lib/notifications/email";
 import { sendOrderDeliveredEmail } from "@/lib/orders/customer-emails";
 import {
   completeDeliveryInput,
@@ -53,7 +54,10 @@ import type { JobNotifyDeps } from "./jobs-server";
 // It is a factory (`deps.serviceDb()`), so it is not even created before that. Kept apart from the Server
 // Actions so tests/rls can run it against the local database.
 
-export type ExecutionDeps = Pick<JobNotifyDeps, "serviceDb" | "appUrl">;
+export type ExecutionDeps = Pick<JobNotifyDeps, "serviceDb" | "appUrl"> & {
+  /** after() of the Server Action: the order_delivered e-mail is queued before the answer, sent after it (D134). */
+  defer?: Defer;
+};
 
 type DbError = { code?: string | null; message?: string | null; details?: string | null } | null;
 
@@ -184,7 +188,7 @@ export async function completeDelivery(db: SupabaseClient, input: unknown, deps:
   if (error || !data) return dbFailure("complete_delivery", error);
 
   try {
-    await sendOrderDeliveredEmail(deps.serviceDb(), orderId, deps.appUrl);
+    await sendOrderDeliveredEmail(deps.serviceDb(), orderId, deps.appUrl, { defer: deps.defer });
   } catch (e) {
     console.error("[execution] order_delivered e-mail failed — queued again by the cron, or /admin/email", {
       orderId,

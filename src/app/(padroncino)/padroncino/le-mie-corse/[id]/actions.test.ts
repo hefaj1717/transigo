@@ -51,7 +51,7 @@ function fakeSessionClient() {
   };
 }
 
-vi.mock("next/server", () => ({ connection: async () => {} }));
+vi.mock("next/server", () => ({ connection: async () => {}, after: vi.fn() }));
 vi.mock("next/cache", () => ({ refresh: vi.fn(), revalidatePath: vi.fn() }));
 vi.mock("@/lib/auth/account-context", () => ({ loadAccountContext: async () => state.ctx }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fakeSessionClient() }));

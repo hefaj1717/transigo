@@ -1,7 +1,7 @@
 import "server-only";
 import type Stripe from "stripe";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { sendEmail } from "@/lib/notifications/email";
+import { sendEmail, type Defer, type SendOptions } from "@/lib/notifications/email";
 import { renderOrderPaidEmail } from "@/lib/notifications/templates/order-paid";
 import { getStripe, getWebhookSecret } from "@/lib/stripe/server";
 import { getAppUrl } from "@/lib/supabase/env";
@@ -135,7 +135,8 @@ export async function cancelUnpaidOrder(db: SupabaseClient, customerId: string, 
 // Webhook dependencies
 // ---------------------------------------------------------------------------
 
-export function webhookDeps(db: SupabaseClient): WebhookDeps {
+/** `defer` = after() of the route: the order_paid e-mail is queued inside the webhook, sent after the response. */
+export function webhookDeps(db: SupabaseClient, defer?: Defer): WebhookDeps {
   const stripe = getStripe();
   const secret = getWebhookSecret();
   const rpc = async <T>(fn: string, args: Record<string, unknown>): Promise<T> => {
@@ -184,13 +185,13 @@ export function webhookDeps(db: SupabaseClient): WebhookDeps {
     expirePayment: (sessionId) => rpc<string | null>("expire_order_payment", { p_session_id: sessionId }),
     expireOrder: (orderId) => rpc<boolean>("expire_order", { p_order_id: orderId, p_source: "stripe_webhook" }),
     failPayment: (sessionId, message) => rpc<string | null>("fail_order_payment", { p_session_id: sessionId, p_message: message }),
-    onPaid: (orderId) => sendOrderPaidEmail(db, orderId),
+    onPaid: (orderId) => sendOrderPaidEmail(db, orderId, { defer }),
     log: (message, data) => console.warn(`[stripe] ${message}`, data ?? {}),
   };
 }
 
 /** Confirmation e-mail after payment (D93). Idempotent: one e-mail per order (email_outbox unique key). */
-export async function sendOrderPaidEmail(db: SupabaseClient, orderId: string): Promise<void> {
+export async function sendOrderPaidEmail(db: SupabaseClient, orderId: string, opts: SendOptions = {}): Promise<void> {
   const { data: o, error } = await db
     .from("orders")
     .select("id, order_number, customer_id, order_charges(total_cents, customer_type), order_legs(leg_index, pickup_city, delivery_city, pickup_window_start, pickup_window_end)")
@@ -213,7 +214,7 @@ export async function sendOrderPaidEmail(db: SupabaseClient, orderId: string): P
     customerType: charges.customer_type,
     orderUrl: `${getAppUrl()}/cliente/ordini/${o.id}`,
   });
-  await sendEmail(db, { ...rendered, templateCode: "order_paid", to: profile.email, recipientId: o.customer_id, orderId: o.id });
+  await sendEmail(db, { ...rendered, templateCode: "order_paid", to: profile.email, recipientId: o.customer_id, orderId: o.id }, opts);
 }
 
 // ---------------------------------------------------------------------------

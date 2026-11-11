@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { requireArea } from "@/lib/auth/session";
 import {
   canExecuteJobs,
@@ -107,7 +108,9 @@ export async function createSignatureUploadAction(input: unknown): Promise<Uploa
 /** "Conferma consegna": { orderId, recipientName, signaturePath, lat?, lng? }. */
 export async function completeDeliveryAction(input: unknown): Promise<CompleteDeliveryResult> {
   if (!(await session())) return refused();
-  const result = await guarded("completeDeliveryAction", async () => completeDelivery(await createClient(), input, jobNotifyDeps()));
+  // e-mail queued before the answer, Resend after it (D134): the carrier's phone never waits for the provider
+  const result = await guarded("completeDeliveryAction", async () =>
+    completeDelivery(await createClient(), input, { ...jobNotifyDeps(), defer: (task) => after(task) }));
   if (result.ok || result.refresh) revalidateJob(orderIdOf(input), true);
   return result;
 }
