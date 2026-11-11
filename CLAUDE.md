@@ -103,7 +103,8 @@ Priorytet właściciela: najpierw cała strona (publiczna + panel klienta + pane
   - [x] B. Reklamacje (D138): migracja `20261111150000_claims.sql` (**lokalnie**; `claims`, `claim_photos`, bucket `claim-photos`; `open_claim` / `register_claim_photo` sesją klienta, `admin_close_claim` service role), testy `tests/rls/claims.test.ts`; logika `src/lib/claims/`, akcje `src/app/(cliente)/cliente/reclami/actions.ts`, ekrany `/cliente/ordini/[id]/reclamo` i `/cliente/reclami`, mail `claim_opened`.
   - [x] C. Depozyt (D139): `/cliente/deposito` (logika `src/lib/orders/storage-view.ts`; kroki przez `order_legs(order_leg_steps(...))` — FK do odcinków). Menu klienta: „I miei ordini · Deposito · Reclami · Profilo” (na telefonie drugi wiersz).
   - Test ręczny: `docs/testy-reczne/panel-klienta-2.md`. **Na staging czekają migracje `customer_cancellation` i `claims` (zgoda właściciela).**
-- [ ] Krok 3: panel admina — „Clienti”, zwroty/anulowania (`cancellation_review`, `payment_review`), „Reclami”, „Impostazioni”, pozycje w magazynie, dashboard.
+- [ ] Krok 3: panel admina — „Clienti”, zwroty/anulowania (`cancellation_review`, `payment_review`), „Reclami”, „Impostazioni”, pozycje w magazynie, dashboard. Plan `docs/plany/panel-admina.md` (zatwierdzony 2026-11-11, D140–D143).
+  - [ ] A. Pieniądze: migracja `20261111160000_admin_refunds.sql` (**lokalnie**) + `tests/rls/admin-refunds.test.ts` zrobione — `admin_decide_cancellation`, `admin_resolve_payment_review`, `admin_refund_order`, `admin_retry_refund`; kwota dla przewoźnika w `order_cancellation_decisions` (tylko admin); sesje nie czytają `refunds.created_by`. Dalej: logika + akcje + ekrany + mail.
 - [ ] Krok 4: faktury klienta i admina (do decyzji: adapter „demo” z PDF oznaczonym DEMO zamiast Fatture in Cloud).
 - [ ] Krok 5: mapa trasy w kroku „Percorso”, przegląd strony publicznej (telefon + komputer).
 - Do decyzji: mapa trackingu u klienta — odłożyć z PWA albo symulacja przejazdu tylko na demo.

@@ -160,6 +160,20 @@ export async function paidOrder(o: OrderOpts = {}): Promise<string> {
   return order.id;
 }
 
+/**
+ * An order whose Stripe payment did not match (D96): `amount_mismatch` (Stripe received `receivedDelta` cents more
+ * or less) → the order is in payment_review. Returns the order and the payment in review.
+ */
+export async function reviewOrder(o: OrderOpts & { receivedDelta?: number } = {}): Promise<{ orderId: string; paymentId: string; receivedCents: number }> {
+  const p = payload(o);
+  const order = (await check(service.rpc("create_order", { p }))) as { id: string };
+  const session = `cs_test_${randomUUID()}`;
+  const paymentId = (await check(service.rpc("start_order_payment", { p_order_id: order.id, p_session_id: session, p_amount_cents: p.charges.total_cents, p_expires_at: new Date(Date.now() + HOUR).toISOString() }))) as string;
+  const receivedCents = p.charges.total_cents + (o.receivedDelta ?? -100);
+  await run(service.rpc("confirm_order_payment", { p_session_id: session, p_payment_intent_id: `pi_${randomUUID()}`, p_charge_id: `ch_${randomUUID()}`, p_amount_cents: receivedCents, p_currency: "eur" }));
+  return { orderId: order.id, paymentId, receivedCents };
+}
+
 export type JobRow = { order_id: string; matching_vehicle_ids: string[]; legs: Record<string, unknown>[]; [k: string]: unknown };
 export const list = async (c: TestUser, orderId?: string) => {
   const { data, error } = await c.client.rpc("list_available_jobs", orderId ? { p_order_id: orderId } : {});
