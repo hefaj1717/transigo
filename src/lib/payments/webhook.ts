@@ -1,4 +1,5 @@
 import type Stripe from "stripe";
+import { refundStatusFromStripe, type RefundStatus } from "@/lib/orders/cancellation";
 
 // Stripe webhook processing (D89–D91). Pure orchestration: Stripe and the database come in as dependencies,
 // so every path is unit-tested (src/lib/payments/webhook.test.ts); the real ones are in ./server.ts.
@@ -35,6 +36,8 @@ export type WebhookDeps = {
   failPayment: (sessionId: string, message: string) => Promise<string | null>;
   /** After a confirmed payment: confirmation e-mail (idempotent per order). Errors are logged, never fail the webhook. */
   onPaid: (orderId: string) => Promise<void>;
+  /** The outcome of a refund we created (record_refund_result; repeated calls are no-ops). */
+  recordRefund: (refundId: string, stripeRefundId: string, status: RefundStatus) => Promise<boolean>;
   log: (message: string, data?: Record<string, unknown>) => void;
 };
 
@@ -45,6 +48,9 @@ export const HANDLED_EVENTS = [
   "checkout.session.async_payment_succeeded",
   "checkout.session.async_payment_failed",
   "checkout.session.expired",
+  // Refunds of customer cancellations (D137) that Stripe completes or fails after the Refund call.
+  "refund.updated",
+  "refund.failed",
 ] as const;
 
 export async function processStripeWebhook(rawBody: string, signature: string | null, deps: WebhookDeps): Promise<WebhookResponse> {
@@ -96,6 +102,14 @@ export async function handleEvent(event: Stripe.Event, deps: WebhookDeps): Promi
       if (!orderId) return "ignored: unknown session";
       const expired = await deps.expireOrder(orderId);
       return expired ? "order expired" : "session expired, order kept";
+    }
+    case "refund.updated":
+    case "refund.failed": {
+      const refund = event.data.object;
+      const refundId = refund.metadata?.refund_id;
+      if (!refundId) return "ignored: not a Transigo refund";
+      const changed = await deps.recordRefund(refundId, refund.id, refundStatusFromStripe(refund.status));
+      return changed ? `refund ${refund.status}` : "refund unchanged";
     }
     default:
       return `ignored: ${event.type}`;

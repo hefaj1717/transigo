@@ -5,7 +5,7 @@ Zakres: to, czego brakuje w panelu klienta według spec 7 — bez faktur (krok 4
 **reklamacje**, **depozyt**. Ekrany admina do tych funkcji (decyzja w `cancellation_review`, obsługa reklamacji,
 ponowienie zwrotu) — krok 3.
 
-**Status: czeka na akceptację właściciela** (migracje = zmiana schematu).
+**Status:** zatwierdzony 2026-11-11 (D137–D139). A zrobione (lokalnie); B, C w toku.
 
 ## A. Anulowanie opłaconego zlecenia (D33, D38, D41, D94)
 

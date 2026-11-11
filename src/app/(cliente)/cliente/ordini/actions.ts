@@ -1,9 +1,12 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { z } from "zod";
 import { requireArea } from "@/lib/auth/session";
+import { cancellationDeps, cancelOrderForCustomer } from "@/lib/orders/cancellation-server";
 import { cancelUnpaidOrder, startCheckout } from "@/lib/payments/server";
+import { getAppUrl } from "@/lib/supabase/env";
 import { createServiceClient } from "@/lib/supabase/service";
 
 // Customer actions on an unpaid order. The customer id comes from the verified session (DAL); the payment
@@ -44,5 +47,34 @@ export async function cancelUnpaid(_prev: OrderActionState, formData: FormData):
     console.error("[orders] cancelUnpaid:", e instanceof Error ? e.message : e);
     return { error: "Non è stato possibile annullare l'ordine. Riprova." };
   }
+  redirect(`/cliente/ordini/${id.data}`);
+}
+
+const reasonSchema = z.string().trim().max(2000);
+
+/**
+ * D33, D137: cancels a paid order (free / with the fee, automatic refund) or, when a carrier has the job, sends the
+ * request to the admin. The amounts are computed by the database; the customer id comes from the session only.
+ */
+export async function cancelPaid(_prev: OrderActionState, formData: FormData): Promise<OrderActionState> {
+  const id = orderId.safeParse(formData.get("orderId"));
+  if (!id.success) return { error: "Ordine non valido." };
+  const ctx = await requireArea("cliente", `/cliente/ordini/${id.data}`);
+  const reason = reasonSchema.safeParse(formData.get("reason") ?? "");
+  if (!reason.success) return { error: "Il motivo può avere al massimo 2000 caratteri." };
+
+  let outcome;
+  try {
+    const deps = cancellationDeps(createServiceClient(), {
+      appUrl: getAppUrl(),
+      adminEmail: process.env.ADMIN_NOTIFICATION_EMAIL?.trim() || null,
+      defer: after,
+    });
+    outcome = await cancelOrderForCustomer(deps, ctx.userId, id.data, reason.data || null);
+  } catch (e) {
+    console.error("[orders] cancelPaid:", e instanceof Error ? e.message : e);
+    return { error: "Non è stato possibile annullare l'ordine. Riprova tra qualche minuto." };
+  }
+  if (!outcome.ok) return { error: outcome.message };
   redirect(`/cliente/ordini/${id.data}`);
 }

@@ -7,12 +7,15 @@ import { requireArea } from "@/lib/auth/session";
 import { CUSTOMER_STATUS_LABEL, progressSteps, routeSummary, type ProgressStep } from "@/lib/orders/customer-view";
 import { loadCustomerExecution, type CustomerExecutionView } from "@/lib/orders/execution-read";
 import { groupPhotos, PHOTO_KIND_LABEL } from "@/lib/orders/execution-view";
+import { cancellationPreview, type CancellationPreview } from "@/lib/orders/cancellation";
+import { loadCancellationSettings } from "@/lib/orders/cancellation-server";
 import { paymentState } from "@/lib/orders/status";
 import { formatCents } from "@/lib/pricing/money";
 import { PORTER_PACKAGE_LABEL } from "@/lib/pricing/rule-meta";
 import type { PorterPackageCode } from "@/lib/pricing/types";
 import { createClient } from "@/lib/supabase/server";
-import { CancelUnpaidButton, PaymentPending, PayNowButton } from "../order-actions";
+import { createServiceClient } from "@/lib/supabase/service";
+import { CancelPaidOrder, CancelUnpaidButton, PaymentPending, PayNowButton } from "../order-actions";
 
 export const metadata = { title: "Ordine – Transigo" };
 
@@ -38,7 +41,7 @@ type Leg = {
   pickup_warehouse_id: string | null; delivery_warehouse_id: string | null;
 };
 type OrderRow = {
-  id: string; order_number: string; status: string; payment_due_at: string; paid_at: string | null; created_at: string;
+  id: string; order_number: string; status: string; payment_due_at: string; paid_at: string | null; created_at: string; pickup_window_start: string;
   assigned_at: string | null; picked_up_at: string | null; in_transit_at: string | null; delivered_at: string | null;
   delivered_without_pod: boolean;
   goods_description: string; items_count: number | null; weight_kg: number | null; goods_dimensions_note: string | null;
@@ -48,21 +51,25 @@ type OrderRow = {
   pickup_contact_name: string; pickup_contact_phone: string; delivery_contact_name: string; delivery_contact_phone: string;
   customer_notes: string | null;
   vehicle_types: { name_it: string } | null;
-  order_charges: { total_cents: number; subtotal_cents: number; vat_cents: number; refunded_cents: number; customer_type: "private" | "business" } | null;
-  order_lines: { sort_order: number; label_it: string; net_cents: number; gross_cents: number }[];
+  order_charges: { total_cents: number; subtotal_cents: number; vat_cents: number; refunded_cents: number; cancellation_fee_cents: number | null; customer_type: "private" | "business" } | null;
+  order_lines: { sort_order: number; label_it: string; line_type: string; net_cents: number; gross_cents: number }[];
+  refunds: { amount_cents: number; status: "pending" | "succeeded" | "failed" }[];
+  cancelled_at: string | null;
   order_legs: Leg[];
   order_status_history: { id: number; to_status: string; created_at: string; note: string | null }[];
 };
 type CarrierInfo = { first_name: string | null; company_name: string; vehicle_type: string | null; plate: string | null };
 
 const SELECT = [
-  "id, order_number, status, payment_due_at, paid_at, created_at, assigned_at, picked_up_at, in_transit_at, delivered_at, delivered_without_pod",
+  "id, order_number, status, payment_due_at, paid_at, created_at, pickup_window_start, assigned_at, picked_up_at, in_transit_at, delivered_at, delivered_without_pod",
   "goods_description, items_count, weight_kg, goods_dimensions_note, largest_item_length_cm, largest_item_width_cm, largest_item_height_cm",
   "pallets_count, load_category, packing_items_count, storage_type, storage_days, storage_pallets",
   "pickup_contact_name, pickup_contact_phone, delivery_contact_name, delivery_contact_phone, customer_notes",
   "vehicle_types(name_it)",
-  "order_charges(total_cents, subtotal_cents, vat_cents, refunded_cents, customer_type)",
-  "order_lines(sort_order, label_it, net_cents, gross_cents)",
+  "cancelled_at",
+  "order_charges(total_cents, subtotal_cents, vat_cents, refunded_cents, cancellation_fee_cents, customer_type)",
+  "order_lines(sort_order, label_it, line_type, net_cents, gross_cents)",
+  "refunds(amount_cents, status)",
   "order_legs(leg_index, pickup_address, delivery_address, pickup_city, delivery_city, pickup_window_start, pickup_window_end, pickup_floor, pickup_has_elevator, delivery_floor, delivery_has_elevator, distance_m, is_urgent, porter_package_code, porters_count, porters_included_hours, pickup_warehouse_id, delivery_warehouse_id)",
   "order_status_history(id, to_status, created_at, note)",
 ].join(", ");
@@ -98,6 +105,19 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
   const returnedFromCheckout = sp.pagamento === "ok";
   const cancelledCheckout = sp.pagamento === "annullato";
   const paidAndOpen = ["paid", "assigned"].includes(o.status);
+  // D137 preview — the database recomputes the amounts on click. settings is admin-only: two numbers via service role.
+  let cancel: { preview: CancellationPreview; freeHours: number; feeBp: number } | null = null;
+  if (paidAndOpen && charges) {
+    const s = await loadCancellationSettings(createServiceClient());
+    const refundedCents = o.refunds.filter((r) => r.status !== "failed").reduce((sum, r) => sum + r.amount_cents, 0);
+    const preview = cancellationPreview({
+      status: o.status, pickupWindowStart: new Date(o.pickup_window_start), now, freeHours: s.freeHours, feeBp: s.feeBp,
+      totalCents: charges.total_cents, refundedCents, lines: o.order_lines,
+    });
+    cancel = { preview, ...s };
+  }
+  const refundTotal = o.refunds.filter((r) => r.status !== "failed").reduce((sum, r) => sum + r.amount_cents, 0);
+  const refundPending = o.refunds.some((r) => r.status === "pending");
 
   return (
     <CustomerShell
@@ -267,11 +287,27 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
           </Card>
         ) : null}
 
-        {/* Changes */}
-        {paidAndOpen ? (
+        {/* Cancellation (D33, D137) */}
+        {o.status === "cancelled" && charges ? (
           <Note tone="info">
-            Devi modificare o annullare l&apos;ordine? <Link href="/contatti" className="font-medium underline">Contattaci</Link> indicando il numero {o.order_number}.
+            Ordine annullato{o.cancelled_at ? ` il ${rome(o.cancelled_at, { dateStyle: "medium", timeStyle: "short" })}` : ""}.
+            {charges.cancellation_fee_cents ? <> Costo di annullamento: <strong>{formatCents(charges.cancellation_fee_cents)}</strong>.</> : null}
+            {refundTotal > 0 ? (
+              <> Rimborso: <strong>{formatCents(refundTotal)}</strong> — {refundPending ? "in elaborazione: arriva sulla carta usata per il pagamento in 5–10 giorni lavorativi." : "inviato sulla carta usata per il pagamento."}</>
+            ) : null}
           </Note>
+        ) : null}
+        {o.status === "cancellation_review" ? (
+          <Note tone="warning">Abbiamo ricevuto la tua richiesta di annullamento. Il trasporto era già stato assegnato: il nostro team la valuta e ti contatta per il rimborso.</Note>
+        ) : null}
+        {paidAndOpen ? (
+          <Card>
+            <H2>Annullare o modificare l&apos;ordine</H2>
+            {cancel ? <div className="mt-3"><CancelPaidOrder orderId={o.id} preview={serializePreview(cancel.preview)} freeHours={cancel.freeHours} feeBp={cancel.feeBp} /></div> : null}
+            <p className="mt-3 text-xs text-zinc-500">
+              Per modificare l&apos;ordine <Link href="/contatti" className="underline">contattaci</Link> indicando il numero {o.order_number}.
+            </p>
+          </Card>
         ) : null}
 
         {/* History */}
@@ -405,4 +441,10 @@ function Progress({ steps }: { steps: ProgressStep[] }) {
       ))}
     </ol>
   );
+}
+
+/** Dates as ISO strings for the client component. */
+function serializePreview(p: CancellationPreview) {
+  if (p.kind === "review" || p.kind === "not_allowed") return { kind: p.kind };
+  return { kind: p.kind, feeCents: p.feeCents, refundCents: p.refundCents, freeUntil: p.freeUntil.toISOString() };
 }

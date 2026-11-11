@@ -186,6 +186,8 @@ export function webhookDeps(db: SupabaseClient, defer?: Defer): WebhookDeps {
     expireOrder: (orderId) => rpc<boolean>("expire_order", { p_order_id: orderId, p_source: "stripe_webhook" }),
     failPayment: (sessionId, message) => rpc<string | null>("fail_order_payment", { p_session_id: sessionId, p_message: message }),
     onPaid: (orderId) => sendOrderPaidEmail(db, orderId, { defer }),
+    recordRefund: (refundId, stripeRefundId, status) =>
+      rpc<boolean>("record_refund_result", { p_refund_id: refundId, p_stripe_refund_id: stripeRefundId, p_status: status }),
     log: (message, data) => console.warn(`[stripe] ${message}`, data ?? {}),
   };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cancellationPreview, freeCancellationUntil, lateCancellationFeeCents, type CancellationInput } from "./cancellation";
+import { cancellationPreview, freeCancellationUntil, lateCancellationFeeCents, refundStatusFromStripe, type CancellationInput } from "./cancellation";
 
 const H = 3_600_000;
 const lines = [
@@ -67,5 +67,14 @@ describe("cancellationPreview (D33)", () => {
     for (const status of ["pending_payment", "picked_up", "in_transit", "delivered", "cancelled", "cancellation_review", "expired"]) {
       expect(cancellationPreview({ ...base, status })).toEqual({ kind: "not_allowed" });
     }
+  });
+});
+
+describe("refundStatusFromStripe", () => {
+  it("maps the Stripe refund statuses", () => {
+    expect(refundStatusFromStripe("succeeded")).toBe("succeeded");
+    expect(refundStatusFromStripe("failed")).toBe("failed");
+    expect(refundStatusFromStripe("canceled")).toBe("failed");
+    for (const s of ["pending", "requires_action", null, undefined, "something_new"]) expect(refundStatusFromStripe(s)).toBe("pending");
   });
 });

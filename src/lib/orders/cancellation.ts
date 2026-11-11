@@ -53,3 +53,12 @@ export function cancellationPreview(i: CancellationInput): CancellationPreview {
 
 /** The customer may see the cancel button (the database decides again on click). */
 export const CUSTOMER_CANCELLABLE_STATUSES = ["paid", "assigned"] as const;
+
+export type RefundStatus = "pending" | "succeeded" | "failed";
+
+/** Stripe Refund.status → refunds.status. requires_action / pending stay pending; canceled counts as failed. */
+export function refundStatusFromStripe(status: string | null | undefined): RefundStatus {
+  if (status === "succeeded") return "succeeded";
+  if (status === "failed" || status === "canceled") return "failed";
+  return "pending";
+}

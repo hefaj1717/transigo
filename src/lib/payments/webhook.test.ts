@@ -76,6 +76,7 @@ function fakeDeps(over: Partial<WebhookDeps> = {}, confirm: ConfirmResult = { re
     expireOrder: spy("expireOrder", async () => true),
     failPayment: spy("failPayment", async () => ORDER_ID),
     onPaid: spy("onPaid", async () => undefined),
+    recordRefund: spy("recordRefund", async () => true),
     log: () => undefined,
     ...over,
   };
@@ -261,5 +262,40 @@ describe("other events", () => {
     expect(r.status).toBe(200);
     expect(deps.processed.size).toBe(1);
     for (const k of ["confirmPayment", "expirePayment", "failPayment", "expireOrder"]) expect(deps.calls[k]).toBeUndefined();
+  });
+});
+
+describe("refunds (D137)", () => {
+  const refundEvent = (type: string, refund: Record<string, unknown>) =>
+    JSON.stringify({
+      id: `evt_${Math.random().toString(36).slice(2)}`, object: "event", type, livemode: false, created: 1, api_version: "2026-09-30.endive",
+      data: { object: { id: "re_1", object: "refund", amount: 9_760, currency: "eur", payment_intent: "pi_1", ...refund } },
+    });
+  const REFUND_ID = "22222222-2222-4222-8222-222222222222";
+
+  it("refund.updated succeeded → recorded as succeeded", async () => {
+    const body = refundEvent("refund.updated", { status: "succeeded", metadata: { refund_id: REFUND_ID, order_id: ORDER_ID } });
+    const r = await processStripeWebhook(body, sign(body), deps);
+    expect(r.status).toBe(200);
+    expect(deps.calls.recordRefund).toEqual([[REFUND_ID, "re_1", "succeeded"]]);
+  });
+
+  it("refund.failed → recorded as failed", async () => {
+    const body = refundEvent("refund.failed", { status: "failed", metadata: { refund_id: REFUND_ID } });
+    await processStripeWebhook(body, sign(body), deps);
+    expect(deps.calls.recordRefund).toEqual([[REFUND_ID, "re_1", "failed"]]);
+  });
+
+  it("a refund without our metadata (e.g. made in the Dashboard) is ignored", async () => {
+    const body = refundEvent("refund.updated", { status: "succeeded", metadata: {} });
+    const r = await processStripeWebhook(body, sign(body), deps);
+    expect(r.status).toBe(200);
+    expect(deps.calls.recordRefund).toBeUndefined();
+  });
+
+  it("a database error → 500 so Stripe retries", async () => {
+    deps = fakeDeps({ recordRefund: async () => { throw new Error("db down"); } });
+    const body = refundEvent("refund.updated", { status: "succeeded", metadata: { refund_id: REFUND_ID } });
+    expect((await processStripeWebhook(body, sign(body), deps)).status).toBe(500);
   });
 });
