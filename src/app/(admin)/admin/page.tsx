@@ -28,6 +28,8 @@ type MonthOrder = {
   status: string;
   order_charges: { total_cents: number; subtotal_cents: number; refunded_cents: number } | null;
   order_legs: { order_leg_carrier_terms: { carrier_amount_cents: number } | null }[];
+  // Facchinaggio (D152): the carrier amount hangs off the porter job (foreign key to order_porter_jobs)
+  order_porter_jobs: { order_porter_carrier_terms: { carrier_amount_cents: number } | null } | null;
   order_cancellation_decisions: { carrier_cents: number } | null;
 };
 
@@ -50,7 +52,7 @@ async function Content({ searchParams }: Pick<PageProps<"/admin">, "searchParams
     db.from("refunds").select("id, status, retry_of").neq("status", "succeeded"),
     db.from("claims").select("id", head).eq("status", "open"),
     db.from("orders").select("id", head).in("status", ["picked_up", "in_transit"]).is("carrier_id", null).not("handover_required_at", "is", null),
-    db.from("orders").select("status, carrier_id, paid_at").eq("status", "paid").is("carrier_id", null),
+    db.from("orders").select("status, carrier_id, paid_at").eq("status", "paid").is("carrier_id", null).neq("service_type", "storage"), // storage: never a carrier (D152)
     db.from("contact_requests").select("id", head).eq("status", "new"),
     loadAdminCarriers(db),
     loadPendingVehicles(db),
@@ -58,7 +60,7 @@ async function Content({ searchParams }: Pick<PageProps<"/admin">, "searchParams
     db.from("carrier_documents").select("carrier_id, vehicle_id, doc_type, expires_at, review_status, created_at, carriers!inner(status), carrier_vehicles(is_active)")
       .not("expires_at", "is", null).in("carriers.status", ["active", "suspended"]),
     db.from("orders")
-      .select("status, order_charges(total_cents, subtotal_cents, refunded_cents), order_legs(order_leg_carrier_terms(carrier_amount_cents)), order_cancellation_decisions(carrier_cents)")
+      .select("status, order_charges(total_cents, subtotal_cents, refunded_cents), order_legs(order_leg_carrier_terms(carrier_amount_cents)), order_porter_jobs(order_porter_carrier_terms(carrier_amount_cents)), order_cancellation_decisions(carrier_cents)")
       .gte("paid_at", month.start.toISOString()).lt("paid_at", month.end.toISOString())
       .returns<MonthOrder[]>(),
     db.from("orders").select("status").limit(10_000),
@@ -96,7 +98,8 @@ async function Content({ searchParams }: Pick<PageProps<"/admin">, "searchParams
       total_cents: o.order_charges?.total_cents ?? 0,
       subtotal_cents: o.order_charges?.subtotal_cents ?? 0,
       refunded_cents: o.order_charges?.refunded_cents ?? 0,
-      carrier_amount_cents: o.order_legs.reduce((s, l) => s + (l.order_leg_carrier_terms?.carrier_amount_cents ?? 0), 0),
+      carrier_amount_cents: o.order_legs.reduce((s, l) => s + (l.order_leg_carrier_terms?.carrier_amount_cents ?? 0), 0)
+        + (o.order_porter_jobs?.order_porter_carrier_terms?.carrier_amount_cents ?? 0),
       cancellation_carrier_cents: o.order_cancellation_decisions?.carrier_cents ?? null,
     })),
   );

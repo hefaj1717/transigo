@@ -5,6 +5,7 @@ import { AdminShell } from "@/components/admin/admin-nav";
 import { requireArea } from "@/lib/auth/session";
 import { ADMIN_ORDER_PATHS, HANDOVER_BADGE, handoverKind, isHandoverPending, ORDER_FILTERS } from "@/lib/orders/dispatch";
 import { ORDER_STATUS_LABEL, PAYMENT_STATE_LABEL, paymentState } from "@/lib/orders/status";
+import { dispatchable, SERVICE_FILTERS, SERVICE_TYPE_LABEL, serviceFilter, serviceTypeOf } from "@/lib/orders/service-type";
 import { formatCents } from "@/lib/pricing/money";
 import { stripeDashboardPaymentUrl } from "@/lib/stripe/keys";
 import { createClient } from "@/lib/supabase/server";
@@ -12,7 +13,8 @@ import { createClient } from "@/lib/supabase/server";
 export const metadata = { title: "Ordini – Transigo" };
 
 // Admin order list: order and payment status, carrier, link to the payment in the Stripe Dashboard and to the
-// order page (assignment and status changes, D122). Actions on payments under review come in Stage 6.
+// order page (assignment and status changes, D122). Filters by status and by service type (D151; ?filtro= and
+// ?servizio= combine). Storage orders are never dispatched to carriers, so "Da assegnare" leaves them out.
 export default function Page({ searchParams }: PageProps<"/admin/ordini">) {
   return (
     <Suspense fallback={<Loading />}>
@@ -27,6 +29,7 @@ type Row = {
   handover_leg_index: number | null;
   carrier_id: string | null;
   order_number: string;
+  service_type: string;
   status: string;
   created_at: string;
   pickup_window_start: string;
@@ -48,23 +51,34 @@ const REVIEW_REASON: Record<string, string> = {
 };
 
 const rome = (iso: string) => new Date(iso).toLocaleString("it-IT", { timeZone: "Europe/Rome", dateStyle: "short", timeStyle: "short" });
+// Storage orders start at midnight in Rome of their first day: the date only.
+const romeDay = (iso: string) => new Date(iso).toLocaleDateString("it-IT", { timeZone: "Europe/Rome", dateStyle: "short" });
 
 async function Content({ searchParams }: Pick<PageProps<"/admin/ordini">, "searchParams">) {
   await requireArea("admin", "/admin/ordini");
   const sp = await searchParams;
   const filter = FILTERS.find((f) => f.key === sp.filtro) ?? FILTERS[0];
+  const service = serviceFilter(sp.servizio);
+  const href = (filtro: string, servizio: string) => {
+    const params = new URLSearchParams();
+    if (filtro !== "tutti") params.set("filtro", filtro);
+    if (servizio !== "tutti") params.set("servizio", servizio);
+    const qs = params.toString();
+    return qs ? `/admin/ordini?${qs}` : "/admin/ordini";
+  };
 
   // Admin's own client: RLS gives admins read access to every order and payment.
   const db = await createClient();
   let q = db
     .from("orders")
     .select(
-      "id, order_number, status, created_at, pickup_window_start, payment_due_at, paid_at, handover_required_at, handover_leg_index, carrier_id, order_charges(total_cents, refunded_cents), customers(profiles(first_name, last_name, email)), payments(status, stripe_payment_intent_id, review_reason, created_at), carriers(company_name)",
+      "id, order_number, service_type, status, created_at, pickup_window_start, payment_due_at, paid_at, handover_required_at, handover_leg_index, carrier_id, order_charges(total_cents, refunded_cents), customers(profiles(first_name, last_name, email)), payments(status, stripe_payment_intent_id, review_reason, created_at), carriers(company_name)",
     )
     .order(filter.unassigned ? "pickup_window_start" : "created_at", { ascending: !!filter.unassigned })
     .limit(100);
   if (filter.statuses) q = q.in("status", filter.statuses);
-  if (filter.unassigned) q = q.is("carrier_id", null);
+  if (filter.unassigned) q = q.is("carrier_id", null).neq("service_type", "storage");
+  if (service.type) q = q.eq("service_type", service.type);
   if (filter.handover) q = q.not("handover_required_at", "is", null);
   if (filter.byIds) q = q.in("id", await orderIdsFor(db, filter.byIds));
   const { data: orders, error } = await q.returns<Row[]>();
@@ -78,9 +92,17 @@ async function Content({ searchParams }: Pick<PageProps<"/admin/ordini">, "searc
 
   return (
     <AdminShell title="Ordini">
-      <nav className="mb-4 flex flex-wrap gap-2 text-sm">
+      <nav aria-label="Stato" className="mb-2 flex flex-wrap gap-2 text-sm">
         {FILTERS.map((f) => (
-          <Link key={f.key} href={f.key === "tutti" ? "/admin/ordini" : `/admin/ordini?filtro=${f.key}`} className={`rounded-full px-3 py-1 ${f.key === filter.key ? "bg-blue-600 text-white" : "bg-zinc-100 text-zinc-800 hover:bg-zinc-200"}`}>
+          <Link key={f.key} href={href(f.key, service.key)} className={`rounded-full px-3 py-1 ${f.key === filter.key ? "bg-blue-600 text-white" : "bg-zinc-100 text-zinc-800 hover:bg-zinc-200"}`}>
+            {f.label}
+          </Link>
+        ))}
+      </nav>
+      <nav aria-label="Servizio" className="mb-4 flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-zinc-500">Servizio:</span>
+        {SERVICE_FILTERS.map((f) => (
+          <Link key={f.key} href={href(filter.key, f.key)} aria-current={f.key === service.key ? "page" : undefined} className={`rounded-full border px-3 py-0.5 ${f.key === service.key ? "border-blue-600 bg-blue-50 text-blue-800" : "border-zinc-200 text-zinc-700 hover:bg-zinc-50"}`}>
             {f.label}
           </Link>
         ))}
@@ -92,7 +114,7 @@ async function Content({ searchParams }: Pick<PageProps<"/admin/ordini">, "searc
             <tr>
               <th className="py-2 pr-3 font-medium">Ordine</th>
               <th className="py-2 pr-3 font-medium">Cliente</th>
-              <th className="py-2 pr-3 font-medium">Ritiro</th>
+              <th className="py-2 pr-3 font-medium">Data</th>
               <th className="py-2 pr-3 font-medium">Stato</th>
               <th className="py-2 pr-3 font-medium">Padroncino</th>
               <th className="py-2 pr-3 font-medium">Pagamento</th>
@@ -107,22 +129,24 @@ async function Content({ searchParams }: Pick<PageProps<"/admin/ordini">, "searc
               const payments = [...o.payments].sort((a, b) => b.created_at.localeCompare(a.created_at));
               const succeeded = payments.filter((x) => x.status === "succeeded" && x.stripe_payment_intent_id);
               const reviews = succeeded.filter((x) => x.review_reason);
+              const type = serviceTypeOf(o.service_type);
               return (
                 <tr key={o.id} className="border-t border-zinc-100 align-top">
                   <td className="py-2 pr-3 font-medium text-zinc-900">
                     <Link href={ADMIN_ORDER_PATHS.detail(o.id)} className="text-blue-700 hover:underline">{o.order_number}</Link>
                     <div className="text-xs font-normal text-zinc-500">{rome(o.created_at)}</div>
+                    <span className={`mt-0.5 inline-block rounded px-1.5 py-0.5 text-xs font-normal ${type === "transport" ? "bg-zinc-100 text-zinc-700" : "bg-violet-100 text-violet-900"}`}>{SERVICE_TYPE_LABEL[type]}</span>
                   </td>
                   <td className="py-2 pr-3">
                     {[p?.first_name, p?.last_name].filter(Boolean).join(" ") || "—"}
                     <div className="text-xs text-zinc-500">{p?.email}</div>
                   </td>
-                  <td className="py-2 pr-3 whitespace-nowrap">{rome(o.pickup_window_start)}</td>
+                  <td className="py-2 pr-3 whitespace-nowrap">{type === "storage" ? `dal ${romeDay(o.pickup_window_start)}` : rome(o.pickup_window_start)}</td>
                   <td className="py-2 pr-3">{ORDER_STATUS_LABEL[o.status] ?? o.status}</td>
                   <td className="py-2 pr-3">
                     {isHandoverPending(o) ? (
                       <Link href={ADMIN_ORDER_PATHS.detail(o.id)} className="inline-block rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-900 underline">{HANDOVER_BADGE[handoverKind(o, (handoverSteps ?? []).filter((x) => x.order_id === o.id))]}</Link>
-                    ) : o.carriers?.company_name ?? (o.status === "paid" ? <Link href={ADMIN_ORDER_PATHS.detail(o.id)} className="text-amber-800 underline">Da assegnare</Link> : <span className="text-zinc-400">—</span>)}
+                    ) : o.carriers?.company_name ?? (o.status === "paid" && dispatchable(type) ? <Link href={ADMIN_ORDER_PATHS.detail(o.id)} className="text-amber-800 underline">Da assegnare</Link> : <span className="text-zinc-400">—</span>)}
                   </td>
                   <td className="py-2 pr-3">
                     {PAYMENT_STATE_LABEL[pay]}

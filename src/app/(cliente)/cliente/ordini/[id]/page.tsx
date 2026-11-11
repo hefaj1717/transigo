@@ -6,7 +6,8 @@ import { CUSTOMER_DOC_COLUMNS, InvoiceList, type CustomerDoc } from "@/component
 import { groupDocuments } from "@/lib/einvoice/view";
 import { Loading } from "@/components/panel-shell";
 import { requireArea } from "@/lib/auth/session";
-import { CUSTOMER_STATUS_LABEL, progressSteps, routeSummary, type ProgressStep } from "@/lib/orders/customer-view";
+import { CUSTOMER_STATUS_LABEL, orderTitle, progressSteps, type ProgressStep } from "@/lib/orders/customer-view";
+import { bookingDays, bookingUnitLabel, CUSTOMER_STORAGE_INTAKE_LABEL, CUSTOMER_STORAGE_OUTBOUND_LABEL, formatDateOnly, serviceTypeOf } from "@/lib/orders/service-type";
 import { loadCustomerExecution, type CustomerExecutionView } from "@/lib/orders/execution-read";
 import { groupPhotos, PHOTO_KIND_LABEL } from "@/lib/orders/execution-view";
 import { canOpenClaim, claimDeadline } from "@/lib/claims/claims";
@@ -25,7 +26,8 @@ export const metadata = { title: "Ordine – Transigo" };
 // Order page of the customer (spec 7): progress, carrier (customer_order_carrier — first name, company,
 // vehicle, plate only), proof of delivery (recipient, time, signature, photos — signed URLs of 5 min made with the
 // customer's session; pickup photos already after loading) and porter working time, price breakdown (D3), route
-// with floors and contacts, goods, services, history.
+// with floors and contacts, goods, services, history. Facchinaggio and Deposito orders (D151) have no legs: their
+// job / booking replaces the route; the transport progress bar is not shown for them.
 // Return URL of Stripe Checkout: ?pagamento=ok only shows "Pagamento in verifica" — the status changes only
 // through the webhook (D89). Everything is read with the customer's own session (RLS, D77).
 export default function Page({ params, searchParams }: PageProps<"/cliente/ordini/[id]">) {
@@ -43,15 +45,24 @@ type Leg = {
   porter_package_code: PorterPackageCode | null; porters_count: number; porters_included_hours: number | null;
   pickup_warehouse_id: string | null; delivery_warehouse_id: string | null;
 };
+type PorterJob = {
+  address: string; city: string; window_start: string; window_end: string; floor: number; has_elevator: boolean;
+  persons: number; requested_hours: number; billed_hours: number; is_urgent: boolean;
+};
+type Booking = {
+  unit: string; box_code: string | null; pallets: number | null; start_date: string; end_date: string;
+  intake: string; outbound: string; // the warehouse is admin-only (RLS): its address for the customer comes with step 7
+};
 type OrderRow = {
-  id: string; order_number: string; status: string; payment_due_at: string; paid_at: string | null; created_at: string; pickup_window_start: string;
+  id: string; order_number: string; service_type: string; status: string; payment_due_at: string; paid_at: string | null; created_at: string; pickup_window_start: string;
   assigned_at: string | null; picked_up_at: string | null; in_transit_at: string | null; delivered_at: string | null;
   delivered_without_pod: boolean;
   goods_description: string; items_count: number | null; weight_kg: number | null; goods_dimensions_note: string | null;
   largest_item_length_cm: number | null; largest_item_width_cm: number | null; largest_item_height_cm: number | null;
   pallets_count: number | null; load_category: PorterPackageCode | null; packing_items_count: number;
   storage_type: "transshipment" | "short_term" | "long_term" | null; storage_days: number | null; storage_pallets: number | null;
-  pickup_contact_name: string; pickup_contact_phone: string; delivery_contact_name: string; delivery_contact_phone: string;
+  // transport: both contacts; porters: on-site contact in pickup_*; storage: none
+  pickup_contact_name: string | null; pickup_contact_phone: string | null; delivery_contact_name: string | null; delivery_contact_phone: string | null;
   customer_notes: string | null;
   vehicle_types: { name_it: string } | null;
   order_charges: { total_cents: number; subtotal_cents: number; vat_cents: number; refunded_cents: number; cancellation_fee_cents: number | null; customer_type: "private" | "business" } | null;
@@ -60,12 +71,14 @@ type OrderRow = {
   claims: { id: string; status: "open" | "closed" }[];
   cancelled_at: string | null;
   order_legs: Leg[];
+  order_porter_jobs: PorterJob | null;
+  warehouse_bookings: Booking | null;
   order_status_history: { id: number; to_status: string; created_at: string; note: string | null }[];
 };
 type CarrierInfo = { first_name: string | null; company_name: string; vehicle_type: string | null; plate: string | null };
 
 const SELECT = [
-  "id, order_number, status, payment_due_at, paid_at, created_at, pickup_window_start, assigned_at, picked_up_at, in_transit_at, delivered_at, delivered_without_pod",
+  "id, order_number, service_type, status, payment_due_at, paid_at, created_at, pickup_window_start, assigned_at, picked_up_at, in_transit_at, delivered_at, delivered_without_pod",
   "goods_description, items_count, weight_kg, goods_dimensions_note, largest_item_length_cm, largest_item_width_cm, largest_item_height_cm",
   "pallets_count, load_category, packing_items_count, storage_type, storage_days, storage_pallets",
   "pickup_contact_name, pickup_contact_phone, delivery_contact_name, delivery_contact_phone, customer_notes",
@@ -76,6 +89,8 @@ const SELECT = [
   "refunds(amount_cents, status)",
   "claims(id, status)",
   "order_legs(leg_index, pickup_address, delivery_address, pickup_city, delivery_city, pickup_window_start, pickup_window_end, pickup_floor, pickup_has_elevator, delivery_floor, delivery_has_elevator, distance_m, is_urgent, porter_package_code, porters_count, porters_included_hours, pickup_warehouse_id, delivery_warehouse_id)",
+  "order_porter_jobs(address, city, window_start, window_end, floor, has_elevator, persons, requested_hours, billed_hours, is_urgent)",
+  "warehouse_bookings(unit, box_code, pallets, start_date, end_date, intake, outbound)",
   "order_status_history(id, to_status, created_at, note)",
 ].join(", ");
 
@@ -102,13 +117,15 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
   const exec = await loadCustomerExecution(supabase, o);
 
   const now = new Date();
+  const type = serviceTypeOf(o.service_type);
   const legs = [...o.order_legs].sort((a, b) => a.leg_index - b.leg_index);
   const lines = [...o.order_lines].sort((a, b) => a.sort_order - b.sort_order);
   const history = [...o.order_status_history].sort((a, b) => a.id - b.id);
   const charges = o.order_charges;
   const business = charges?.customer_type === "business";
   const pay = paymentState({ ...o, refunded_cents: charges?.refunded_cents, total_cents: charges?.total_cents }, now);
-  const progress = progressSteps(o);
+  // The steps (assigned, picked up, in transit) describe a transport; other services get theirs with their wizard.
+  const progress = type === "transport" ? progressSteps(o) : null;
   const returnedFromCheckout = sp.pagamento === "ok";
   const cancelledCheckout = sp.pagamento === "annullato";
   const paidAndOpen = ["paid", "assigned"].includes(o.status);
@@ -128,7 +145,7 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
 
   return (
     <CustomerShell
-      title={routeSummary(legs)}
+      title={orderTitle(o)}
       subtitle={<>Ordine {o.order_number} · creato il {rome(o.created_at, { dateStyle: "medium" })}</>}
     >
       <p className="-mt-2 mb-5 text-sm">
@@ -189,12 +206,20 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
             ) : null}
             <p className="mt-3 text-xs text-zinc-500">Per qualsiasi necessità sul trasporto <Link href="/contatti" className="underline">contattaci</Link>: siamo noi il tuo riferimento.</p>
           </Card>
-        ) : o.status === "paid" ? (
+        ) : o.status === "paid" && type === "transport" ? (
           <Card>
             <H2>Il tuo trasportatore</H2>
             <p className="mt-2 text-sm text-zinc-600">Stiamo assegnando il trasporto a uno dei nostri trasportatori verificati. Ti avviseremo appena è confermato.</p>
           </Card>
+        ) : o.status === "paid" && type === "porters" ? (
+          <Card>
+            <H2>I tuoi facchini</H2>
+            <p className="mt-2 text-sm text-zinc-600">Stiamo assegnando il servizio a una squadra verificata. Ti avviseremo appena è confermato.</p>
+          </Card>
         ) : null}
+
+        {o.order_porter_jobs ? <PorterJobCard job={o.order_porter_jobs} contact={o.pickup_contact_name ? `${o.pickup_contact_name} · ${o.pickup_contact_phone}` : null} notes={o.customer_notes} /> : null}
+        {o.warehouse_bookings ? <BookingCard b={o.warehouse_bookings} /> : null}
 
         <Execution exec={exec} multiLeg={o.order_legs.length > 1} />
 
@@ -215,41 +240,43 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
         ) : null}
 
         {/* Route */}
-        <Card>
-          <H2>Percorso</H2>
-          <ol className="mt-3 space-y-4">
-            {legs.map((l) => (
-              <li key={l.leg_index} className="rounded-lg bg-zinc-50 p-4">
-                {legs.length > 1 ? <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">{l.leg_index === 0 ? "1. Ritiro → deposito" : "2. Deposito → consegna"}</p> : null}
-                <p className="text-sm text-zinc-900">
-                  {rome(l.pickup_window_start, { weekday: "long", day: "numeric", month: "long" })}, {time(l.pickup_window_start)}–{time(l.pickup_window_end)}
-                  {l.is_urgent ? <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-900">Urgente</span> : null}
-                </p>
-                <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
-                  <Place title="Ritiro" address={l.pickup_address} detail={l.pickup_warehouse_id ? "Nostro magazzino" : floor(l.pickup_floor, l.pickup_has_elevator)} />
-                  <Place title="Consegna" address={l.delivery_address} detail={l.delivery_warehouse_id ? "Nostro magazzino" : floor(l.delivery_floor, l.delivery_has_elevator)} />
-                </dl>
-                <p className="mt-2 text-xs text-zinc-500">{num.format(Math.round(l.distance_m / 100) / 10)} km</p>
-              </li>
-            ))}
-          </ol>
-          <dl className="mt-4 grid gap-3 border-t border-zinc-100 pt-4 text-sm sm:grid-cols-2">
-            <div>
-              <dt className="text-zinc-500">Contatto al ritiro</dt>
-              <dd className="text-zinc-900">{o.pickup_contact_name} · {o.pickup_contact_phone}</dd>
-            </div>
-            <div>
-              <dt className="text-zinc-500">Contatto alla consegna</dt>
-              <dd className="text-zinc-900">{o.delivery_contact_name} · {o.delivery_contact_phone}</dd>
-            </div>
-            {o.customer_notes ? (
-              <div className="sm:col-span-2">
-                <dt className="text-zinc-500">Note</dt>
-                <dd className="whitespace-pre-line text-zinc-900">{o.customer_notes}</dd>
+        {legs.length ? (
+          <Card>
+            <H2>Percorso</H2>
+            <ol className="mt-3 space-y-4">
+              {legs.map((l) => (
+                <li key={l.leg_index} className="rounded-lg bg-zinc-50 p-4">
+                  {legs.length > 1 ? <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">{l.leg_index === 0 ? "1. Ritiro → deposito" : "2. Deposito → consegna"}</p> : null}
+                  <p className="text-sm text-zinc-900">
+                    {rome(l.pickup_window_start, { weekday: "long", day: "numeric", month: "long" })}, {time(l.pickup_window_start)}–{time(l.pickup_window_end)}
+                    {l.is_urgent ? <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-900">Urgente</span> : null}
+                  </p>
+                  <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                    <Place title="Ritiro" address={l.pickup_address} detail={l.pickup_warehouse_id ? "Nostro magazzino" : floor(l.pickup_floor, l.pickup_has_elevator)} />
+                    <Place title="Consegna" address={l.delivery_address} detail={l.delivery_warehouse_id ? "Nostro magazzino" : floor(l.delivery_floor, l.delivery_has_elevator)} />
+                  </dl>
+                  <p className="mt-2 text-xs text-zinc-500">{num.format(Math.round(l.distance_m / 100) / 10)} km</p>
+                </li>
+              ))}
+            </ol>
+            <dl className="mt-4 grid gap-3 border-t border-zinc-100 pt-4 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="text-zinc-500">Contatto al ritiro</dt>
+                <dd className="text-zinc-900">{o.pickup_contact_name} · {o.pickup_contact_phone}</dd>
               </div>
-            ) : null}
-          </dl>
-        </Card>
+              <div>
+                <dt className="text-zinc-500">Contatto alla consegna</dt>
+                <dd className="text-zinc-900">{o.delivery_contact_name} · {o.delivery_contact_phone}</dd>
+              </div>
+              {o.customer_notes ? (
+                <div className="sm:col-span-2">
+                  <dt className="text-zinc-500">Note</dt>
+                  <dd className="whitespace-pre-line text-zinc-900">{o.customer_notes}</dd>
+                </div>
+              ) : null}
+            </dl>
+          </Card>
+        ) : null}
 
         {/* Goods and services */}
         <Card>
@@ -424,6 +451,47 @@ function Execution({ exec, multiLeg }: { exec: CustomerExecutionView; multiLeg: 
         </div>
       ))}
       {exec.photos.length ? <p className="mt-2 text-xs text-zinc-500">Tocca una foto per aprirla. I link scadono dopo 5 minuti: ricarica la pagina per vederle di nuovo.</p> : null}
+    </Card>
+  );
+}
+
+function PorterJobCard({ job, contact, notes }: { job: PorterJob; contact: string | null; notes: string | null }) {
+  return (
+    <Card>
+      <H2>Facchinaggio</H2>
+      <div className="mt-3 rounded-lg bg-zinc-50 p-4">
+        <p className="text-sm text-zinc-900">
+          {rome(job.window_start, { weekday: "long", day: "numeric", month: "long" })}, {time(job.window_start)}–{time(job.window_end)}
+          {job.is_urgent ? <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-900">Urgente</span> : null}
+        </p>
+        <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+          <Place title="Indirizzo" address={job.address} detail={floor(job.floor, job.has_elevator)} />
+          <Row k="Facchini" v={`${job.persons} persone, ${job.billed_hours} h${job.billed_hours > job.requested_hours ? " (minimo)" : ""}`} />
+        </dl>
+      </div>
+      <dl className="mt-4 grid gap-3 border-t border-zinc-100 pt-4 text-sm sm:grid-cols-2">
+        {contact ? <Row k="Contatto sul posto" v={contact} /> : null}
+        {notes ? (
+          <div className="sm:col-span-2">
+            <dt className="text-zinc-500">Note</dt>
+            <dd className="whitespace-pre-line text-zinc-900">{notes}</dd>
+          </div>
+        ) : null}
+      </dl>
+    </Card>
+  );
+}
+
+function BookingCard({ b }: { b: Booking }) {
+  return (
+    <Card>
+      <H2>Deposito</H2>
+      <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+        <Row k="Spazio" v={bookingUnitLabel(b)} />
+        <Row k="Periodo" v={`${formatDateOnly(b.start_date)} – ${formatDateOnly(b.end_date)} (${bookingDays(b.start_date, b.end_date)} giorni)`} />
+        <Row k="Arrivo della merce" v={CUSTOMER_STORAGE_INTAKE_LABEL[b.intake] ?? b.intake} />
+        <Row k="Uscita della merce" v={CUSTOMER_STORAGE_OUTBOUND_LABEL[b.outbound] ?? b.outbound} />
+      </dl>
     </Card>
   );
 }

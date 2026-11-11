@@ -61,6 +61,7 @@ public/workbox-*.js.map
 
 # end-to-end test build (playwright.config.ts)
 /.next-e2e/
+/.next-check/
 
 # Claude Code — personal settings (permissions), not shared
 .claude/settings.local.json

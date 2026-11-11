@@ -1,4 +1,5 @@
 // How the customer panel presents an order (spec 7). Pure — tested in customer-view.test.ts.
+import { bookingUnitLabel, SERVICE_TYPE_LABEL, serviceTypeOf } from "./service-type";
 import { ORDER_STATUS_LABEL } from "./status";
 
 /** Customer-facing wording where the admin label is too technical. */
@@ -87,4 +88,20 @@ export function routeSummary(legs: { leg_index: number; pickup_city: string; del
   const from = sorted[0].pickup_city;
   const to = sorted[sorted.length - 1].delivery_city;
   return sorted.length > 1 ? `${from} → ${to} (con deposito)` : `${from} → ${to}`;
+}
+
+/**
+ * Title of an order card / page (D151): the route for transport, "Facchinaggio · Firenze" for porters only,
+ * "Deposito · Box M" for storage only. Orders without legs never fall back to "—" when their job or booking is there.
+ */
+export function orderTitle(o: {
+  service_type?: string | null;
+  order_legs: { leg_index: number; pickup_city: string; delivery_city: string }[];
+  order_porter_jobs?: { city: string } | null;
+  warehouse_bookings?: { unit: string; box_code: string | null; pallets: number | null } | null;
+}): string {
+  const type = serviceTypeOf(o.service_type);
+  if (type === "porters") return o.order_porter_jobs ? `${SERVICE_TYPE_LABEL.porters} · ${o.order_porter_jobs.city}` : SERVICE_TYPE_LABEL.porters;
+  if (type === "storage") return o.warehouse_bookings ? `${SERVICE_TYPE_LABEL.storage} · ${bookingUnitLabel(o.warehouse_bookings)}` : SERVICE_TYPE_LABEL.storage;
+  return routeSummary(o.order_legs);
 }

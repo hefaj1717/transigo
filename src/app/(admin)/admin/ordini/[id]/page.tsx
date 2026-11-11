@@ -14,6 +14,10 @@ import { ADMIN_ORDER_PATHS, HANDOVER_BADGE, handoverKind, isHandoverPending, NEX
 import { loadCandidates, type Candidate } from "@/lib/orders/dispatch-server";
 import { loadAdminExecution } from "@/lib/orders/execution-read";
 import { ORDER_STATUS_LABEL, PAYMENT_STATE_LABEL, paymentState } from "@/lib/orders/status";
+import {
+  bookingDays, bookingUnitLabel, formatDateOnly, SERVICE_TYPE_LABEL, serviceTypeOf, STORAGE_BOOKING_STATUS_LABEL, STORAGE_INTAKE_LABEL,
+  STORAGE_OUTBOUND_LABEL, type ServiceType,
+} from "@/lib/orders/service-type";
 import { formatCents } from "@/lib/pricing/money";
 import { createClient } from "@/lib/supabase/server";
 import { advanceOrderAction, assignHandoverAction, assignJobAction, unassignJobAction } from "../actions";
@@ -26,6 +30,8 @@ export const metadata = { title: "Ordine – Transigo" };
 // One order for the admin (D122, D123): route, goods, contacts, customer price, carrier amount, payment, history,
 // and dispatch — Assegna (candidates by the D120 rules), Rimuovi padroncino (reason code), next status — plus the
 // job execution (steps, photos, POD, porter time, "Annulla ultimo passo", "Consenti inizio anticipato", internal notes).
+// Facchinaggio and Deposito orders (D151) have no legs: their job / booking replaces "Percorso"; they are not
+// dispatched from here yet (porters: step 6 of the three-services plan; storage: never to a carrier).
 // Reads with the admin's session (RLS; the status history through admin_order_status_history, D128); candidates through the service role after the session check.
 export default function Page({ params }: PageProps<"/admin/ordini/[id]">) {
   return (
@@ -43,12 +49,22 @@ type Leg = {
   early_start_allowed_at: string | null; porter_overtime_grace_minutes: number | null;
   order_leg_carrier_terms: { carrier_amount_cents: number } | null;
 };
+type PorterJob = {
+  address: string; city: string; province: string; window_start: string; window_end: string; floor: number; has_elevator: boolean;
+  persons: number; requested_hours: number; billed_hours: number; is_urgent: boolean; worked_minutes: number | null;
+  order_porter_carrier_terms: { carrier_amount_cents: number } | null;
+};
+type Booking = {
+  unit: string; box_code: string | null; pallets: number | null; start_date: string; end_date: string; payment_plan: string;
+  intake: string; outbound: string; status: string; warehouses: { name: string; address: string } | null;
+};
 type OrderDetail = {
-  id: string; order_number: string; status: string; created_at: string; payment_due_at: string; customer_id: string; paid_at: string | null;
+  id: string; order_number: string; service_type: string; status: string; created_at: string; payment_due_at: string; customer_id: string; paid_at: string | null;
   pickup_window_start: string; goods_description: string; items_count: number | null; weight_kg: number | null;
   largest_item_length_cm: number | null; largest_item_width_cm: number | null; largest_item_height_cm: number | null;
   pallets_count: number | null; packing_items_count: number; storage_type: string | null; storage_days: number | null;
-  pickup_contact_name: string; pickup_contact_phone: string; delivery_contact_name: string; delivery_contact_phone: string;
+  // transport: both contacts; porters: on-site contact in pickup_*; storage: none (orders_service_fields_check)
+  pickup_contact_name: string | null; pickup_contact_phone: string | null; delivery_contact_name: string | null; delivery_contact_phone: string | null;
   customer_notes: string | null; carrier_id: string | null; assigned_at: string | null; picked_up_at: string | null;
   in_transit_at: string | null; delivered_at: string | null; delivered_without_pod: boolean;
   handover_required_at: string | null; handover_leg_index: number | null;
@@ -57,6 +73,8 @@ type OrderDetail = {
   carrier_vehicles: { plate: string; vehicle_types: { name_it: string } | null } | null;
   customers: { customer_type: string; profiles: { first_name: string | null; last_name: string | null; email: string; phone: string | null } | null } | null;
   order_legs: Leg[];
+  order_porter_jobs: PorterJob | null;
+  warehouse_bookings: Booking | null;
   order_charges: { total_cents: number; subtotal_cents: number; vat_cents: number; refunded_cents: number; cancellation_fee_cents: number | null } | null;
   order_lines: { sort_order: number; label_it: string; line_type: string; gross_cents: number }[];
   cancellation_requested_at: string | null; cancellation_reason: string | null;
@@ -68,13 +86,15 @@ type OrderDetail = {
 type HistoryRow = { id: number; from_status: string | null; to_status: string; source: string; changed_by: string | null; created_at: string };
 
 const SELECT = [
-  "id, order_number, status, created_at, payment_due_at, customer_id, paid_at, pickup_window_start, goods_description, items_count, weight_kg",
+  "id, order_number, service_type, status, created_at, payment_due_at, customer_id, paid_at, pickup_window_start, goods_description, items_count, weight_kg",
   "largest_item_length_cm, largest_item_width_cm, largest_item_height_cm, pallets_count, packing_items_count, storage_type, storage_days",
   "pickup_contact_name, pickup_contact_phone, delivery_contact_name, delivery_contact_phone, customer_notes",
   "carrier_id, assigned_at, picked_up_at, in_transit_at, delivered_at, delivered_without_pod, handover_required_at, handover_leg_index",
   "vehicle_types(name_it), carriers(company_name), carrier_vehicles(plate, vehicle_types(name_it))",
   "customers(customer_type, profiles(first_name, last_name, email, phone))",
   "order_legs(leg_index, pickup_address, delivery_address, pickup_window_start, pickup_window_end, distance_m, duration_s, pickup_floor, pickup_has_elevator, delivery_floor, delivery_has_elevator, is_urgent, porters_count, porters_included_hours, pickup_warehouse_id, delivery_warehouse_id, early_start_allowed_at, porter_overtime_grace_minutes, order_leg_carrier_terms(carrier_amount_cents))",
+  "order_porter_jobs(address, city, province, window_start, window_end, floor, has_elevator, persons, requested_hours, billed_hours, is_urgent, worked_minutes, order_porter_carrier_terms(carrier_amount_cents))",
+  "warehouse_bookings(unit, box_code, pallets, start_date, end_date, payment_plan, intake, outbound, status, warehouses(name, address))",
   "order_charges(total_cents, subtotal_cents, vat_cents, refunded_cents, cancellation_fee_cents)",
   "order_lines(sort_order, label_it, line_type, gross_cents)",
   "cancellation_requested_at, cancellation_reason",
@@ -109,16 +129,19 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
   if (error) throw new Error(`order unavailable: ${error.code}`);
   if (!o) notFound();
 
+  const type = serviceTypeOf(o.service_type);
   const legs = [...o.order_legs].sort((a, b) => a.leg_index - b.leg_index);
   const lines = [...o.order_lines].sort((a, b) => a.sort_order - b.sort_order);
   // The history with changed_by only through admin_order_status_history (D128: no session reads that column).
   const { data: historyRows, error: historyError } = await db.rpc("admin_order_status_history", { p_order_id: o.id });
   if (historyError) throw new Error(`order history unavailable: ${historyError.code}`);
   const history = [...((historyRows ?? []) as HistoryRow[])].sort((a, b) => a.id - b.id);
-  // Carrier terms hang off the legs (foreign key to order_legs, not to orders).
-  const carrierAmount = legs.reduce((sum, l) => sum + (l.order_leg_carrier_terms?.carrier_amount_cents ?? 0), 0);
+  // Carrier terms hang off the legs / the porter job (foreign keys to order_legs / order_porter_jobs, not to orders).
+  const carrierAmount = legs.reduce((sum, l) => sum + (l.order_leg_carrier_terms?.carrier_amount_cents ?? 0), 0)
+    + (o.order_porter_jobs?.order_porter_carrier_terms?.carrier_amount_cents ?? 0);
   const pay = paymentState({ ...o, refunded_cents: o.order_charges?.refunded_cents, total_cents: o.order_charges?.total_cents }, new Date());
-  const assignable = (o.status === "paid" && !o.carrier_id) || isHandoverPending(o);
+  // Only transport orders have candidates today (admin_job_candidates needs a vehicle type).
+  const assignable = type === "transport" && ((o.status === "paid" && !o.carrier_id) || isHandoverPending(o));
   const [candidates, exec, settingsRes, docsRes, techRes] = await Promise.all([
     assignable ? loadCandidates(deps, o.id) : Promise.resolve([] as Candidate[]),
     loadAdminExecution(db, { id: o.id, order_legs: legs }),
@@ -151,6 +174,7 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
       <p className="mb-4 text-sm"><Link href={ADMIN_ORDER_PATHS.list} className="text-blue-700 hover:underline">← Ordini</Link></p>
 
       <div className="flex flex-wrap items-center gap-2">
+        <span className={`rounded px-2 py-0.5 text-sm ${type === "transport" ? "bg-zinc-100 text-zinc-700" : "bg-violet-100 text-violet-900"}`}>{SERVICE_TYPE_LABEL[type]}</span>
         <span className="rounded bg-zinc-100 px-2 py-0.5 text-sm font-medium text-zinc-900">{ORDER_STATUS_LABEL[o.status] ?? o.status}</span>
         <span className="text-sm text-zinc-600">Pagamento: {PAYMENT_STATE_LABEL[pay]}{o.paid_at ? ` (${rome(o.paid_at)})` : ""}</span>
         {o.delivered_without_pod ? (
@@ -169,7 +193,7 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
         </ul>
       ) : null}
 
-      <Dispatch o={o} legs={legs} steps={exec.steps.map((st) => ({ leg_index: st.legIndex, step: st.step, reverted_at: st.revertedAt }))} candidates={candidates} />
+      <Dispatch o={o} type={type} legs={legs} steps={exec.steps.map((st) => ({ leg_index: st.legIndex, step: st.step, reverted_at: st.revertedAt }))} candidates={candidates} />
 
       <Money d={{
         orderId: o.id, status: o.status, pickupWindowStart: o.pickup_window_start, totalCents: o.order_charges?.total_cents ?? 0,
@@ -191,32 +215,39 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
 
       <Execution orderId={o.id} status={o.status} legs={legs} exec={exec} actorName={actorName} />
 
-      <section className={section} aria-labelledby="route">
-        <h2 id="route" className={h2}>Percorso</h2>
-        <ol className="space-y-3">
-          {legs.map((l) => (
-            <li key={l.leg_index} className="rounded-md border border-zinc-200 p-3 text-sm">
-              {legs.length > 1 ? <p className="mb-1 text-xs font-medium uppercase text-zinc-500">Tratta {l.leg_index + 1}</p> : null}
-              <p><span className="text-zinc-500">Ritiro:</span> {l.pickup_address} <span className="text-zinc-500">({floor(l.pickup_floor, l.pickup_has_elevator)})</span></p>
-              <p><span className="text-zinc-500">Consegna:</span> {l.delivery_address} <span className="text-zinc-500">({floor(l.delivery_floor, l.delivery_has_elevator)})</span></p>
-              <p className="mt-1 text-zinc-700">
-                {rome(l.pickup_window_start)}–{time(l.pickup_window_end)} · {km(l.distance_m)}{duration(l.duration_s) ? ` · ${duration(l.duration_s)}` : ""}
-                {l.is_urgent ? " · urgente" : ""}
-                {l.porters_count ? ` · ${l.porters_count} facchini, ${l.porters_included_hours} h` : ""}
-              </p>
-            </li>
-          ))}
-        </ol>
-        <p className="mt-2 text-sm text-zinc-700"><span className="text-zinc-500">Veicolo richiesto:</span> {o.vehicle_types?.name_it ?? "—"}</p>
-      </section>
+      {o.order_porter_jobs ? <PorterJobSection job={o.order_porter_jobs} /> : null}
+      {o.warehouse_bookings ? <BookingSection b={o.warehouse_bookings} /> : null}
+
+      {legs.length || type === "transport" ? (
+        <section className={section} aria-labelledby="route">
+          <h2 id="route" className={h2}>Percorso</h2>
+          <ol className="space-y-3">
+            {legs.map((l) => (
+              <li key={l.leg_index} className="rounded-md border border-zinc-200 p-3 text-sm">
+                {legs.length > 1 ? <p className="mb-1 text-xs font-medium uppercase text-zinc-500">Tratta {l.leg_index + 1}</p> : null}
+                <p><span className="text-zinc-500">Ritiro:</span> {l.pickup_address} <span className="text-zinc-500">({floor(l.pickup_floor, l.pickup_has_elevator)})</span></p>
+                <p><span className="text-zinc-500">Consegna:</span> {l.delivery_address} <span className="text-zinc-500">({floor(l.delivery_floor, l.delivery_has_elevator)})</span></p>
+                <p className="mt-1 text-zinc-700">
+                  {rome(l.pickup_window_start)}–{time(l.pickup_window_end)} · {km(l.distance_m)}{duration(l.duration_s) ? ` · ${duration(l.duration_s)}` : ""}
+                  {l.is_urgent ? " · urgente" : ""}
+                  {l.porters_count ? ` · ${l.porters_count} facchini, ${l.porters_included_hours} h` : ""}
+                </p>
+              </li>
+            ))}
+          </ol>
+          <p className="mt-2 text-sm text-zinc-700"><span className="text-zinc-500">Veicolo richiesto:</span> {o.vehicle_types?.name_it ?? "—"}</p>
+        </section>
+      ) : null}
 
       <section className={section} aria-labelledby="goods">
         <h2 id="goods" className={h2}>Merce e contatti</h2>
         <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
           <Row label="Merce"><span className="whitespace-pre-line">{o.goods_description}</span></Row>
           <Row label="Dettagli">{goods || "—"}</Row>
-          <Row label="Ritiro">{o.pickup_contact_name} · {o.pickup_contact_phone}</Row>
-          <Row label="Consegna">{o.delivery_contact_name} · {o.delivery_contact_phone}</Row>
+          {o.pickup_contact_name ? (
+            <Row label={type === "porters" ? "Contatto sul posto" : "Ritiro"}>{o.pickup_contact_name} · {o.pickup_contact_phone}</Row>
+          ) : null}
+          {o.delivery_contact_name ? <Row label="Consegna">{o.delivery_contact_name} · {o.delivery_contact_phone}</Row> : null}
           <Row label="Note cliente"><span className="whitespace-pre-line">{o.customer_notes || "—"}</span></Row>
           <Row label="Cliente">
             <Link href={ADMIN_CUSTOMER_PATHS.detail(o.customer_id)} className="text-blue-700 hover:underline">
@@ -273,11 +304,55 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+function PorterJobSection({ job }: { job: PorterJob }) {
+  return (
+    <section className={section} aria-labelledby="porters">
+      <h2 id="porters" className={h2}>Facchinaggio</h2>
+      <div className="rounded-md border border-zinc-200 p-3 text-sm">
+        <p><span className="text-zinc-500">Indirizzo:</span> {job.address} <span className="text-zinc-500">({floor(job.floor, job.has_elevator)})</span></p>
+        <p className="mt-1 text-zinc-700">
+          {rome(job.window_start)}–{time(job.window_end)}{job.is_urgent ? " · urgente" : ""}
+          {` · ${job.persons} facchini, ${job.billed_hours} h`}
+          {job.billed_hours > job.requested_hours ? ` (richieste ${job.requested_hours} h, minimo del listino)` : ""}
+        </p>
+        {job.worked_minutes != null ? <p className="mt-1 text-zinc-700">Tempo lavorato: {Math.floor(job.worked_minutes / 60)} h {job.worked_minutes % 60} min</p> : null}
+      </div>
+    </section>
+  );
+}
+
+function BookingSection({ b }: { b: Booking }) {
+  return (
+    <section className={section} aria-labelledby="storage">
+      <h2 id="storage" className={h2}>Deposito</h2>
+      <dl className="grid gap-x-6 gap-y-1 rounded-md border border-zinc-200 p-3 text-sm sm:grid-cols-2">
+        <Row label="Magazzino">{b.warehouses?.name ?? "—"}</Row>
+        <Row label="Spazio">{bookingUnitLabel(b)}</Row>
+        <Row label="Periodo">{formatDateOnly(b.start_date)} – {formatDateOnly(b.end_date)} ({bookingDays(b.start_date, b.end_date)} giorni)</Row>
+        <Row label="Stato">{STORAGE_BOOKING_STATUS_LABEL[b.status] ?? b.status}</Row>
+        <Row label="Arrivo merce">{STORAGE_INTAKE_LABEL[b.intake] ?? b.intake}</Row>
+        <Row label="Uscita merce">{STORAGE_OUTBOUND_LABEL[b.outbound] ?? b.outbound}</Row>
+        <Row label="Pagamento">{b.payment_plan === "monthly" ? "Mensile" : "Tutto subito"}</Row>
+      </dl>
+    </section>
+  );
+}
+
 type StepRef = { leg_index: number; step: string; reverted_at: string | null };
 type LegRef = OrderDetail["order_legs"][number];
 
-function Dispatch({ o, legs, steps, candidates }: { o: OrderDetail; legs: LegRef[]; steps: StepRef[]; candidates: Candidate[] }) {
+function Dispatch({ o, type, legs, steps, candidates }: { o: OrderDetail; type: ServiceType; legs: LegRef[]; steps: StepRef[]; candidates: Candidate[] }) {
   const next = NEXT_STATUS[o.status];
+  // Deposito is never dispatched to a carrier (D152); Facchinaggio to carriers offering porters — step 6.
+  if (type === "storage") return null;
+  if (type === "porters" && !o.carrier_id) {
+    return o.status === "paid" ? (
+      <section className={section} aria-labelledby="dispatch">
+        <h2 id="dispatch" className={h2}>Assegna facchini</h2>
+        <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-900">L&apos;assegnazione del facchinaggio ai padroncini non è ancora disponibile.</p>
+      </section>
+    ) : null;
+  }
   const windowPassed = new Date(o.pickup_window_start) <= new Date();
   // from leg 1 "Carico completato" (status picked_up) on, release_job refuses — only the admin removes the carrier;
   // the order then never goes back to the list (D130, D136): "da gestire", or refused when everything is unloaded

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CUSTOMER_STATUS_LABEL, orderGroup, progressSteps, routeSummary, statusTone } from "./customer-view";
+import { CUSTOMER_STATUS_LABEL, orderGroup, orderTitle, progressSteps, routeSummary, statusTone } from "./customer-view";
 import { ORDER_STATUS_LABEL } from "./status";
 
 const base = { paid_at: "2026-11-09T08:00:00Z", assigned_at: null, picked_up_at: null, in_transit_at: null, delivered_at: null };
@@ -55,5 +55,22 @@ describe("routeSummary", () => {
       { leg_index: 0, pickup_city: "Como", delivery_city: "Milano" },
     ])).toBe("Como → Bergamo (con deposito)");
     expect(routeSummary([])).toBe("—");
+  });
+});
+
+describe("orderTitle (D151)", () => {
+  const leg = { leg_index: 0, pickup_city: "Milano", delivery_city: "Torino" };
+  it("transport: the route (also for orders without service_type, before D151)", () => {
+    expect(orderTitle({ service_type: "transport", order_legs: [leg] })).toBe("Milano → Torino");
+    expect(orderTitle({ order_legs: [leg] })).toBe("Milano → Torino");
+  });
+  it("porters and storage have no legs: the city of the job / the booked space", () => {
+    expect(orderTitle({ service_type: "porters", order_legs: [], order_porter_jobs: { city: "Firenze" } })).toBe("Facchinaggio · Firenze");
+    expect(orderTitle({ service_type: "storage", order_legs: [], warehouse_bookings: { unit: "box", box_code: "m", pallets: null } })).toBe("Deposito · Box M");
+    expect(orderTitle({ service_type: "storage", order_legs: [], warehouse_bookings: { unit: "pallet", box_code: null, pallets: 4 } })).toBe("Deposito · 4 pallet");
+  });
+  it("never crashes without the job or the booking", () => {
+    expect(orderTitle({ service_type: "porters", order_legs: [], order_porter_jobs: null })).toBe("Facchinaggio");
+    expect(orderTitle({ service_type: "storage", order_legs: [] })).toBe("Deposito");
   });
 });
