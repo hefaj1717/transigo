@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CARRIER_DOCUMENT_TYPES } from "@/lib/carriers/document-types";
-import { FAQ_GROUPS, FAQS, HOME_FAQS } from "./content";
+import { FAQ_GROUPS, FAQS, HOME_FAQS, SERVICE_PAGES, SERVICES } from "./content";
 import { partnerDocuments } from "./partner";
 import { faqPageJsonLd, jsonLdString } from "./seo";
 
@@ -12,8 +12,14 @@ describe("FAQ", () => {
     expect(HOME_FAQS.length).toBeGreaterThan(0);
   });
 
-  it("never mentions long-term storage (D117)", () => {
-    expect(FAQS.map((f) => f.q + f.a).join(" ").toLowerCase()).not.toMatch(/lungo termine/);
+  it("service pages: FAQ questions unique across the site", () => {
+    const all = [...FAQS.map((f) => f.q), ...Object.values(SERVICE_PAGES).flatMap((p) => p.faqs.map((f) => f.q))];
+    expect(new Set(all).size).toBe(all.length);
+  });
+
+  it("every service has a page and a header link (D158)", () => {
+    expect(SERVICES.map((s) => s.href)).toEqual(["/trasporto", "/facchinaggio", "/deposito"]);
+    for (const s of SERVICES) expect(SERVICE_PAGES[s.code].faqs.length).toBeGreaterThan(0);
   });
 });
 

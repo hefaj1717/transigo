@@ -28,17 +28,21 @@ Każdy krok sprawdź na komputerze **i na telefonie** (albo w trybie urządzenia
 | A3 | Przewiń do stopki | Logo na granatowym tle, linki usług i stron, „Scrivici”; na dole **ragione sociale, sede legale, P.IVA** (z `settings.company_*`; puste pola nie są pokazywane), linki Termini / Privacy / Cookie policy. |
 | A4 | Hero: wpisz adres odbioru w Mediolanie, wybierz z listy; to samo dla dostawy; wybierz datę; „Calcola il prezzo” | Otwiera się `/prenota` na kroku „Percorso” z oboma adresami i datą (krok „Data e ora”). |
 | A5 | Hero bez wybrania adresu z listy → „Calcola il prezzo” | Komunikat pod polem „Seleziona l'indirizzo … dall'elenco”. |
-| A6 | Sekcje strony głównej | Usługi (4 karty), „Come funziona” (3 kroki), pojazdy z aktywnego cennika (bez cen), zielona sekcja partnera, 4 pytania FAQ (rozwijane), „Pronto a partire?”. |
+| A6 | Sekcje strony głównej | Usługi (3 karty tej samej wysokości), „Per privati” / „Per aziende”, „Come funziona” (3 kroki), pojazdy z aktywnego cennika (bez cen), zielona sekcja partnera, 4 pytania FAQ (rozwijane), „Pronto a partire?”. |
 
-## B. Usługi
+## B. Usługi (D151, D158, D162)
 
 | # | Krok | Oczekiwany wynik |
 |---|---|---|
-| B1 | `/servizi` | 4 karty z 3 punktami i przyciskiem „Scopri …”. |
-| B2 | `/servizi/trasporto` | „Cosa è incluso”, „Da cosa dipende il prezzo”, karty pojazdów, „Altri servizi”, przycisk „Calcola il prezzo”. |
-| B3 | `/servizi/facchinaggio` | Tabela kategorii ładunku (facchini, ore incluse) z aktywnego cennika. Cennik bez kategorii tragarzy → zamiast przycisku „Al momento questo servizio non è prenotabile online” + „Scrivici”. |
-| B4 | `/servizi/deposito-merci` | „fino a N giorni” (limit krótkiego składowania z cennika), jednostka (pallet/giorno lub giornaliera), miasto magazynu. **Nigdzie „lungo termine”** (D117). Bez aktywnego magazynu → „non è prenotabile online”. |
-| B5 | `/servizi/cokolwiek` | 404. |
+| B1 | Strona główna, zakładki w hero „Trasporto | Facchini | Deposito” (też strzałki ←/→ na klawiaturze) | Trasporto = formularz trasy; Facchini i Deposito = kalkulator z ceną „Prezzo indicativo”. Privato → kwota z IVA, Azienda → netto „+ IVA (… totale)”. |
+| B2 | Facchini: 2 osoby, 3 h, 4. piętro bez windy (cennik v14) | 268,40 € IVA inclusa (220,00 € + IVA). 1 h → liczona jako minimum, dopisek „Minimo 2 ore per facchino”. |
+| B3 | Deposito: Privato → box S, „1 mese”; Azienda → 5 pallet, 20 giorni | 73,20 € IVA inclusa; 300,00 € + IVA. Powyżej 60 dni dopisek „Oppure N rate mensili da circa …”. |
+| B4 | „Richiedi la prenotazione” w kalkulatorze | `/contatti` z zielonym „Prenotazione online in arrivo” i wiadomością wypełnioną wybranymi wartościami (do kroków 6–7 planu). Ręcznie zmieniony adres (np. `persone=9`, `box=<x>`) → zwykły formularz bez wypełnienia. |
+| B5 | Menu „Servizi” w nagłówku (komputer: klik, Escape, klik obok; telefon: sekcja „Servizi” w menu) | 3 pozycje: Trasporto, Facchinaggio, Deposito. |
+| B6 | `/trasporto`, `/facchinaggio`, `/deposito` | „A cosa serve”, „Cosa è incluso”, „Da cosa dipende il prezzo”, „Prezzi indicativi” z aktywnego cennika (netto i z IVA; facchinaggio i deposito z kalkulatorem), FAQ, „Altri servizi”. Trasporto: pojazdy i „Servizi aggiuntivi” (Facchini, Imballaggio). Usługa niedostępna w cenniku → „non è prenotabile online” + „Scrivici”, bez tabeli. |
+| B7 | Źródło strony usługi | `application/ld+json` z `FAQPage`; w HTML nigdzie `carrier`, `share`, `overtime`. |
+| B8 | `/servizi`, `/servizi/trasporto`, `/servizi/facchinaggio`, `/servizi/imballaggio`, `/servizi/deposito-merci`, `/servizi/cokolwiek` | 308 → `/#servizi`, `/trasporto`, `/facchinaggio`, `/trasporto#imballaggio`, `/deposito`, `/#servizi`. |
+| B9 | Telefon (375 px) | Bez przewijania strony w bok; tabele cen przewijają się w swojej ramce. |
 
 ## C. Come funziona, FAQ, Diventa partner, Cookie
 

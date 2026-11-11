@@ -18,11 +18,14 @@ export function ContactForm({
   hidden = {},
   idPrefix = "contact",
   messagePlaceholder,
+  defaultMessage,
 }: {
   action: ContactAction;
   hidden?: Record<string, string>;
   idPrefix?: string;
   messagePlaceholder?: string;
+  /** Pre-filled message (e.g. from a home-page calculator); the values returned after an error win. */
+  defaultMessage?: string;
 }) {
   const [state, action, pending] = useActionState(serverAction, initialContactState);
 
@@ -72,7 +75,7 @@ export function ContactForm({
       </div>
       <div>
         <label htmlFor={`${idPrefix}-message`} className={label}>Messaggio <span className="text-red-600">*</span></label>
-        <textarea id={`${idPrefix}-message`} name="message" rows={6} placeholder={messagePlaceholder} maxLength={5000} defaultValue={state.values?.message} aria-invalid={!!err("message")} aria-describedby={errId("message")} className={input} />
+        <textarea id={`${idPrefix}-message`} name="message" rows={6} placeholder={messagePlaceholder} maxLength={5000} defaultValue={state.values?.message ?? defaultMessage} aria-invalid={!!err("message")} aria-describedby={errId("message")} className={input} />
         <FieldError p={idPrefix} k="message" msg={err("message")} />
       </div>
       <div>

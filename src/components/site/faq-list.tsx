@@ -1,7 +1,7 @@
 import type { Faq } from "@/lib/public/content";
 
 /** FAQ accordion without JavaScript (<details>). */
-export function FaqList({ faqs }: { faqs: Faq[] }) {
+export function FaqList({ faqs }: { faqs: Pick<Faq, "q" | "a">[] }) {
   return (
     <div className="divide-y divide-zinc-200 rounded-xl border border-zinc-200">
       {faqs.map((f) => (

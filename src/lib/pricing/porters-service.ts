@@ -15,9 +15,9 @@ import type { CustomerType, PricingConfig, PricingError, Quote, QuotePorters } f
 // as for transport porters (D68): the terms are returned with the quote and stored with the order.
 
 const HOUR_MS = 3_600_000;
-const MAX_PERSONS = 4; // D54
-const MAX_HOURS = 12;
-const MAX_FLOOR = 20; // D53
+export const PORTERS_MAX_PERSONS = 4; // D54
+export const PORTERS_MAX_HOURS = 12;
+export const PORTERS_MAX_FLOOR = 20; // D53
 
 export type PortersPriceInput = {
   customerType: CustomerType;
@@ -44,15 +44,15 @@ export function calculatePortersPrice(input: PortersPriceInput, config: PricingC
 
   if (!(input.now instanceof Date) || Number.isNaN(input.now.getTime())) return invalid("now must be a valid date");
   if (!(input.startAt instanceof Date) || Number.isNaN(input.startAt.getTime())) return invalid("startAt must be a valid date");
-  if (!isInt(input.floor, 0, MAX_FLOOR)) return invalid(`floor must be 0–${MAX_FLOOR}`);
+  if (!isInt(input.floor, 0, PORTERS_MAX_FLOOR)) return invalid(`floor must be 0–${PORTERS_MAX_FLOOR}`);
 
   const rules = enabledRules(config.rules);
   const perHour = rules.get("porter_hour")?.amountCents ?? null;
   const service = config.portersService;
   if (!service || perHour === null) return fail({ code: "service_unavailable", service: "porters" });
 
-  if (!isInt(input.persons, service.minPersons, MAX_PERSONS)) return invalid(`persons must be ${service.minPersons}–${MAX_PERSONS}`);
-  if (!isInt(input.hours, 1, MAX_HOURS)) return invalid(`hours must be 1–${MAX_HOURS}`);
+  if (!isInt(input.persons, service.minPersons, PORTERS_MAX_PERSONS)) return invalid(`persons must be ${service.minPersons}–${PORTERS_MAX_PERSONS}`);
+  if (!isInt(input.hours, 1, PORTERS_MAX_HOURS)) return invalid(`hours must be 1–${PORTERS_MAX_HOURS}`);
 
   const province = input.province.trim().toUpperCase();
   if (!config.serviceAreaProvinces.some((p) => p.toUpperCase() === province)) {

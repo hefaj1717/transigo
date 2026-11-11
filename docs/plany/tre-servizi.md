@@ -110,7 +110,7 @@ stronie głównej, każda usługa ma własną podstronę i własny kreator. Teks
 1. Decyzje D151–D158 + ten plan. ✔
 2. Silnik cenowy (sekcja 2). ✔ (2026-11-11; stawka za piętro w `PricingConfig.portersService.floorNoElevatorCents` — loader wypełni ją z reguły `porters_floor_no_elevator` w kroku 3)
 3. Migracja 1 — cennik (SQL do akceptacji) + `/admin/listini`. ✔ (2026-11-11, D161; migracje `20261111190000_pricing_services_code.sql` + `20261111190001_pricing_services.sql` lokalnie; opublikowane cenniki bez zmian — usługi dostępne po „Crea bozza” → „Pubblica”)
-4. Strona publiczna (sekcja 4).
+4. Strona publiczna (sekcja 4). ✔ (2026-11-11, D162; kalkulatory → `/contatti` do kroków 6–7 — wtedy zmienić `REQUEST_PATH` w `src/lib/public/requests.ts`)
 5. Migracja 2 — zlecenia (SQL do akceptacji) + filtr w `/admin/ordini`.
 6. Kreator Facchini → płatność → admin przypisuje → „Consegnato”.
 7. Kreator Deposito, płatność z góry (bez rat): porto io / ritiro Transigo / consegna dalej.

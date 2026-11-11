@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PageHero } from "@/components/site/page-hero";
-import { getCompanyInfo } from "@/lib/public/server";
+import { Suspense } from "react";
+import { getCompanyInfo, getPublicRates } from "@/lib/public/server";
 import { ContactForm } from "@/components/contact-form";
 import { sendContactAction } from "./actions";
+import { RequestContactForm } from "./request-form";
 
 export const metadata: Metadata = {
   title: "Contatti – Transigo",
@@ -12,15 +14,19 @@ export const metadata: Metadata = {
 
 // Contact page (spec section 5, D125): form saved through submit_contact_request (rate limit per IP),
 // notification to the team without personal data. Company contacts from settings (cached).
+// ?servizio=… from the Facchini / Deposito calculators pre-fills the message (D162); the query string is read
+// in the browser, so the page stays prerendered.
 export default async function Page() {
-  const company = await getCompanyInfo();
+  const [company, rates] = await Promise.all([getCompanyInfo(), getPublicRates()]);
   return (
     <main className="flex-1">
       <PageHero title="Contatti" lead="Hai una domanda o un trasporto particolare? Scrivici: ti rispondiamo al più presto." />
       <div className="mx-auto grid max-w-6xl gap-12 px-4 py-16 lg:grid-cols-[2fr_1fr]">
         <section aria-labelledby="form-title">
           <h2 id="form-title" className="mb-6 text-2xl font-bold text-brand-900">Scrivici</h2>
-          <ContactForm action={sendContactAction} />
+          <Suspense fallback={<ContactForm action={sendContactAction} />}>
+            <RequestContactForm rates={rates} />
+          </Suspense>
         </section>
         <aside className="space-y-6">
           <div className="rounded-xl bg-brand-50 p-6">

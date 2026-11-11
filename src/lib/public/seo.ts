@@ -6,8 +6,8 @@ export function jsonLdString(data: unknown): string {
   return JSON.stringify(data).replace(/</g, "\\u003c");
 }
 
-/** schema.org FAQPage for the FAQ page. */
-export function faqPageJsonLd(faqs: Faq[]) {
+/** schema.org FAQPage (FAQ page and service pages). */
+export function faqPageJsonLd(faqs: Pick<Faq, "q" | "a">[]) {
   return {
     "@context": "https://schema.org",
     "@type": "FAQPage",
@@ -32,11 +32,9 @@ export function isIndexable(env: Record<string, string | undefined> = process.en
 /** Public pages listed in the sitemap (account, booking and panel pages are left out). */
 export const SITEMAP_PATHS = [
   "/",
-  "/servizi",
-  "/servizi/trasporto",
-  "/servizi/facchinaggio",
-  "/servizi/imballaggio",
-  "/servizi/deposito-merci",
+  "/trasporto",
+  "/facchinaggio",
+  "/deposito",
   "/come-funziona",
   "/domande-frequenti",
   "/diventa-partner",

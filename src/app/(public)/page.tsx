@@ -1,20 +1,21 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { HOME_FAQS, HOW_IT_WORKS, SERVICES } from "@/lib/public/content";
-import { getPublicCatalog } from "@/lib/public/server";
+import { AUDIENCES, HOME_FAQS, HOW_IT_WORKS, SERVICES } from "@/lib/public/content";
+import { getPublicCatalog, getPublicRates } from "@/lib/public/server";
 import { FaqList } from "@/components/site/faq-list";
 import { Check, SectionTitle, VehicleGrid } from "@/components/site/ui";
-import { HeroForm } from "./hero-form";
+import { HeroTabs } from "./hero-tabs";
 
 export const metadata: Metadata = {
   title: "Transigo – Trasporti, facchinaggio e deposito merci con prezzo online",
   description: "Calcola subito il prezzo del tuo trasporto, prenota e paga online. Trasportatori verificati, facchinaggio, imballaggio e deposito merci.",
 };
 
-// Home page (spec section 5): hero with the mini form → wizard, services, how it works, vehicles,
-// "Diventa partner", FAQ. Everything is static or cached — the page is prerendered.
+// Home page (spec section 5, D151): hero with one tab per service (route form → wizard, Facchini and
+// Deposito calculators with public rates, D162), the three services, "Per privati" / "Per aziende", how it
+// works, vehicles, "Diventa partner", FAQ. Everything is static or cached — the page is prerendered.
 export default async function Home() {
-  const catalog = await getPublicCatalog();
+  const [catalog, rates] = await Promise.all([getPublicCatalog(), getPublicRates()]);
 
   return (
     <main className="flex-1">
@@ -23,11 +24,11 @@ export default async function Home() {
         <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-14 lg:grid-cols-2 lg:py-20">
           <div>
             <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">
-              Il tuo trasporto, <span className="text-accent-400">prezzo subito</span>.
+              Trasporto, facchini e deposito. <span className="text-accent-400">Prezzo subito</span>.
             </h1>
             <p className="mt-5 max-w-xl text-lg text-brand-100">
-              Trasporti, facchinaggio, imballaggio e deposito merci. Calcola il prezzo online, prenota in pochi minuti e
-              segui la consegna fino alla firma.
+              Sposta le tue cose, fatti aiutare dai facchini o lascia la merce nel nostro magazzino. Calcola il prezzo
+              online e prenota in pochi minuti.
             </p>
             <ul className="mt-6 space-y-2 text-brand-100">
               {["Prezzo chiaro prima di pagare", "Trasportatori verificati", "Fattura elettronica per privati e aziende"].map((t) => (
@@ -37,20 +38,40 @@ export default async function Home() {
               ))}
             </ul>
           </div>
-          <HeroForm />
+          <HeroTabs rates={rates} />
         </div>
       </section>
 
-      {/* Services */}
-      <section className="mx-auto max-w-6xl px-4 py-16">
-        <SectionTitle eyebrow="Servizi" title="Tutto quello che serve per spostare le tue cose" />
-        <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Services: three equal cards (D151) */}
+      <section id="servizi" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-16">
+        <SectionTitle eyebrow="Servizi" title="Tre servizi, una sola piattaforma" />
+        <div className="mt-8 grid auto-rows-fr gap-5 md:grid-cols-3">
           {SERVICES.map((s) => (
-            <Link key={s.code} href={`/servizi/${s.code}`} className="group rounded-xl border border-zinc-200 p-5 hover:border-brand-300 hover:shadow-md">
-              <h3 className="text-lg font-semibold text-brand-900">{s.title}</h3>
-              <p className="mt-2 text-sm text-zinc-600">{s.summary}</p>
-              <span className="mt-4 inline-block text-sm font-medium text-brand-700 group-hover:text-brand-900">Scopri di più →</span>
+            <Link key={s.code} href={s.href} className="group flex flex-col rounded-xl border border-zinc-200 p-6 hover:border-brand-300 hover:shadow-md">
+              <h3 className="text-xl font-semibold text-brand-900">{s.title}</h3>
+              <p className="mt-2 flex-1 text-zinc-600">{s.summary}</p>
+              <span className="mt-5 inline-block text-sm font-medium text-brand-700 group-hover:text-brand-900">Scopri di più →</span>
             </Link>
+          ))}
+        </div>
+      </section>
+
+      {/* Per privati / Per aziende */}
+      <section className="mx-auto max-w-6xl px-4 pb-16">
+        <div className="grid gap-5 md:grid-cols-2">
+          {AUDIENCES.map((a) => (
+            <div key={a.title} className="rounded-xl bg-brand-900 p-6 text-white sm:p-8">
+              <h2 className="text-2xl font-bold">{a.title}</h2>
+              <p className="mt-2 text-brand-100">{a.lead}</p>
+              <ul className="mt-5 space-y-3">
+                {a.points.map((t) => (
+                  <li key={t} className="flex items-start gap-3 text-brand-50">
+                    <span className="mt-0.5"><Check /></span>
+                    {t}
+                  </li>
+                ))}
+              </ul>
+            </div>
           ))}
         </div>
       </section>

@@ -12,8 +12,9 @@ type Place = HeroInput["pickup"];
 /**
  * Home-page mini form (Da / A / Data). Prepares the wizard state in localStorage (D78: route and date only)
  * and opens /prenota on its first step, where the customer adds floors and continues. No price here (D76).
+ * `embedded`: inside the home-page tabs (HeroTabs), without its own card.
  */
-export function HeroForm() {
+export function HeroForm({ embedded = false }: { embedded?: boolean }) {
   const router = useRouter();
   const [pickup, setPickup] = useState<Place>(null);
   const [delivery, setDelivery] = useState<Place>(null);
@@ -49,9 +50,9 @@ export function HeroForm() {
   }
 
   return (
-    <form onSubmit={submit} noValidate className="rounded-xl bg-white p-5 text-left shadow-xl ring-1 ring-black/5 sm:p-6">
-      <h2 className="text-lg font-semibold text-brand-900">Calcola il prezzo</h2>
-      <p className="mt-1 text-sm text-zinc-600">Gratis e senza registrazione.</p>
+    <form onSubmit={submit} noValidate className={embedded ? "text-left" : "rounded-xl bg-white p-5 text-left shadow-xl ring-1 ring-black/5 sm:p-6"}>
+      {embedded ? null : <h2 className="text-lg font-semibold text-brand-900">Calcola il prezzo</h2>}
+      <p className={embedded ? "text-sm text-zinc-600" : "mt-1 text-sm text-zinc-600"}>Prezzo esatto subito, gratis e senza registrazione.</p>
       <div className="mt-4 space-y-4">
         <AddressField id="hero-pickup" label="Da (ritiro)" value={pickup} onChange={(p) => { setPickup(p); setErrors({}); }} externalError={errors.pickup} />
         <AddressField id="hero-delivery" label="A (consegna)" value={delivery} onChange={(p) => { setDelivery(p); setErrors({}); }} externalError={errors.delivery} />

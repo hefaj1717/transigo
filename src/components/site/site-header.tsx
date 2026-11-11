@@ -2,6 +2,7 @@ import Link from "next/link";
 import { NAV_LINKS } from "@/lib/public/content";
 import { LogoLink } from "./logo";
 import { MobileMenu } from "./mobile-menu";
+import { ServicesMenu } from "./services-menu";
 
 // Public site header. Static on purpose (no session read): it is part of every prerendered public page.
 export function SiteHeader() {
@@ -10,6 +11,7 @@ export function SiteHeader() {
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4">
         <LogoLink />
         <nav aria-label="Principale" className="hidden items-center gap-6 md:flex">
+          <ServicesMenu />
           {NAV_LINKS.map((l) => (
             <Link key={l.href} href={l.href} className="text-sm font-medium text-zinc-700 hover:text-brand-800">
               {l.label}

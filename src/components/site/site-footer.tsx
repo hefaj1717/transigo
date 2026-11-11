@@ -22,7 +22,7 @@ export async function SiteFooter() {
           <ul className="mt-3 space-y-2">
             {SERVICES.map((s) => (
               <li key={s.code}>
-                <Link href={`/servizi/${s.code}`} className={link}>{s.title}</Link>
+                <Link href={s.href} className={link}>{s.title}</Link>
               </li>
             ))}
           </ul>
@@ -30,7 +30,7 @@ export async function SiteFooter() {
         <div>
           <h2 className={heading}>Transigo</h2>
           <ul className="mt-3 space-y-2">
-            {NAV_LINKS.filter((l) => l.href !== "/servizi").map((l) => (
+            {NAV_LINKS.map((l) => (
               <li key={l.href}>
                 <Link href={l.href} className={link}>{l.label}</Link>
               </li>

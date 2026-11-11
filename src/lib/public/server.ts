@@ -1,9 +1,11 @@
 import "server-only";
 import { cacheLife, cacheTag } from "next/cache";
 import { COMPANY_INFO_CACHE_TAG } from "@/lib/admin/settings";
-import { loadBookingOptions } from "@/lib/booking/server";
+import { loadActiveWarehouse, loadBookingOptions, loadFleet } from "@/lib/booking/server";
+import { loadPricingConfig, PricingConfigError } from "@/lib/pricing/load";
 import { createServiceClient } from "@/lib/supabase/service";
 import { toCompanyInfo, type CompanyInfo } from "./company";
+import { toPublicRates, type PublicRates } from "./rates";
 
 // Data for the public pages. Nothing here depends on the visitor, so it is cached ('use cache') and becomes
 // part of the prerendered pages; it is read with the service role because `settings`, `vehicle_types` and the
@@ -84,5 +86,23 @@ export async function getPublicCatalog(): Promise<PublicCatalog> {
   } catch (e) {
     console.error("[public] catalog:", e instanceof Error ? e.message : e);
     return { bookingAvailable: false, vehicles: [], portersAvailable: false, porterPackages: [], packingAvailable: false, storageAvailable: false, storageMaxDays: 0, storageBillingUnit: "pallet_day", warehouseCity: null, maxDistanceKm: 0, minLeadHours: 0 };
+  }
+}
+
+/**
+ * Customer rates of the active price list for the indicative price tables and the home-page calculators
+ * (D162). Only toPublicRates() output leaves this function — never carrier shares. null = no active price list.
+ */
+export async function getPublicRates(): Promise<PublicRates | null> {
+  "use cache";
+  cacheLife("hours");
+  try {
+    const db = createServiceClient();
+    const config = await loadPricingConfig(db);
+    const [fleet, warehouse] = await Promise.all([loadFleet(db, config), loadActiveWarehouse(db)]);
+    return toPublicRates(config, { vehicleIds: fleet.vehicles.map((v) => v.id), warehouseActive: !!warehouse });
+  } catch (e) {
+    if (!(e instanceof PricingConfigError)) console.error("[public] rates:", e instanceof Error ? e.message : e);
+    return null;
   }
 }

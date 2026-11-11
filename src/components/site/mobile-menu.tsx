@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { NAV_LINKS } from "@/lib/public/content";
+import { NAV_LINKS, SERVICES } from "@/lib/public/content";
 
 /** Phone menu (below md). Closes on navigation. */
 export function MobileMenu() {
@@ -31,7 +31,17 @@ export function MobileMenu() {
         </svg>
       </button>
       {open ? (
-        <nav id="mobile-menu" aria-label="Principale" className="absolute inset-x-0 top-16 border-b border-zinc-200 bg-white px-4 pb-4 shadow-lg">
+        <nav id="mobile-menu" aria-label="Principale" className="absolute inset-x-0 top-16 max-h-[calc(100dvh-4rem)] overflow-y-auto border-b border-zinc-200 bg-white px-4 pb-4 shadow-lg">
+          <p className="px-3 pt-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">Servizi</p>
+          <ul className="border-b border-zinc-100 pb-2">
+            {SERVICES.map((s) => (
+              <li key={s.code}>
+                <Link href={s.href} className={`${item} pl-6`}>
+                  {s.title}
+                </Link>
+              </li>
+            ))}
+          </ul>
           {NAV_LINKS.map((l) => (
             <Link key={l.href} href={l.href} className={item}>
               {l.label}

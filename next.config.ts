@@ -6,6 +6,17 @@ const nextConfig: NextConfig = {
   // Phone on the same Wi-Fi (docs/testy-reczne/realizacja-kursu.md): DEV_LAN_HOST=192.168.x.y npm run dev -- -H 0.0.0.0
   ...(process.env.DEV_LAN_HOST ? { allowedDevOrigins: [process.env.DEV_LAN_HOST] } : {}),
   cacheComponents: true,
+  // D158: the service pages moved from /servizi/… (permanent = 308). Imballaggio is an extra of the transport.
+  async redirects() {
+    return [
+      { source: "/servizi", destination: "/#servizi", permanent: true },
+      { source: "/servizi/trasporto", destination: "/trasporto", permanent: true },
+      { source: "/servizi/facchinaggio", destination: "/facchinaggio", permanent: true },
+      { source: "/servizi/imballaggio", destination: "/trasporto#imballaggio", permanent: true },
+      { source: "/servizi/deposito-merci", destination: "/deposito", permanent: true },
+      { source: "/servizi/:rest*", destination: "/#servizi", permanent: true },
+    ];
+  },
   async headers() {
     return [
       {
