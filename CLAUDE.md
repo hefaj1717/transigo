@@ -126,6 +126,15 @@ Priorytet właściciela: najpierw cała strona (publiczna + panel klienta + pane
 - Do decyzji: mapa trackingu u klienta — odłożyć z PWA albo symulacja przejazdu tylko na demo.
 - Odłożone razem z PWA: Stripe Connect i wypłaty (też ekran wypłat admina), faktura przewoźnika, GPS, „Segnala un problema”, SMS.
 
+## W toku: trzy równorzędne usługi (plan zatwierdzony 2026-11-11)
+
+Plan `docs/plany/tre-servizi.md`, decyzje D151–D158. Trasporto, Facchinaggio i Deposito równorzędne (strona główna z zakładkami w hero, 3 podstrony, 3 kreatory). Facchinaggio wykonują przewoźnicy z `offers_porters` (D152). Łańcuch z magazynem = osobne powiązane zlecenia, jedna płatność i jedna faktura — **zastępuje model B (D117)**. Deposito na okres stały, boxy dla privati, raty miesięczne > 2 mies., „Prolunga” przy wolnym miejscu (D154–D156).
+
+- [x] Krok 1: decyzje i plan.
+- [ ] Krok 2: silnik cenowy (facchinaggio, boxy, raty) + testy.
+- [ ] Krok 3: migracja 1 — cennik (SQL do akceptacji) + `/admin/listini`.
+- [ ] Kroki 4–11: wg planu (strona publiczna, migracja 2 — zlecenia, kreatory Facchini / Deposito / Trasporto, panele, raty i „Prolunga”, seed i staging).
+
 ## Odłożone: PWA przewoźnika (po pełnym demo strony, decyzja właściciela 2026-11-11)
 
 Decyzje właściciela (D117–D121 w spec):
@@ -269,8 +278,8 @@ Stan:
   - **TODO (D122):** zlecenie odpięte przez admina („Rimuovi padroncino”) z **minionym oknem odbioru** wraca do `paid`, ale nikt go nie przyjmie (`too_late`) — potrzebna zmiana terminu albo zwrot (audit ma `pickup_window_passed`). Do tego czasu admin obsługuje ręcznie.
   - Dopłata za nadgodziny tragarzy: link od admina, osobna e-faktura, kwota przewoźnika do wypłaty (D69). Przed etapem rozstrzygnąć otwartą kwestię D69 (wypłata, gdy klient nie zapłaci dopłaty).
 - [ ] 7. Magazyn i dashboard admina
-  - **TWARDE TODO (przed Etapem 7 i przed startem produkcyjnym, D117):** model B — każdy odcinek zlecenia z magazynem to osobny kurs (osobny przewoźnik, statusy per odcinek) z **osobną wypłatą per odcinek**. Do tego czasu kreator **nie oferuje** „stoccaggio lungo termine” (`long_term`).
+  - ~~**TWARDE TODO (D117)**~~ — zastąpione przez D153 (powiązane zlecenia, plan `docs/plany/tre-servizi.md`). Dawny opis: model B — każdy odcinek zlecenia z magazynem to osobny kurs (osobny przewoźnik, statusy per odcinek) z **osobną wypłatą per odcinek**. Do tego czasu kreator **nie oferuje** „stoccaggio lungo termine” (`long_term`).
 - [ ] 8. Testy end-to-end, dokumenty prawne, wdrożenie
   - Na stagingu „Confirm email” w Supabase Auth jest **wyłączone**; na produkcji musi być **włączone**, z własnym SMTP (Resend, D79).
-  - **Przed startem:** model B kursów per odcinek (D117, TODO w Etapie 7) — warunek startu.
+  - **Przed startem:** łańcuch z magazynem jako powiązane zlecenia (D153, zastępuje model B z D117).
   - **Przed startem** założyć osobny projekt Supabase na produkcję; obecny `bacabuzzevwwdxrswbnc` zostaje stagingiem (testy ręczne). Testy RLS działają lokalnie (D64).
