@@ -27,7 +27,8 @@
 //       22 warehouse like 21, no porters                  → admin: "Rimuovi padroncino" → "Da gestire" (D136)
 //   * admin money decisions (D140–D142): 23 "Annullamento in revisione" (assigned to Ferri, the customer asked to
 //     cancel), 24 "Pagamento da verificare" (Stripe received 5 € more), 25 paid with a partial refund that failed
-//     ("Riprova"; on staging the failed row has a fake Stripe id, the retry makes a real test refund).
+//     ("Riprova"; on staging the failed row has a fake Stripe id, the retry makes a real test refund); an open claim
+//     on 20 (admin «Reclami»).
 // Delivered orders and the blocked-Rinuncia job are moved into the past with plain SQL in the local container.
 import { randomUUID } from "node:crypto";
 import {
@@ -276,6 +277,8 @@ ${stepTimesSql(j22.id, { "0:arrived_pickup": a22(5), "0:loaded": a22(30), "0:dep
 
 // 20: POD after the shifted steps, so complete_delivery stores the real porter minutes; then the delivery to yesterday.
 await completeDelivery(ferri, j20.id, "Anna Conti", POS.monza);
+// 20: an open claim by the customer (D138) → admin «Reclami» → «Chiudi il reclamo».
+await ok(customer.client.rpc("open_claim", { p_order_id: j20.id, p_category: "damaged_goods", p_description: "Una delle scatole di libri è arrivata bagnata e con il fondo rotto." }).single());
 if (LOCAL) localSql(`set local session_replication_role = replica;
 update public.delivery_proofs set signed_at = ${a20(140)} where order_id = ${sqlUuid(j20.id)};
 update public.orders set delivered_at = ${a20(140)} where id = ${sqlUuid(j20.id)};

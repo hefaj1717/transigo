@@ -7,6 +7,8 @@ import { ActionForm } from "@/components/admin/action-form";
 import { AdminShell, inputClass } from "@/components/admin/admin-nav";
 import { adminDeps } from "@/lib/admin/deps";
 import { ADMIN_CARRIER_PATHS } from "@/lib/carriers/admin";
+import { ADMIN_CLAIM_PATHS } from "@/lib/claims/admin";
+import { CLAIM_CATEGORY_LABEL, CLAIM_STATUS_LABEL, type ClaimCategory } from "@/lib/claims/claims";
 import { ADMIN_ORDER_PATHS, HANDOVER_BADGE, handoverKind, isHandoverPending, NEXT_STATUS, removalOutcome, UNASSIGN_REASONS } from "@/lib/orders/dispatch";
 import { loadCandidates, type Candidate } from "@/lib/orders/dispatch-server";
 import { loadAdminExecution } from "@/lib/orders/execution-read";
@@ -59,6 +61,7 @@ type OrderDetail = {
   payments: MoneyPayment[];
   refunds: MoneyRefund[];
   order_cancellation_decisions: { refund_cents: number; carrier_cents: number; decided_at: string } | null;
+  claims: { id: string; status: "open" | "closed"; category: ClaimCategory; created_at: string }[];
 };
 type HistoryRow = { id: number; from_status: string | null; to_status: string; source: string; changed_by: string | null; created_at: string };
 
@@ -76,6 +79,7 @@ const SELECT = [
   "payments(id, status, amount_cents, amount_received_cents, review_reason, reviewed_at, review_outcome, paid_at, created_at)",
   "refunds(id, payment_id, kind, amount_cents, reason, status, stripe_refund_id, retry_of, created_at)",
   "order_cancellation_decisions(refund_cents, carrier_cents, decided_at)",
+  "claims(id, status, category, created_at)",
 ].join(", ");
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -148,6 +152,17 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
           <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-900">Consegnato senza firma e foto — nessun pagamento automatico al padroncino</span>
         ) : null}
       </div>
+
+      {o.claims.length ? (
+        <ul className="mt-3 space-y-1 text-sm">
+          {[...o.claims].sort((a, b) => a.created_at.localeCompare(b.created_at)).map((c) => (
+            <li key={c.id} className={`rounded-md px-3 py-2 ${c.status === "open" ? "bg-amber-50 text-amber-950" : "bg-zinc-50 text-zinc-700"}`}>
+              Reclamo {CLAIM_STATUS_LABEL[c.status].toLowerCase()}: {CLAIM_CATEGORY_LABEL[c.category]} · {rome(c.created_at)} ·{" "}
+              <Link href={ADMIN_CLAIM_PATHS.detail(c.id)} className="text-blue-700 hover:underline">apri</Link>
+            </li>
+          ))}
+        </ul>
+      ) : null}
 
       <Dispatch o={o} legs={legs} steps={exec.steps.map((st) => ({ leg_index: st.legIndex, step: st.step, reverted_at: st.revertedAt }))} candidates={candidates} />
 

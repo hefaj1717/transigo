@@ -5,6 +5,7 @@ import { SignOutButton } from "@/components/sign-out-button";
 const LINKS = [
   { href: "/admin", label: "Dashboard" },
   { href: "/admin/ordini", label: "Ordini" },
+  { href: "/admin/reclami", label: "Reclami" },
   { href: "/admin/padroncini", label: "Padroncini" },
   { href: "/admin/richieste", label: "Richieste" },
   { href: "/admin/email", label: "E-mail" },

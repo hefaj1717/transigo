@@ -19,3 +19,12 @@ Lokalnie płatności są sztuczne (`pi_demo_…`), więc każdy zwrot zostaje �
    reszta w całości → „Rimborsato”. Przy kursie w toku (zlecenie 4) zwrot całości → „rimuovi prima il padroncino”.
 5. Na stagingu (po zgodzie na migrację i seed): to samo z prawdziwymi zwrotami testowymi — w Stripe Dashboard widać
    refund z `metadata.refund_id`, wiersz przechodzi w „Rimborsato” (od razu albo przez webhook `refund.updated`).
+
+## B. Reklamacje (D138)
+
+1. Menu „Reclami” → zakładka „Aperti”: reklamacja do zlecenia 20 (Merce danneggiata), wiek „oggi”, klient.
+2. Szczegóły: opis, zdjęcia (jeśli klient dodał — `/cliente/reclami` → „Aggiungi foto”; podgląd przez podpisany URL),
+   zlecenie z linkiem, przewoźnik, kontakt do klienta. `/admin/ordini/[id]` zlecenia 20 pokazuje „Reclamo aperto … apri”.
+3. „Chiudi il reclamo” bez tekstu → przeglądarka wymaga pola; z tekstem → „Chiuso”, odpowiedź z datą i adminem.
+   `/admin/email`: `claim_closed` do klienta. Klient w „I miei reclami” widzi „Chiuso” i odpowiedź.
+4. Druga karta z tym samym reklamacją otwartą wcześniej → „Chiudi” → „Il reclamo era già chiuso.”
