@@ -423,7 +423,7 @@ describe("visibility", () => {
   });
 });
 
-describe("carrier dispatch: porters and storage stay out until step 6", () => {
+describe("vehicle dispatch (transport functions) never takes porters or storage", () => {
   it("not in list_available_jobs or admin_job_candidates; accept_job and admin_assign_job refuse them", async () => {
     const porters = (await created(portersPayload({ persons: 2 }))).id;
     await pay(porters);
