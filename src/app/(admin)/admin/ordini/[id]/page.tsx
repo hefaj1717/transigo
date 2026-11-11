@@ -8,6 +8,7 @@ import { AdminShell, inputClass } from "@/components/admin/admin-nav";
 import { adminDeps } from "@/lib/admin/deps";
 import { ADMIN_CARRIER_PATHS } from "@/lib/carriers/admin";
 import { ADMIN_CLAIM_PATHS } from "@/lib/claims/admin";
+import { ADMIN_CUSTOMER_PATHS } from "@/lib/customers/admin";
 import { CLAIM_CATEGORY_LABEL, CLAIM_STATUS_LABEL, type ClaimCategory } from "@/lib/claims/claims";
 import { ADMIN_ORDER_PATHS, HANDOVER_BADGE, handoverKind, isHandoverPending, NEXT_STATUS, removalOutcome, UNASSIGN_REASONS } from "@/lib/orders/dispatch";
 import { loadCandidates, type Candidate } from "@/lib/orders/dispatch-server";
@@ -42,7 +43,7 @@ type Leg = {
   order_leg_carrier_terms: { carrier_amount_cents: number } | null;
 };
 type OrderDetail = {
-  id: string; order_number: string; status: string; created_at: string; payment_due_at: string; paid_at: string | null;
+  id: string; order_number: string; status: string; created_at: string; payment_due_at: string; customer_id: string; paid_at: string | null;
   pickup_window_start: string; goods_description: string; items_count: number | null; weight_kg: number | null;
   largest_item_length_cm: number | null; largest_item_width_cm: number | null; largest_item_height_cm: number | null;
   pallets_count: number | null; packing_items_count: number; storage_type: string | null; storage_days: number | null;
@@ -66,7 +67,7 @@ type OrderDetail = {
 type HistoryRow = { id: number; from_status: string | null; to_status: string; source: string; changed_by: string | null; created_at: string };
 
 const SELECT = [
-  "id, order_number, status, created_at, payment_due_at, paid_at, pickup_window_start, goods_description, items_count, weight_kg",
+  "id, order_number, status, created_at, payment_due_at, customer_id, paid_at, pickup_window_start, goods_description, items_count, weight_kg",
   "largest_item_length_cm, largest_item_width_cm, largest_item_height_cm, pallets_count, packing_items_count, storage_type, storage_days",
   "pickup_contact_name, pickup_contact_phone, delivery_contact_name, delivery_contact_phone, customer_notes",
   "carrier_id, assigned_at, picked_up_at, in_transit_at, delivered_at, delivered_without_pod, handover_required_at, handover_leg_index",
@@ -204,7 +205,9 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
           <Row label="Consegna">{o.delivery_contact_name} · {o.delivery_contact_phone}</Row>
           <Row label="Note cliente"><span className="whitespace-pre-line">{o.customer_notes || "—"}</span></Row>
           <Row label="Cliente">
-            {[customer?.first_name, customer?.last_name].filter(Boolean).join(" ") || "—"} · {customer?.email}
+            <Link href={ADMIN_CUSTOMER_PATHS.detail(o.customer_id)} className="text-blue-700 hover:underline">
+              {[customer?.first_name, customer?.last_name].filter(Boolean).join(" ") || "—"}
+            </Link> · {customer?.email}
             {o.customers?.customer_type === "business" ? " (azienda)" : ""}
           </Row>
         </dl>

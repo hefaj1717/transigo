@@ -28,3 +28,13 @@ Lokalnie płatności są sztuczne (`pi_demo_…`), więc każdy zwrot zostaje �
 3. „Chiudi il reclamo” bez tekstu → przeglądarka wymaga pola; z tekstem → „Chiuso”, odpowiedź z datą i adminem.
    `/admin/email`: `claim_closed` do klienta. Klient w „I miei reclami” widzi „Chiuso” i odpowiedź.
 4. Druga karta z tą samą reklamacją otwartą wcześniej → „Chiudi” → „Il reclamo era già chiuso.”
+
+## C. Klienci (D143)
+
+1. Menu „Clienti”: lista (nazwa lub firma, e-mail, typ, data rejestracji, liczba zleceń, stan). Szukaj „conti”,
+   „cliente@example.com”, fragment P.IVA / CF → wynik; `x),email.ilike.*` → „Nessun cliente trovato.” (bez błędu).
+2. Szczegóły: dane, dane do faktury, zlecenia (linki), reklamacje. Z `/admin/ordini/[id]` link na imieniu klienta.
+3. „Blocca cliente” bez motywu → przeglądarka wymaga pola; z motywem → „Cliente bloccato. N ordini in corso
+   continuano…”, czerwony pasek, historia „bloccato (motivo) · admin”. Zakładka „Bloccati” pokazuje klienta.
+4. W drugiej przeglądarce klient (`cliente@example.com`) przy następnym kliknięciu trafia na „Account sospeso”.
+5. „Sblocca cliente” → klient znów się loguje i widzi swoje zlecenia.
