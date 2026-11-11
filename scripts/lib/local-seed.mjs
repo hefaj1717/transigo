@@ -154,6 +154,30 @@ export async function seedAdmin() {
   return a;
 }
 
+/** Every leg of the order to TODAY (Europe/Rome): leg 1 from 08:00, leg 2 from 18:00 — "Sono arrivato al ritiro" works now. */
+export const legsToTodaySql = (id) => `
+  update public.order_legs set
+    pickup_date = (now() at time zone 'Europe/Rome')::date,
+    pickup_window_start = (((now() at time zone 'Europe/Rome')::date + case when leg_index = 0 then time '08:00' else time '18:00' end) at time zone 'Europe/Rome'),
+    pickup_window_end = (((now() at time zone 'Europe/Rome')::date + case when leg_index = 0 then time '10:00' else time '20:00' end) at time zone 'Europe/Rome')
+  where order_id = ${sqlUuid(id)};
+  update public.orders o set pickup_window_start = l.pickup_window_start
+    from public.order_legs l where l.order_id = o.id and l.leg_index = 0 and o.id = ${sqlUuid(id)};`;
+
+/**
+ * Porters (D67) need a price list with porter packages; the migrations' list v1 has none. When the active list
+ * lacks them, the admin clones it (clone_price_list adds the placeholder packages and the overtime rule) and
+ * publishes the clone — exactly what "Crea bozza" → "Pubblica" does in /admin/listini. LOCAL database only.
+ */
+export async function ensurePorterPackages(admin) {
+  const active = await ok(service.from("price_lists").select("id, version").eq("status", "active").single());
+  const packages = await ok(service.from("price_list_porter_packages").select("code").eq("price_list_id", active.id));
+  if (packages.length) return;
+  const draftId = await ok(admin.client.rpc("clone_price_list", { p_source_id: active.id }));
+  await ok(admin.client.rpc("publish_price_list", { p_price_list_id: draftId }));
+  console.log(`Listino: pubblicata una nuova versione con i pacchetti facchini (da v${active.version}).`);
+}
+
 /** A valid, deterministic partita IVA (check digit as in src/lib/auth/italian-ids.ts); `k` keeps them unique. */
 export function vat(k) {
   const d = String(5_550_000_000 + k);
@@ -267,7 +291,7 @@ async function loadBooking() {
 }
 
 /** Creates an order (pending payment) for a private customer, priced like the wizard. */
-export async function order(customer, { from, to, daysAhead, window = "10-12", vehicle = "van_medium", goods, packing = 0, storage = null, contacts, notes = "" }) {
+export async function order(customer, { from, to, daysAhead, window = "10-12", vehicle = "van_medium", goods, packing = 0, storage = null, porters = null, portersDelivery = null, contacts, notes = "" }) {
   const b = await loadBooking();
   const vehicleId = await vehicleTypeId(vehicle);
   const A = { ...PLACES[from], warehouseId: null };
@@ -279,7 +303,9 @@ export async function order(customer, { from, to, daysAhead, window = "10-12", v
     delivery: { placeId: B.placeId, label: B.address, floor: goods.deliveryFloor ?? 0, hasElevator: goods.deliveryElevator ?? true },
     pickupDate: romeDate(daysAhead),
     pickupWindow: window,
-    goods: { ...E.goods, description: goods.description, itemsCount: goods.items ?? null, weightKg: goods.weightKg ?? null, largestItem: goods.largest ?? E.goods.largestItem, palletsCount: goods.pallets ?? null },
+    goods: { ...E.goods, description: goods.description, itemsCount: goods.items ?? null, weightKg: goods.weightKg ?? null, largestItem: goods.largest ?? E.goods.largestItem, palletsCount: goods.pallets ?? null, loadCategory: porters ?? portersDelivery ?? null },
+    portersPickup: porters ? { packageCode: porters } : null,
+    portersDelivery: storage && portersDelivery ? { packageCode: portersDelivery } : null,
     packingItems: packing,
     storage: storage ? { returnDate: romeDate(daysAhead + storage.days), returnWindow: "14-16", pallets: storage.pallets } : null,
     vehicleTypeId: vehicleId,

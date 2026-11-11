@@ -8,15 +8,17 @@
 // every status, priced by the real engine and built like the wizard; then
 //   * paid jobs nobody has taken, of different sizes — some too big for a furgone medio (only Galli sees them);
 //   * a job accepted by Ferri over 15 minutes ago with pickup within 48 h ("Rinuncia" blocked);
-//   * a job accepted by Ferri with pickup in ≥ 48 h ("Rinuncia" allowed).
+//   * a job accepted by Ferri with pickup in ≥ 48 h ("Rinuncia" allowed);
+//   * two jobs accepted by Ferri with pickup TODAY, to run on the phone (docs/testy-reczne/realizacja-kursu.md):
+//     one leg with porters, and one with warehouse (2 legs, porters at pickup and delivery; both legs today).
 // Delivered orders and the blocked-Rinuncia job are moved into the past with plain SQL in the local container.
 import {
-  ADMIN_EMAIL, approveCarrier, carrierAccount, companyDocs, existingUserId, localSql, ok, order, pay, printOrders,
+  ADMIN_EMAIL, approveCarrier, carrierAccount, companyDocs, ensurePorterPackages, existingUserId, legsToTodaySql, localSql, ok, order, pay, printOrders,
   printPasswordHint, privateCustomer, seedAdmin, service, sqlUuid, user, vehicle,
 } from "./lib/local-seed.mjs";
 
 const EMAILS = { customer: "cliente@example.com", ferri: "padroncino@example.com", galli: "padroncino2@example.com" };
-const EXPECTED_ORDERS = 15;
+const EXPECTED_ORDERS = 17;
 
 function printLogins() {
   console.log("\nLogin:");
@@ -58,6 +60,7 @@ if (ids.some(Boolean)) {
 // Accounts
 // ---------------------------------------------------------------------------
 const admin = await seedAdmin();
+await ensurePorterPackages(admin);
 const customer = await privateCustomer({ email: EMAILS.customer, firstName: "Giulia", lastName: "Conti", phone: "+393401112233" });
 
 const ferri = await carrierAccount({ email: EMAILS.ferri, firstName: "Marco", lastName: "Ferri", company: "Ferri Trasporti Srl", vatIndex: 1, phone: "+393405556677" });
@@ -121,6 +124,12 @@ await accept(ferri, j14, ferriVan);
 const j15 = await pay(await mk({ from: "brescia", to: "milanoCentro", daysAhead: 6, window: "14-16", goods: { description: "Libreria e 15 scatoloni", items: 16, weightKg: 260 }, contacts: ["Giulia Conti", "Paolo Conti"] }));
 await accept(ferri, j15, ferriVan);
 
+// 16–17. Job execution (krok 4): accepted by Ferri, every leg moved to TODAY below (Rome day) — ready to run.
+const j16 = await pay(await mk({ from: "milanoCentro", to: "monza", daysAhead: 2, window: "08-10", porters: "monolocale", goods: { description: "Trasloco monolocale: divano, letto, 12 scatoloni", items: 14, weightKg: 400, pickupFloor: 3, pickupElevator: false }, contacts: ["Giulia Conti", "Paolo Conti"], notes: "Citofono Conti. Scala stretta." }));
+await accept(ferri, j16, ferriVan);
+const j17 = await pay(await mk({ from: "milanoNavigli", to: "bergamo", daysAhead: 2, window: "10-12", porters: "parcels", portersDelivery: "parcels", storage: { days: 1, pallets: 1 }, goods: { description: "8 scatoloni e una cassettiera", items: 9, weightKg: 120 }, contacts: ["Giulia Conti", "Marta Conti"] }));
+await accept(ferri, j17, ferriVan);
+
 // ---------------------------------------------------------------------------
 // Times: every date of an order back by N days (delivered orders into the past, +1 for the day they were created
 // ahead; "Ritirato" / "In viaggio" to this morning). For job 14 only the booking/payment/acceptance times move back
@@ -151,6 +160,8 @@ const shiftBooking = (id, hours) => `
   update public.order_status_history set created_at = created_at - interval '${hours} hours' where order_id = ${sqlUuid(id)};
   update public.payments set created_at = created_at - interval '${hours} hours' where order_id = ${sqlUuid(id)};`;
 localSql(`set local session_replication_role = replica;
+${legsToTodaySql(j16.id)}
+${legsToTodaySql(j17.id)}
 ${shiftBooking(j14.id, 2)}
 ${shiftDays(o5.id, 1)}
 ${shiftDays(o6.id, 1)}

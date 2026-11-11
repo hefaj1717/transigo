@@ -11,6 +11,7 @@ export const JOB_PATHS = {
   available_job: (id: string) => `/padroncino/corse/${id}`,
   mine: "/padroncino/le-mie-corse",
   my_job: (id: string) => `/padroncino/le-mie-corse/${id}`,
+  my_job_delivery: (id: string) => `/padroncino/le-mie-corse/${id}/consegna`,
 } as const;
 
 // ---------------------------------------------------------------------------

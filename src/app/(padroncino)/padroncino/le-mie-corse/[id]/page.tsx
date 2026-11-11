@@ -4,6 +4,8 @@ import { Loading } from "@/components/panel-shell";
 import { bigButton, bigButtonSecondary, CarrierShell } from "@/components/padroncino/carrier-shell";
 import { ContactTransigo, JobAmount, Notice, RouteList, Section, UrgentBadge } from "@/components/padroncino/job-views";
 import { RefreshButton } from "@/components/padroncino/refresh-button";
+import { JobExecution } from "@/components/padroncino/execution/job-execution";
+import { legStops } from "@/components/padroncino/execution/leg-stops";
 import { ReleaseJob } from "@/components/padroncino/release-job";
 import { requireArea } from "@/lib/auth/session";
 import {
@@ -17,9 +19,13 @@ import {
   romeWindow,
   type RouteStop,
 } from "@/lib/carriers/jobs";
+import { EXEC_MSG } from "@/lib/carriers/execution";
+import { googleMapsUrl } from "@/lib/carriers/execution-ui";
+import { loadJobExecution, type ExecutionView } from "@/lib/carriers/execution-server";
 import { loadMyJob, type MyJobDetail } from "@/lib/carriers/jobs-server";
 import { getCompanyInfo } from "@/lib/public/server";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 
 export const metadata = { title: "La mia corsa – Transigo" };
 
@@ -35,7 +41,11 @@ export default function Page({ params, searchParams }: PageProps<"/padroncino/le
   );
 }
 
-const ESITO: Record<string, string> = { accettata: JOB_MSG.accepted, "gia-tua": JOB_MSG.alreadyMine };
+const ESITO: Record<string, string> = { accettata: JOB_MSG.accepted, "gia-tua": JOB_MSG.alreadyMine, consegnata: EXEC_MSG.delivered };
+
+const RUNNING = new Set(["assigned", "picked_up", "in_transit"]);
+
+
 
 async function Content({ params, searchParams }: Pick<PageProps<"/padroncino/le-mie-corse/[id]">, "params" | "searchParams">) {
   const { id } = await params;
@@ -68,6 +78,17 @@ async function Content({ params, searchParams }: Pick<PageProps<"/padroncino/le-
 
   const lastLeg = job.legs.length - 1;
 
+  // Running (or delivered) job: the execution state, read with the carrier's session (D130).
+  let execution: ExecutionView | null = null;
+  let executionFailed = false;
+  if (RUNNING.has(job.status) || job.status === "delivered" || job.status === "completed") {
+    try {
+      execution = await loadJobExecution(await createClient(), ctx.userId, id, { serviceDb: () => createServiceClient() });
+    } catch {
+      executionFailed = true;
+    }
+  }
+
   return (
     <CarrierShell title={`Corsa ${job.orderNumber}`} back={back}>
       <div className="space-y-4">
@@ -77,6 +98,23 @@ async function Content({ params, searchParams }: Pick<PageProps<"/padroncino/le-
           <span className="rounded-full bg-blue-100 px-3 py-1 text-sm font-semibold text-[#0B3B8C]">{job.statusLabel}</span>
           {job.isUrgent ? <UrgentBadge /> : null}
         </div>
+
+        {executionFailed ? (
+          <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
+            <p role="alert" className="font-medium text-red-800">Non è stato possibile caricare i passaggi della corsa.</p>
+            <div className="mt-3">
+              <RefreshButton label="Riprova" pendingLabel="Caricamento…" className={bigButton} />
+            </div>
+          </div>
+        ) : null}
+        {execution && RUNNING.has(execution.status) ? (
+          <JobExecution view={execution} stops={legStops(job)} podHref={JOB_PATHS.my_job_delivery(job.orderId)} />
+        ) : null}
+        {execution?.proof ? (
+          <Notice tone="success">
+            Consegnata a {execution.proof.recipientName} il {romeDateTime(execution.proof.signedAt)}.
+          </Notice>
+        ) : null}
 
         <Section title="Percorso">
           <RouteList stops={job.stops} />
@@ -195,7 +233,6 @@ function NotMine() {
   );
 }
 
-const mapsUrl = (lat: number, lng: number) => `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
 
 function Stop({
   title,
@@ -247,7 +284,7 @@ function Stop({
         {extra}
       </dl>
       {typeof lat === "number" && typeof lng === "number" ? (
-        <a href={mapsUrl(lat, lng)} target="_blank" rel="noopener noreferrer" className={`${bigButtonSecondary} mt-3`}>
+        <a href={googleMapsUrl(lat, lng)} target="_blank" rel="noopener noreferrer" className={`${bigButtonSecondary} mt-3`}>
           Apri in Google Maps
         </a>
       ) : null}

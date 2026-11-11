@@ -16,7 +16,24 @@ import {
   type RegisterPhotoResult,
   type UploadTicket,
 } from "./execution-actions";
-import { EXEC_MSG, executionDbError, isAlreadyUploaded, isPhotoPath, isSignaturePath, photoPath, signaturePath } from "./execution";
+import {
+  EXEC_MSG,
+  executionDbError,
+  isAlreadyUploaded,
+  isPhotoPath,
+  isSignaturePath,
+  liveSteps,
+  photoPath,
+  porterSummaries,
+  signaturePath,
+  type ExecLeg,
+  type PhotoKind,
+  type PorterLegTerms,
+  type PorterSummary,
+  type StepRecord,
+  type StepRow,
+  type WorkedRow,
+} from "./execution";
 import type { JobNotifyDeps } from "./jobs-server";
 
 // Carrier job execution — server side (plan docs/plany/realizacja-kursu.md, krok 3; D69, D116, D130).
@@ -73,10 +90,10 @@ type StorageError = { statusCode?: string | number; message?: string } | null;
 
 async function uploadTicket(db: SupabaseClient, bucket: "order-photos" | "pod-signatures", path: string, retry: boolean): Promise<UploadTicket> {
   const { data, error } = await db.storage.from(bucket).createSignedUploadUrl(path);
-  if (!error && data) return { ok: true, path: data.path, token: data.token, alreadyUploaded: false };
+  if (!error && data) return { ok: true, path: data.path, token: data.token, signedUrl: data.signedUrl, alreadyUploaded: false };
   const e = error as StorageError;
   // "Riprova" after an upload that did arrive: the file is there — register it.
-  if (retry && isAlreadyUploaded(e)) return { ok: true, path, token: null, alreadyUploaded: true };
+  if (retry && isAlreadyUploaded(e)) return { ok: true, path, token: null, signedUrl: null, alreadyUploaded: true };
   // Refused by the bucket's insert policy: not (any more) assigned to this carrier, or the job is not running.
   if (String(e?.statusCode) === "403") return fail(EXEC_MSG.notInProgress, true);
   console.error(`[execution] signed upload URL (${bucket}):`, e?.statusCode ?? "", e?.message ?? "");
@@ -173,4 +190,119 @@ export async function completeDelivery(db: SupabaseClient, input: unknown, deps:
     });
   }
   return { ok: true, message: EXEC_MSG.delivered, newlyDelivered: data.newly_delivered };
+}
+
+// ---------------------------------------------------------------------------
+// Screen data (krok 4): what the job screen needs to run the job
+// ---------------------------------------------------------------------------
+
+export type ExecPhoto = { id: string; legIndex: number; kind: PhotoKind; path: string; url: string | null };
+
+/** Everything the job screen needs — serializable, sent to the browser. No positions, no user ids, no amounts. */
+export type ExecutionView = {
+  orderId: string;
+  status: string;
+  legs: ExecLeg[];
+  steps: StepRecord[];
+  photos: ExecPhoto[];
+  porters: PorterSummary[];
+  /** Taken-over leg (D130 "da gestire"): where the goods are now. */
+  handover: { legIndex: number; address: string } | null;
+  proof: { recipientName: string; signedAt: string } | null;
+};
+
+export type ExecutionLoadDeps = Pick<ExecutionDeps, "serviceDb">;
+
+type LegExecRow = {
+  leg_index: number;
+  pickup_window_start: string;
+  early_start_allowed_at: string | null;
+  pickup_warehouse_id: string | null;
+  delivery_warehouse_id: string | null;
+  porters_count: number | null;
+  porters_included_hours: number | null;
+  porter_overtime_grace_minutes: number | null;
+};
+
+/**
+ * Reads the job's execution state with the carrier's OWN session (RLS: only its order, its own photos, steps since
+ * its assignment). Returns null when the order is not this carrier's. The service role is used for ONE value —
+ * whether the bought price list has a porter overtime rate (order_charges is not readable by carriers, D77) — and
+ * only AFTER the session read proved the order is this carrier's, only when a leg has porters; the browser gets
+ * a yes/no (the overtime HOURS), never the rate.
+ */
+export async function loadJobExecution(db: SupabaseClient, userId: string, orderId: string, deps: ExecutionLoadDeps): Promise<ExecutionView | null> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId)) return null;
+  const { data: order, error } = await db
+    .from("orders")
+    .select("id, status, order_legs(leg_index, pickup_window_start, early_start_allowed_at, pickup_warehouse_id, delivery_warehouse_id, porters_count, porters_included_hours, porter_overtime_grace_minutes)")
+    .eq("id", orderId)
+    .eq("carrier_id", userId)
+    .maybeSingle<{ id: string; status: string; order_legs: LegExecRow[] }>();
+  if (error) {
+    console.error("[execution] loadJobExecution:", error.code, error.message);
+    throw new Error("execution unavailable");
+  }
+  if (!order) return null;
+
+  const legRows = [...order.order_legs].sort((a, b) => a.leg_index - b.leg_index);
+  const [stepsRes, photosRes, handoverRes, proofRes, minutesRes] = await Promise.all([
+    db.from("order_leg_steps").select("leg_index, step, created_at, reverted_at").eq("order_id", orderId).returns<StepRow[]>(),
+    db.from("order_photos").select("id, leg_index, kind, storage_path, created_at").eq("order_id", orderId).order("created_at")
+      .returns<{ id: string; leg_index: number; kind: PhotoKind; storage_path: string }[]>(),
+    db.from("order_handovers").select("leg_index, address").eq("order_id", orderId).order("id", { ascending: false }).limit(1)
+      .returns<{ leg_index: number; address: string }[]>(),
+    db.from("delivery_proofs").select("recipient_name, signed_at").eq("order_id", orderId).maybeSingle<{ recipient_name: string; signed_at: string }>(),
+    db.rpc("order_porters_worked_minutes", { p_order_id: orderId }),
+  ]);
+  for (const [what, res] of [["steps", stepsRes], ["photos", photosRes], ["handover", handoverRes], ["proof", proofRes], ["minutes", minutesRes]] as const) {
+    if (res.error) {
+      console.error(`[execution] loadJobExecution ${what}:`, res.error.code, res.error.message);
+      throw new Error("execution unavailable");
+    }
+  }
+
+  const photoRows = photosRes.data ?? [];
+  let urls = new Map<string, string>();
+  if (photoRows.length) {
+    const { data: signed } = await db.storage.from("order-photos").createSignedUrls(photoRows.map((p) => p.storage_path), 300);
+    urls = new Map((signed ?? []).filter((s) => s.signedUrl && s.path).map((s) => [s.path as string, s.signedUrl as string]));
+  }
+
+  const terms: PorterLegTerms[] = legRows.map((l) => ({
+    legIndex: l.leg_index,
+    persons: l.porters_count ?? 0,
+    includedHours: Number(l.porters_included_hours ?? 0),
+    graceMinutes: l.porter_overtime_grace_minutes ?? 0,
+  }));
+  const overtimeEnabled = terms.some((t) => t.persons > 0) ? await hasOvertimeRate(deps.serviceDb(), orderId) : false;
+
+  const proof = proofRes.data;
+  const handover = handoverRes.data?.[0];
+  return {
+    orderId,
+    status: order.status,
+    legs: legRows.map((l) => ({
+      legIndex: l.leg_index,
+      pickupWindowStart: l.pickup_window_start,
+      earlyStartAllowedAt: l.early_start_allowed_at,
+      pickupIsWarehouse: l.pickup_warehouse_id !== null,
+      deliveryIsWarehouse: l.delivery_warehouse_id !== null,
+    })),
+    steps: liveSteps(stepsRes.data ?? []),
+    photos: photoRows.map((p) => ({ id: p.id, legIndex: p.leg_index, kind: p.kind, path: p.storage_path, url: urls.get(p.storage_path) ?? null })),
+    porters: porterSummaries(terms, (minutesRes.data ?? []) as WorkedRow[], overtimeEnabled),
+    handover: handover ? { legIndex: handover.leg_index, address: handover.address } : null,
+    proof: proof ? { recipientName: proof.recipient_name, signedAt: proof.signed_at } : null,
+  };
+}
+
+/** Service role, ONE column, a yes/no out — call only after the session proved the order is the carrier's. */
+async function hasOvertimeRate(service: SupabaseClient, orderId: string): Promise<boolean> {
+  const { data, error } = await service.from("order_charges").select("porter_overtime_rate_cents").eq("order_id", orderId).maybeSingle<{ porter_overtime_rate_cents: number | null }>();
+  if (error) {
+    console.error("[execution] overtime rate:", error.code, error.message);
+    return false; // shown without overtime hours; billing (Stage 6) reads the rate itself
+  }
+  return (data?.porter_overtime_rate_cents ?? 0) > 0;
 }

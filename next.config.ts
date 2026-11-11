@@ -1,7 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // End-to-end tests build into their own folder (playwright.config.ts) so a running `npm run dev` is not touched.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
+  // Phone on the same Wi-Fi (docs/testy-reczne/realizacja-kursu.md): DEV_LAN_HOST=192.168.x.y npm run dev -- -H 0.0.0.0
+  ...(process.env.DEV_LAN_HOST ? { allowedDevOrigins: [process.env.DEV_LAN_HOST] } : {}),
   cacheComponents: true,
   async headers() {
     return [

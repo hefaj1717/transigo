@@ -18,7 +18,8 @@
     "db:local:reset": "supabase db reset --no-seed",
     "db:local:seed-carriers": "node scripts/seed-local-carriers.mjs",
     "db:local:seed-demo": "node scripts/seed-demo.mjs",
-    "test:rls": "vitest run --config vitest.rls.config.mts"
+    "test:rls": "vitest run --config vitest.rls.config.mts",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
@@ -31,6 +32,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
     "@tailwindcss/turbopack": "^4",
     "@types/node": "^24.19.2",
     "@types/react": "^19",

@@ -4,6 +4,7 @@ import {
   createPhotoUpload,
   createSignatureUpload,
   deletePhoto,
+  loadJobExecution,
   recordStep,
   registerPhoto,
   type ExecutionDeps,
@@ -12,7 +13,7 @@ import { EXEC_MSG, LEG_STEPS, photoKindForStep, uploadErrorMessage, type LegStep
 import { ORDER_DELIVERED_TEMPLATE } from "@/lib/notifications/templates/order-customer-updates";
 import { anon, deleteCreatedUsers, service, type TestUser } from "./helpers";
 import { check, setupJobContext, teardownJobContext } from "./job-fixtures";
-import { JPEG, order, PNG, runningJob } from "./execution-fixtures";
+import { JPEG, order, PNG, runningJob, sql } from "./execution-fixtures";
 
 // Job execution — server code of the Server Actions (src/lib/carriers/execution-server.ts) on the LOCAL database
 // (D64): the carrier's own session, signed upload URLs, the real RPCs, Storage limits and the e-mail outbox.
@@ -171,7 +172,7 @@ describe("errors as Italian messages", () => {
     const first = await takePhoto(me, orderId, 0, "pickup");
     if (!first.ticket.ok || !first.reg?.ok) throw new Error("first photo failed");
     const retry = await createPhotoUpload(me.client, { orderId, legIndex: 0, kind: "pickup", path: first.ticket.path });
-    expect(retry).toEqual({ ok: true, path: first.ticket.path, token: null, alreadyUploaded: true });
+    expect(retry).toEqual({ ok: true, path: first.ticket.path, token: null, signedUrl: null, alreadyUploaded: true });
     expect(await registerPhoto(me.client, { orderId, legIndex: 0, kind: "pickup", path: first.ticket.path }))
       .toMatchObject({ ok: true, photoId: first.reg.photoId, newlyRegistered: false });
   });
@@ -246,5 +247,80 @@ describe("order_delivered e-mail", () => {
     expect(await completeDelivery(me.client, { orderId, recipientName: "Lucia", signaturePath: sig }, deps)).toMatchObject({ ok: true, newlyDelivered: false });
     expect(await completeDelivery(me.client, { orderId, recipientName: "Lucia", signaturePath: sig }, deps)).toMatchObject({ ok: true, newlyDelivered: false });
     expect(await deliveredMails(orderId)).toHaveLength(1);
+  });
+});
+
+describe("screen data (loadJobExecution)", () => {
+  /** Records whether (and when) the service role was asked for anything. */
+  function recordingDeps() {
+    const calls: string[] = [];
+    return { calls, deps: { serviceDb: () => (calls.push("service"), service) } };
+  }
+
+  it("the carrier's own job: steps, own photos with preview URLs, porter time — no positions, ids or amounts", async () => {
+    const { orderId, c } = await runningJob();
+    const me = c.user;
+    await recordStep(me.client, { orderId, legIndex: 0, step: "arrived_pickup", lat: 45.46, lng: 9.19 });
+    const p = await takePhoto(me, orderId, 0, "pickup");
+    expect(p.reg).toMatchObject({ ok: true });
+
+    const { calls, deps: d } = recordingDeps();
+    const view = await loadJobExecution(me.client, me.id, orderId, d);
+    expect(view).toMatchObject({
+      orderId, status: "assigned",
+      steps: [{ legIndex: 0, step: "arrived_pickup" }],
+      photos: [{ legIndex: 0, kind: "pickup", url: expect.stringContaining("/storage/v1/object/sign/order-photos/") }],
+      porters: [{ legIndex: 0, workedMinutes: 0, includedLabel: "1 h", overtimeHours: 0 }],
+      handover: null, proof: null,
+    });
+    expect(calls).toEqual(["service"]); // the overtime yes/no, after the session read
+
+    // Nothing the carrier must not get: no position, no author, no rate, no amounts.
+    const json = JSON.stringify(view);
+    for (const forbidden of ["lat", "lng", "created_by", "uploaded_by", "rate", "cents", "3500", "35.00", me.id]) {
+      expect(json, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it("overtime: only the HOURS reach the browser, and only when the bought price list has an overtime rate", async () => {
+    const { orderId, c } = await runningJob();
+    const me = c.user;
+    await recordStep(me.client, { orderId, legIndex: 0, step: "arrived_pickup" });
+    await takePhoto(me, orderId, 0, "pickup");
+    await recordStep(me.client, { orderId, legIndex: 0, step: "loaded" });
+    // 2 h of loading (> 1 h included + 15 min grace): move arrived_pickup back (LOCAL test database only).
+    sql(`set session_replication_role = replica;
+      update public.order_leg_steps set created_at = created_at - interval '2 hours' where order_id = '${orderId}' and step = 'arrived_pickup';`);
+
+    const withRate = await loadJobExecution(me.client, me.id, orderId, deps);
+    expect(withRate?.porters[0]).toMatchObject({ workedMinutes: 120, overtimeHours: 1 });
+    expect(JSON.stringify(withRate)).not.toMatch(/rate|cents|3500/);
+
+    sql(`set session_replication_role = replica;
+      update public.order_charges set porter_overtime_rate_cents = null where order_id = '${orderId}';`);
+    const withoutRate = await loadJobExecution(me.client, me.id, orderId, deps);
+    expect(withoutRate?.porters[0]).toMatchObject({ workedMinutes: 120, overtimeHours: 0 });
+  });
+
+  it("someone else's order: null, and the service role is never asked", async () => {
+    const { orderId, c } = await runningJob();
+    const other = (await runningJob()).c.user;
+    const { calls, deps: d } = recordingDeps();
+    expect(await loadJobExecution(other.client, other.id, orderId, d)).toBeNull();
+    expect(await loadJobExecution(customer.client, customer.id, orderId, d)).toBeNull();
+    // The user id is only a filter next to RLS: the owner's id with another session does not open the order.
+    expect(await loadJobExecution(other.client, c.user.id, orderId, d)).toBeNull();
+    expect(await loadJobExecution(other.client, other.id, "not-a-uuid", d)).toBeNull();
+    expect(calls).toEqual([]);
+  });
+
+  it("after delivery: the proof (name, time), without the signature path", async () => {
+    const { orderId, c } = await runningJob();
+    await runLeg(c.user, orderId, 0);
+    await completeDelivery(c.user.client, { orderId, recipientName: "Lucia", signaturePath: await sign(c.user, orderId) }, deps);
+    const view = await loadJobExecution(c.user.client, c.user.id, orderId, deps);
+    expect(view?.status).toBe("delivered");
+    expect(view?.proof).toEqual({ recipientName: "Lucia", signedAt: expect.any(String) });
+    expect(JSON.stringify(view)).not.toContain(".png");
   });
 });

@@ -204,7 +204,7 @@ describe("job execution Server Actions", () => {
 
     state.signResult = { data: null, error: { statusCode: "409", message: "The resource already exists" } };
     expect(await createPhotoUploadAction({ orderId: ORDER_ID, legIndex: 0, kind: "pickup", path: PHOTO_PATH }))
-      .toEqual({ ok: true, path: PHOTO_PATH, token: null, alreadyUploaded: true });
+      .toEqual({ ok: true, path: PHOTO_PATH, token: null, signedUrl: null, alreadyUploaded: true });
 
     state.signResult = { data: null, error: { statusCode: "403", message: "new row violates row-level security policy" } };
     expect(await createSignatureUploadAction({ orderId: ORDER_ID })).toEqual({ ok: false, message: EXEC_MSG.notInProgress, refresh: true });

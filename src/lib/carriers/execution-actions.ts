@@ -44,10 +44,10 @@ export const completeDeliveryInput = z.object({
 export type ExecFailure = { ok: false } & ExecErrorView;
 
 /**
- * Signed upload URL for ONE file. `token: null` + `alreadyUploaded: true`: the file at `path` is already in Storage
+ * Signed upload URL for ONE file (`signedUrl`: PUT target with progress, XHR). `token`/`signedUrl` null + `alreadyUploaded: true`: the file at `path` is already in Storage
  * (an earlier attempt arrived) — the browser goes straight to the registration.
  */
-export type UploadTicket = { ok: true; path: string; token: string | null; alreadyUploaded: boolean } | ExecFailure;
+export type UploadTicket = { ok: true; path: string; token: string | null; signedUrl: string | null; alreadyUploaded: boolean } | ExecFailure;
 export type RecordStepResult = { ok: true; message: string; newlyRecorded: boolean; orderStatus: string } | ExecFailure;
 export type RegisterPhotoResult = { ok: true; message: string; photoId: string; newlyRegistered: boolean } | ExecFailure;
 export type DeletePhotoResult = { ok: true; message: string } | ExecFailure;
