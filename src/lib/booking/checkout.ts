@@ -35,6 +35,14 @@ export const contactsSchema = z.object({
 });
 export type ContactsInput = z.input<typeof contactsSchema>;
 
+/** Facchinaggio (D151): one person on site, plus notes for the team. */
+export const portersContactsSchema = z.object({
+  siteName: text(200),
+  sitePhone: phone,
+  notes: z.string().max(2000, { error: MSG.tooLong }).default(""),
+});
+export type PortersContactsInput = z.input<typeof portersContactsSchema>;
+
 const address = {
   street: text(160),
   city: text(80),

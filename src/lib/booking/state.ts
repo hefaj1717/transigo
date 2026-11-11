@@ -11,7 +11,7 @@ const dimension = z.number().int().min(1).max(2_000).nullable(); // cm
 
 const isoDate = z.string().refine(isIsoDate, { error: "Data non valida" });
 
-const placeChoice = z.object({
+export const placeChoice = z.object({
   placeId: z.string().regex(/^[A-Za-z0-9_-]{10,300}$/),
   label: z.string().trim().min(1).max(300), // suggestion text, for display only — the server resolves the place again
   floor: z.number().int().min(0).max(20),

@@ -60,7 +60,7 @@ export async function loadActiveWarehouse(db: SupabaseClient): Promise<Warehouse
   };
 }
 
-async function quoteValidMinutes(db: SupabaseClient): Promise<number> {
+export async function quoteValidMinutes(db: SupabaseClient): Promise<number> {
   const { data, error } = await db.from("settings").select("quote_valid_minutes").single();
   if (error) throw error;
   return data.quote_valid_minutes as number;
@@ -199,6 +199,22 @@ function toEndpoint(p: PlaceDetails): Endpoint {
     province: p.provinceCode,
     warehouseId: null,
   };
+}
+
+/**
+ * One Google place resolved on the server (D76), Italy only — shared by the wizards without a route (Facchinaggio).
+ * Errors: not_found → place_not_found; other → maps_unavailable (logged).
+ */
+export async function resolveItalianPlace(placeId: string): Promise<{ endpoint: Endpoint } | { error: "place_not_found" | "not_italy" | "maps_unavailable" }> {
+  try {
+    const place = await cached(`place:${placeId}`, () => getMapsProvider().placeDetails(placeId));
+    if (place.countryCode !== "IT") return { error: "not_italy" };
+    return { endpoint: toEndpoint(place) };
+  } catch (e) {
+    if (e instanceof MapsError && e.code === "not_found") return { error: "place_not_found" };
+    console.error("[booking] maps:", e instanceof Error ? e.message : e);
+    return { error: "maps_unavailable" };
+  }
 }
 
 const point = (e: Endpoint): RoutePoint => (e.placeId && !e.warehouseId ? { placeId: e.placeId } : { lat: e.lat, lng: e.lng });
@@ -399,7 +415,7 @@ export async function quoteBooking(
 export async function loadStoredQuote(db: SupabaseClient, id: string): Promise<(ServerQuote & { customerType: "private" | "business" }) | null> {
   const { data, error } = await db.from("quotes").select("id, customer_type, input, quote, valid_until").eq("id", id).maybeSingle();
   if (error) throw error;
-  if (!data) return null;
+  if (!data || (data.input as { kind?: string })?.kind === "porters") return null; // another wizard's quote
   return { quoteId: data.id, validUntil: new Date(data.valid_until), quote: data.quote as Quote, input: data.input as StoredQuoteInput, customerType: data.customer_type };
 }
 
