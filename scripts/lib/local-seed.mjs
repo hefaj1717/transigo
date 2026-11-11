@@ -18,6 +18,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { deflateSync } from "node:zlib";
 
 const require = createRequire(import.meta.url);
 const { createClient } = require("@supabase/supabase-js");
@@ -152,6 +153,82 @@ export async function seedAdmin() {
   const a = await user(ADMIN_EMAIL, { first_name: "Anna", last_name: "Admin" });
   await ok(service.from("profiles").update({ role: "admin", first_name: "Anna", last_name: "Admin" }).eq("id", a.id));
   return a;
+}
+
+// ---------------------------------------------------------------------------
+// Job execution (D130): photos, signature, step times
+// ---------------------------------------------------------------------------
+const PHOTO = readFileSync(`${root}tests/e2e/fixtures/foto.jpg`);
+
+/** A photo of the load uploaded with the carrier's own session and registered (as the app does). */
+export async function orderPhoto(c, orderId, leg, kind) {
+  const path = `${orderId}/${randomUUID()}.jpg`;
+  await ok(c.client.storage.from("order-photos").upload(path, new Blob([PHOTO], { type: "image/jpeg" }), { contentType: "image/jpeg" }));
+  await ok(c.client.rpc("register_order_photo", { p_order_id: orderId, p_leg_index: leg, p_kind: kind, p_storage_path: path }));
+}
+
+/** The next step of the job, recorded with the carrier's session (carrier_record_step), with an optional position. */
+export const recordStep = (c, orderId, leg, step, pos = null) =>
+  ok(c.client.rpc("carrier_record_step", { p_order_id: orderId, p_leg_index: leg, p_step: step, p_lat: pos?.lat ?? null, p_lng: pos?.lng ?? null }));
+
+/** A signature-like stroke as a PNG (transparent background), generated here — no image file in the repo. */
+export function signaturePng(width = 360, height = 140) {
+  const px = new Uint8Array(width * height * 4); // RGBA, all transparent
+  const dot = (x, y) => {
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const X = Math.round(x) + dx, Y = Math.round(y) + dy;
+      if (X < 0 || Y < 0 || X >= width || Y >= height) continue;
+      px.set([24, 24, 27, 255], (Y * width + X) * 4);
+    }
+  };
+  for (let t = 0; t <= 1; t += 0.0005) {
+    const x = 20 + t * (width - 40);
+    dot(x, height / 2 + Math.sin(t * 19) * 32 * (1 - t * 0.6) + Math.cos(t * 7) * 10);
+  }
+  for (let t = 0; t <= 1; t += 0.002) dot(60 + t * 230, height - 28 + Math.sin(t * 3) * 4); // underline
+  const raw = Buffer.alloc((width * 4 + 1) * height);
+  for (let y = 0; y < height; y++) Buffer.from(px.buffer, y * width * 4, width * 4).copy(raw, y * (width * 4 + 1) + 1);
+  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = (buf) => { let c = 0xffffffff; for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type, data) => {
+    const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const sum = Buffer.alloc(4); sum.writeUInt32BE(crc(body));
+    return Buffer.concat([len, body, sum]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0); ihdr.writeUInt32BE(height, 4); ihdr[8] = 8; ihdr[9] = 6; // 8-bit RGBA
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
+}
+
+/** POD as the app does it: the signature uploaded with the carrier's session, then complete_delivery. */
+export async function completeDelivery(c, orderId, recipientName, pos = null) {
+  const path = `${orderId}/${randomUUID()}.png`;
+  await ok(c.client.storage.from("pod-signatures").upload(path, new Blob([signaturePng()], { type: "image/png" }), { contentType: "image/png" }));
+  await ok(c.client.rpc("complete_delivery", { p_order_id: orderId, p_recipient_name: recipientName, p_signature_path: path, p_lat: pos?.lat ?? null, p_lng: pos?.lng ?? null }));
+}
+
+/**
+ * Realistic times for the recorded steps (LOCAL container SQL, run with session_replication_role = replica): the
+ * database writes now() for every step, so a seed run would show seconds of porter work. `times` maps
+ * "<leg>:<step>" to an SQL timestamptz expression; photos get the time just before the step that closes them, the
+ * carrier's status history rows and the order's picked_up_at / in_transit_at follow leg 0's loaded / departed.
+ */
+export function stepTimesSql(orderId, times) {
+  const id = sqlUuid(orderId);
+  const parts = [];
+  for (const [key, at] of Object.entries(times)) {
+    const [leg, step] = key.split(":");
+    parts.push(`update public.order_leg_steps set created_at = ${at} where order_id = ${id} and leg_index = ${Number(leg)} and step = '${step}' and reverted_at is null;`);
+    const kind = { loaded: "pickup", unloaded: "delivery" }[step];
+    if (kind) parts.push(`update public.order_photos set created_at = ${at} - interval '3 minutes' where order_id = ${id} and leg_index = ${Number(leg)} and kind = '${kind}';`);
+    const status = { "0:loaded": "picked_up", "0:departed": "in_transit" }[key];
+    if (status) {
+      parts.push(`update public.order_status_history set created_at = ${at} where order_id = ${id} and source = 'carrier_app' and to_status = '${status}';`);
+      parts.push(`update public.orders set ${status === "picked_up" ? "picked_up_at" : "in_transit_at"} = ${at} where id = ${id};`);
+    }
+  }
+  return parts.join("\n");
 }
 
 /** Every leg of the order to TODAY (Europe/Rome): leg 1 from 08:00, leg 2 from 18:00 — "Sono arrivato al ritiro" works now. */

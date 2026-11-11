@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import { localSupabase } from "./tests/e2e/local-supabase";
 
-// End-to-end tests of the carrier job screen in phone views (npm run test:e2e) — LOCAL Supabase only (D64).
+// End-to-end tests: the carrier job screen in phone views, the admin's corrections on a desktop browser (npm run test:e2e) — LOCAL Supabase only (D64).
 // Needs Docker + `npm run db:local:start`. global-setup resets the local database and seeds the demo + test jobs.
 // The app runs as a production build in its own folder (.next-e2e) on port 3200, so a `npm run dev` on 3000 keeps
 // working; the local keys are passed as environment variables (they win over .env.local, which points at staging).
@@ -32,8 +32,11 @@ export default defineConfig({
     geolocation: { latitude: 45.4642, longitude: 9.19 },
   },
   projects: [
-    { name: "iphone", use: { ...devices["iPhone 13"] } }, // WebKit (Safari engine)
-    { name: "android", use: { ...devices["Pixel 7"] } }, // Chromium
+    // The carrier's job screen on phones (one job per project, scripts/seed-e2e-jobs.mjs).
+    { name: "iphone", testMatch: /corsa-padroncino\.spec\.ts$/, use: { ...devices["iPhone 13"] } }, // WebKit (Safari engine)
+    { name: "android", testMatch: /corsa-padroncino\.spec\.ts$/, use: { ...devices["Pixel 7"] } }, // Chromium
+    // The admin panel on a desktop browser, on the demo seed's jobs (runs once: it changes them).
+    { name: "desktop", testMatch: /admin-.*\.spec\.ts$/, use: { ...devices["Desktop Chrome"] } },
   ],
   webServer: {
     command: `npx next build && npx next start -p ${PORT}${HOST === "localhost" ? "" : " -H 0.0.0.0"}`,

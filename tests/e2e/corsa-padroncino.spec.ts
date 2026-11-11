@@ -1,9 +1,8 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
-import { createClient } from "@supabase/supabase-js";
 import { expect, test, type Page } from "@playwright/test";
 import { JOBS_FILE } from "./global-setup";
-import { localSupabase } from "./local-supabase";
+import { login, mainButton, serviceClient } from "./helpers";
 
 // The whole job in a phone view (iPhone 13 / WebKit, Pixel 7 / Chromium) — plan docs/plany/realizacja-kursu.md,
 // krok 4. Ferri (demo seed) runs a job accepted by him with every leg today: steps, camera photos (file chooser),
@@ -13,30 +12,11 @@ import { localSupabase } from "./local-supabase";
 // «Esecuzione» load the signature and photos. LOCAL database only (D64).
 
 const PHOTO = path.join(__dirname, "fixtures", "foto.jpg");
-const sb = localSupabase();
-const service = createClient(sb.url, sb.serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
-
-function password(): string {
-  if (process.env.SEED_PASSWORD) return process.env.SEED_PASSWORD;
-  const file = path.join(process.cwd(), ".seed-local", "password");
-  if (!existsSync(file)) throw new Error("seed password missing (.seed-local/password or SEED_PASSWORD)");
-  return readFileSync(file, "utf8").trim();
-}
+const service = serviceClient();
 
 function jobs(project: string): { single: string; storage: string } {
   return JSON.parse(readFileSync(JOBS_FILE, "utf8"))[project];
 }
-
-async function login(page: Page, next: string, email = "padroncino@example.com") {
-  await page.goto(`/accedi?next=${encodeURIComponent(next)}`);
-  await page.getByLabel("E-mail").fill(email);
-  await page.getByLabel("Password").fill(password());
-  await page.getByRole("button", { name: "Accedi" }).click();
-  await page.waitForURL((u) => u.pathname === next);
-}
-
-/** The big button at the bottom (sticky bar). */
-const mainButton = (page: Page, name: string | RegExp) => page.getByRole("button", { name, exact: typeof name === "string" });
 
 async function takePhoto(page: Page, leg: number, kind: "pickup" | "delivery", expectedCount: number) {
   await page.getByTestId(`photo-input-${leg}-${kind}`).setInputFiles(PHOTO);
