@@ -98,6 +98,7 @@ Priorytet właściciela: najpierw cała strona (publiczna + panel klienta + pane
   - Vercel: projekt `transi-go/transigo`, deploy z `main` działa (status „Vercel: success” na GitHub). Do sprawdzenia przez właściciela: zmienne środowiskowe i webhook Stripe na adres Vercel.
   - Seed na stagingu: `node scripts/seed-demo.mjs --staging=bacabuzzevwwdxrswbnc` (bez skryptu npm; klucze tylko z `.env.local`, jego URL musi być stagingiem; bez SQL — daty z dnia seeda, kursy w toku przez `admin_allow_early_start`; płatności = prawdziwe PaymentIntent testowe Stripe, więc zwroty działają; hasło w `.seed-staging/password`, poza repo). Inne skrypty seed i każda inna flaga → odmowa.
 - [ ] Krok 2: panel klienta — „Profilo” (dane, dane do faktury, zmiana hasła), anulowanie opłaconego zlecenia z opłatą i zwrotem Stripe (D33), „Reclami”, „Deposito”.
+  - „Profilo” zrobione (`/cliente/profilo`, bez zmian w bazie; zapis sesją klienta, hasło po sprawdzeniu obecnego). Reszta — plan `docs/plany/panel-klienta-2.md` (czeka na akceptację).
 - [ ] Krok 3: panel admina — „Clienti”, zwroty/anulowania (`cancellation_review`, `payment_review`), „Reclami”, „Impostazioni”, pozycje w magazynie, dashboard.
 - [ ] Krok 4: faktury klienta i admina (do decyzji: adapter „demo” z PDF oznaczonym DEMO zamiast Fatture in Cloud).
 - [ ] Krok 5: mapa trasy w kroku „Percorso”, przegląd strony publicznej (telefon + komputer).
