@@ -47,3 +47,23 @@ export function storageView(o: { status: string; order_legs: StorageLeg[]; order
   else phase = "incoming";
   return { phase, storedAt, leftAt, plannedEntry, paidUntil };
 }
+
+/** Calendar days between two instants in Europe/Rome (same day = 0). Used for days in storage. */
+export function romeDaysBetween(from: Date, to: Date): number {
+  const day = (d: Date) => Date.parse(`${d.toLocaleDateString("sv-SE", { timeZone: "Europe/Rome" })}T00:00:00Z`);
+  return Math.round((day(to) - day(from)) / 86_400_000);
+}
+
+export type AdminStorageNumbers = {
+  /** Days the goods have been (or were) in the warehouse: entry day → exit day / today. Null before the entry. */
+  daysStored: number | null;
+  /** Still in the warehouse after the planned pickup from it (= paid period, D9): extension or a call. */
+  overdue: boolean;
+};
+
+/** Admin "Magazzino" (spec 9): numbers for one order with storage. */
+export function adminStorageNumbers(v: StorageView, now: Date): AdminStorageNumbers {
+  const daysStored = v.storedAt ? romeDaysBetween(new Date(v.storedAt), v.leftAt ? new Date(v.leftAt) : now) : null;
+  const overdue = v.phase === "stored" && v.paidUntil !== null && now.getTime() > new Date(v.paidUntil).getTime();
+  return { daysStored, overdue };
+}

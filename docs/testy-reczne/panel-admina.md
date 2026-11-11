@@ -48,3 +48,10 @@ Lokalnie płatności są sztuczne (`pi_demo_…`), więc każdy zwrot zostaje �
 3. Reguły: penale „40” → zapis; podgląd anulowania u klienta (`/cliente/ordini/[id]` → „Annulla ordine”) liczy 40 %.
    Penale „101” lub ore „1,5” → komunikat, nic nie zapisane. Bez zmian → „Nessuna modifica.”
 4. `audit_log`: `settings.company` (zmienione pola), `settings.rules` (`before` / `after`).
+
+## E. Magazzino — merce
+
+1. `/admin/magazzino` → „Merce in deposito”: zakładka „In magazzino” (zlecenia 21 i 22: data wejścia = rozładunek
+   odcinka 1, opłacone do = odbiór z magazynu, dni w magazynie / opłacone, przewoźnik), licznik palet.
+2. „In arrivo” (zlecenia z magazynem przed rozładunkiem, np. 3 i 17), „Usciti” (po załadunku odcinka 2 / dostarczone).
+3. Zlecenie 22 po „Rimuovi padroncino” → w wierszu „Da gestire”. Po terminie „Pagato fino a” → „Periodo pagato scaduto”.
