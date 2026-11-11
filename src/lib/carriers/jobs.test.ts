@@ -174,6 +174,7 @@ describe("jobDbError", () => {
   it("too_late on release → contact Transigo", () => {
     expect(jobDbError("release", e("55000", "too_late"))).toEqual({ message: JOB_MSG.releaseTooLate, refreshList: false });
     expect(jobDbError("release", e("55000", "not_assigned")).message).toBe(JOB_MSG.notAssigned);
+    expect(jobDbError("release", e("55000", "loaded"))).toEqual({ message: "Il carico è già a bordo. Contatta Transigo.", refreshList: false });
   });
   it("vehicle errors keep the carrier on the job", () => {
     expect(jobDbError("accept", e("55000", "vehicle_not_suitable"))).toEqual({ message: JOB_MSG.vehicleNotSuitable, refreshList: false });

@@ -6,8 +6,14 @@
 --   * porter working time (D69) = (loaded − arrived_pickup) + (unloaded − arrived_delivery), summed in seconds and
 --     rounded DOWN to full minutes, computed only here (order_porters_worked_minutes) and stored in
 --     order_legs.porters_worked_minutes by complete_delivery;
---   * admin_revert_last_step(): only an admin undoes the last step, with a reason in the status history;
---   * admin_advance_order(): "Consegnato" without POD now requires a reason (note in the status history).
+--   * admin_revert_last_step(): only an admin undoes the last step, with a reason;
+--   * admin_allow_early_start(): an admin lets a leg start before its pickup day, with a reason;
+--   * admin_advance_order(): "Consegnato" without POD now requires a reason;
+--   * order_admin_notes: those reasons — INTERNAL, admins only (owner 2026-11-11): the customer and the carrier see
+--     only the status change itself, never the reason;
+--   * release_job(): no "Rinuncia" once the load is on board (any leg loaded) → detail 'loaded';
+--   * admin_unassign_job(): "Rimuovi padroncino" also in picked_up / in_transit (the only way to take a loaded job
+--     from a carrier); audit data goods_loaded.
 -- Model A (D117): one carrier for all legs. Order status: leg 0 loaded → picked_up, leg 0 departed → in_transit,
 -- complete_delivery → delivered. With storage the order stays in_transit while the goods are in the warehouse
 -- (known limitation until model B).
@@ -32,6 +38,46 @@ as $$
   select p_lat is not null and p_lng is not null and p_lat between -90 and 90 and p_lng between -180 and 180;
 $$;
 revoke execute on function public.valid_position(double precision, double precision) from public, anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- order_admin_notes — internal reasons of admin actions on an order; admins only, append-only.
+-- Written only by the admin functions (same transaction as the action). Free text stays out of audit_log (D65).
+-- ---------------------------------------------------------------------------
+create table public.order_admin_notes (
+  id         bigint generated always as identity primary key,
+  order_id   uuid not null references public.orders (id) on delete cascade,
+  kind       text not null check (kind in ('delivered_without_pod', 'status_changed', 'step_reverted', 'early_start')),
+  leg_index  smallint,
+  body       text not null check (length(trim(body)) between 1 and 1000),
+  created_by uuid not null,                -- the admin; no FK (survives account deletion)
+  created_at timestamptz not null default now()
+);
+create index order_admin_notes_order_idx on public.order_admin_notes (order_id, id);
+
+create trigger order_admin_notes_append_only
+  before update or delete on public.order_admin_notes
+  for each row execute function public.reject_change();
+create trigger order_admin_notes_no_truncate
+  before truncate on public.order_admin_notes
+  for each statement execute function public.reject_change();
+
+revoke all on public.order_admin_notes from anon, authenticated, service_role;
+grant select on public.order_admin_notes to authenticated, service_role;
+alter table public.order_admin_notes enable row level security;
+create policy order_admin_notes_select_admin on public.order_admin_notes
+  for select to authenticated
+  using ((select public.is_admin()));
+
+-- ---------------------------------------------------------------------------
+-- order_legs.early_start_allowed_at — set by admin_allow_early_start(); the leg may start before its pickup day.
+-- The second mutable column of the leg snapshot (D77), set once.
+-- ---------------------------------------------------------------------------
+alter table public.order_legs add column early_start_allowed_at timestamptz;
+
+drop trigger order_legs_guard on public.order_legs;
+create trigger order_legs_guard
+  before update on public.order_legs
+  for each row execute function public.guard_immutable_columns('porters_worked_minutes', 'early_start_allowed_at');
 
 -- ---------------------------------------------------------------------------
 -- order_leg_steps — append-only; a step can only be marked reverted (admin, or automatically when the carrier
@@ -346,8 +392,8 @@ grant execute on function public.order_porters_worked_minutes(uuid) to authentic
 -- carrier_record_step(order, leg, step, lat, lng): the assigned carrier records the NEXT step.
 -- * Same step again (double click, retry) → the existing row, newly_recorded = false, no error.
 -- * Only in order: the next step is the first missing one (leg after leg) — wrong_step otherwise.
--- * arrived_pickup only from the pickup day of that leg (Europe/Rome) — too_early; on leg 0 this does not apply
---   once the admin has moved the order past 'assigned' (admin starts the job early, owner 2026-11-11).
+-- * arrived_pickup only from the pickup day of that leg (Europe/Rome) — too_early; not when the admin allowed an
+--   early start of that leg (admin_allow_early_start), nor on leg 0 once the admin moved the order past 'assigned'.
 -- * loaded / unloaded need ≥ 1 own photo of that leg (pickup / delivery) — photo_required.
 -- * Statuses only forward: leg 0 loaded → picked_up, leg 0 departed → in_transit (history carrier_app, with the
 --   position). Works for a suspended carrier too (D116).
@@ -407,6 +453,7 @@ begin
 
   if p_step = 'arrived_pickup'
      and (v_leg.pickup_window_start at time zone 'Europe/Rome')::date > (v_now at time zone 'Europe/Rome')::date
+     and v_leg.early_start_allowed_at is null
      and not (p_leg_index = 0 and v_order.status <> 'assigned') then
     raise exception 'carrier_record_step: before the pickup day' using errcode = '55000', detail = 'too_early';
   end if;
@@ -659,9 +706,8 @@ grant execute on function public.complete_delivery(uuid, text, text, double prec
 -- admin_revert_last_step(order, admin, reason): undo the LAST live step (only an admin; the carrier never can).
 -- Only while the job runs (assigned / picked_up / in_transit; after delivery nothing is undone here).
 -- The status goes back only when the reverted step caused it: leg 0 departed (in_transit → picked_up),
--- leg 0 loaded (picked_up → assigned); the matching *_at is cleared. ALWAYS a status history row (source
--- admin_panel, from → to, possibly the same status) whose note is the reason (owner, 2026-11-11: the reason is in
--- the history — visible to the order's parties, D77). audit_log: ids, leg, step and statuses only (D65).
+-- leg 0 loaded (picked_up → assigned); the matching *_at is cleared and a status history row is written (no note).
+-- The reason goes ONLY to order_admin_notes (internal). audit_log: ids, leg, step and statuses only (D65).
 -- Photos stay; once the step is open again the carrier may remove or add photos.
 -- Errors: 42501 | 22023 order / reason | 55000 not_in_progress | no_step
 -- ---------------------------------------------------------------------------
@@ -711,10 +757,12 @@ begin
            in_transit_at = case when v_order.status = 'in_transit' then null else in_transit_at end,
            picked_up_at = case when v_order.status = 'picked_up' then null else picked_up_at end
      where id = p_order_id;
-  end if;
 
-  insert into public.order_status_history (order_id, from_status, to_status, changed_by, source, note, created_at)
-  values (p_order_id, v_order.status, v_to, p_admin_id, 'admin_panel', v_reason, v_now);
+    insert into public.order_status_history (order_id, from_status, to_status, changed_by, source, created_at)
+    values (p_order_id, v_order.status, v_to, p_admin_id, 'admin_panel', v_now);
+  end if;
+  insert into public.order_admin_notes (order_id, kind, leg_index, body, created_by, created_at)
+  values (p_order_id, 'step_reverted', v_step.leg_index, v_reason, p_admin_id, v_now);
   insert into public.audit_log (actor_id, actor_email, action, entity_type, entity_id, data)
   values (p_admin_id, v_email, 'order.step_reverted', 'order', p_order_id,
           jsonb_build_object('leg_index', v_step.leg_index, 'step', v_step.step, 'from', v_order.status, 'to', v_to));
@@ -777,8 +825,8 @@ revoke execute on function public.admin_delivery_proof(uuid) from public, anon;
 grant execute on function public.admin_delivery_proof(uuid) to authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
--- admin_advance_order: + p_note. "Consegnato" without POD (D123) requires a reason (owner, 2026-11-11), stored as
--- the note of the status history row (visible to the order's parties, D77); optional for the other steps.
+-- admin_advance_order: + p_note. "Consegnato" without POD (D123) requires a reason (owner, 2026-11-11); optional for
+-- the other steps. The reason goes ONLY to order_admin_notes (internal); the status history row has no note.
 -- Errors as before + 22023 'note'.
 -- ---------------------------------------------------------------------------
 drop function public.admin_advance_order(uuid, uuid, public.order_status);
@@ -824,8 +872,12 @@ begin
          delivered_at = case when p_to_status = 'delivered' then v_now else delivered_at end,
          delivered_without_pod = delivered_without_pod or p_to_status = 'delivered'
    where id = p_order_id;
-  insert into public.order_status_history (order_id, from_status, to_status, changed_by, source, note)
-  values (p_order_id, v_order.status, p_to_status, p_admin_id, 'admin_panel', v_note);
+  insert into public.order_status_history (order_id, from_status, to_status, changed_by, source)
+  values (p_order_id, v_order.status, p_to_status, p_admin_id, 'admin_panel');
+  if v_note is not null then
+    insert into public.order_admin_notes (order_id, kind, body, created_by)
+    values (p_order_id, case when p_to_status = 'delivered' then 'delivered_without_pod' else 'status_changed' end, v_note, p_admin_id);
+  end if;
   insert into public.audit_log (actor_id, actor_email, action, entity_type, entity_id, data)
   values (p_admin_id, v_email, 'order.status_changed', 'order', p_order_id,
           jsonb_build_object('from', v_order.status, 'to', p_to_status)
@@ -835,3 +887,157 @@ end;
 $$;
 revoke execute on function public.admin_advance_order(uuid, uuid, public.order_status, text) from public, anon, authenticated;
 grant execute on function public.admin_advance_order(uuid, uuid, public.order_status, text) to service_role;
+
+-- ---------------------------------------------------------------------------
+-- admin_allow_early_start(order, leg, admin, reason): the leg may start (arrived_pickup) before its pickup day
+-- (owner 2026-11-11 — same as starting leg 0 early, also for leg 2 of a warehouse order). The order of the steps
+-- still applies (leg 2 after leg 1 is unloaded). Allowed again → nothing changes (newly_allowed = false).
+-- Reason → order_admin_notes only; no status history row (the status does not change).
+-- Errors: 42501 | 22023 order / leg / reason | 55000 not_in_progress | already_started
+-- ---------------------------------------------------------------------------
+create function public.admin_allow_early_start(p_order_id uuid, p_leg_index smallint, p_admin_id uuid, p_reason text)
+returns table (allowed_at timestamptz, newly_allowed boolean)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+#variable_conflict use_column
+declare
+  v_email  text := public.require_admin(p_admin_id);
+  v_reason text := trim(coalesce(p_reason, ''));
+  v_order  public.orders%rowtype;
+  v_leg    public.order_legs%rowtype;
+  v_now    timestamptz := now();
+begin
+  if length(v_reason) not between 1 and 1000 then
+    raise exception 'admin_allow_early_start: reason required' using errcode = '22023', detail = 'reason';
+  end if;
+  select * into v_order from public.orders where id = p_order_id for update;
+  if not found then
+    raise exception 'admin_allow_early_start: order not found' using errcode = '22023', detail = 'order';
+  end if;
+  select * into v_leg from public.order_legs where order_id = p_order_id and leg_index = p_leg_index;
+  if not found then
+    raise exception 'admin_allow_early_start: unknown leg' using errcode = '22023', detail = 'leg';
+  end if;
+  if v_leg.early_start_allowed_at is not null then
+    return query select v_leg.early_start_allowed_at, false;
+    return;
+  end if;
+  if v_order.status not in ('assigned', 'picked_up', 'in_transit') then
+    raise exception 'admin_allow_early_start: job not in progress' using errcode = '55000', detail = 'not_in_progress';
+  end if;
+  if exists (select 1 from public.order_leg_steps
+             where order_id = p_order_id and leg_index = p_leg_index and step = 'arrived_pickup' and reverted_at is null) then
+    raise exception 'admin_allow_early_start: leg already started' using errcode = '55000', detail = 'already_started';
+  end if;
+
+  update public.order_legs set early_start_allowed_at = v_now where order_id = p_order_id and leg_index = p_leg_index;
+  insert into public.order_admin_notes (order_id, kind, leg_index, body, created_by, created_at)
+  values (p_order_id, 'early_start', p_leg_index, v_reason, p_admin_id, v_now);
+  insert into public.audit_log (actor_id, actor_email, action, entity_type, entity_id, data)
+  values (p_admin_id, v_email, 'order.early_start_allowed', 'order', p_order_id, jsonb_build_object('leg_index', p_leg_index));
+  return query select v_now, true;
+end;
+$$;
+revoke execute on function public.admin_allow_early_start(uuid, smallint, uuid, text) from public, anon, authenticated;
+grant execute on function public.admin_allow_early_start(uuid, smallint, uuid, text) to service_role;
+
+-- ---------------------------------------------------------------------------
+-- release_job (D121) + no "Rinuncia" once the load is on board (owner 2026-11-11): any live 'loaded' step, or the
+-- order already picked_up / in_transit → 55000 'loaded' ("Il carico è già a bordo. Contatta Transigo.").
+-- Only an admin can then take the job away (admin_unassign_job). Otherwise unchanged.
+-- Errors: 22023 order not found | 55000 not_assigned | loaded | too_late
+-- ---------------------------------------------------------------------------
+create or replace function public.release_job(p_order_id uuid)
+returns table (released_at timestamptz, order_number text)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+#variable_conflict use_column
+declare
+  c_grace     constant interval := interval '15 minutes';
+  c_min_ahead constant interval := interval '48 hours';
+  v_me        uuid := public.require_carrier();
+  v_order     public.orders%rowtype;
+  v_now       timestamptz := now();
+begin
+  select * into v_order from public.orders where id = p_order_id for update;
+  if not found then
+    raise exception 'release_job: order not found' using errcode = '22023', detail = 'order';
+  end if;
+  if v_order.carrier_id is distinct from v_me then
+    raise exception 'release_job: not assigned to this carrier' using errcode = '55000', detail = 'not_assigned';
+  end if;
+  if v_order.status in ('picked_up', 'in_transit')
+     or exists (select 1 from public.order_leg_steps where order_id = p_order_id and step = 'loaded' and reverted_at is null) then
+    raise exception 'release_job: the load is on board' using errcode = '55000', detail = 'loaded';
+  end if;
+  if v_order.status <> 'assigned' then
+    raise exception 'release_job: not assigned to this carrier' using errcode = '55000', detail = 'not_assigned';
+  end if;
+  if not (v_now <= v_order.assigned_at + c_grace or v_order.pickup_window_start >= v_now + c_min_ahead) then
+    raise exception 'release_job: too late' using errcode = '55000', detail = 'too_late';
+  end if;
+
+  update public.orders
+     set status = 'paid', carrier_id = null, carrier_vehicle_id = null, assigned_at = null
+   where id = p_order_id;
+  insert into public.order_status_history (order_id, from_status, to_status, changed_by, source)
+  values (p_order_id, 'assigned', 'paid', v_me, 'carrier_app');
+
+  return query select v_now, v_order.order_number;
+end;
+$$;
+revoke execute on function public.release_job(uuid) from public, anon;
+grant execute on function public.release_job(uuid) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- admin_unassign_job ("Rimuovi padroncino", D39, D122) — now also in picked_up / in_transit: when the load is on
+-- board only an admin can take the job from the carrier (owner 2026-11-11). The order goes back to 'paid',
+-- picked_up_at / in_transit_at cleared, the carrier's steps reverted (trigger); photos stay for the admin.
+-- audit data + goods_loaded (a live 'loaded' step existed). The reason stays a code (audit only).
+-- NOTE: with the pickup window passed nobody can accept or be assigned the order (too_late) — D122 TODO, Stage 6.
+-- Errors: 42501 | 22023 order / reason | 55000 not_assigned
+-- ---------------------------------------------------------------------------
+create or replace function public.admin_unassign_job(p_order_id uuid, p_admin_id uuid, p_reason_code text)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  c_reasons constant text[] := array['errore_admin', 'richiesta_padroncino', 'problema_veicolo', 'padroncino_non_disponibile', 'altro'];
+  v_email   text := public.require_admin(p_admin_id);
+  v_order   public.orders%rowtype;
+  v_loaded  boolean;
+begin
+  if p_reason_code is null or not p_reason_code = any (c_reasons) then
+    raise exception 'admin_unassign_job: unknown reason code' using errcode = '22023', detail = 'reason';
+  end if;
+  select * into v_order from public.orders where id = p_order_id for update;
+  if not found then
+    raise exception 'admin_unassign_job: order not found' using errcode = '22023', detail = 'order';
+  end if;
+  if v_order.status not in ('assigned', 'picked_up', 'in_transit') then
+    raise exception 'admin_unassign_job: not assigned' using errcode = '55000', detail = 'not_assigned';
+  end if;
+  v_loaded := v_order.status <> 'assigned'
+    or exists (select 1 from public.order_leg_steps where order_id = p_order_id and step = 'loaded' and reverted_at is null);
+
+  update public.orders
+     set status = 'paid', carrier_id = null, carrier_vehicle_id = null, assigned_at = null,
+         picked_up_at = null, in_transit_at = null
+   where id = p_order_id;
+  insert into public.order_status_history (order_id, from_status, to_status, changed_by, source)
+  values (p_order_id, v_order.status, 'paid', p_admin_id, 'admin_panel');
+  insert into public.audit_log (actor_id, actor_email, action, entity_type, entity_id, data)
+  values (p_admin_id, v_email, 'order.unassigned', 'order', p_order_id,
+          jsonb_build_object('carrier_id', v_order.carrier_id, 'vehicle_id', v_order.carrier_vehicle_id,
+                             'reason_code', p_reason_code, 'from', v_order.status, 'goods_loaded', v_loaded,
+                             'pickup_window_passed', v_order.pickup_window_start <= now()));
+end;
+$$;
+revoke execute on function public.admin_unassign_job(uuid, uuid, text) from public, anon, authenticated;
+grant execute on function public.admin_unassign_job(uuid, uuid, text) to service_role;

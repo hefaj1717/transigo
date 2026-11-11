@@ -215,6 +215,8 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 function Dispatch({ o, candidates }: { o: OrderDetail; candidates: Candidate[] }) {
   const next = NEXT_STATUS[o.status];
   const windowPassed = new Date(o.pickup_window_start) <= new Date();
+  // the load is on board from leg 1 "Carico completato" (status picked_up) on — release_job refuses, only the admin removes
+  const loaded = o.status === "picked_up" || o.status === "in_transit";
 
   if (o.status === "paid" && !o.carrier_id) {
     return (
@@ -267,14 +269,14 @@ function Dispatch({ o, candidates }: { o: OrderDetail; candidates: Candidate[] }
                 <p className="text-sm text-amber-900">Senza firma e foto del destinatario: il pagamento al padroncino non partirà in automatico.</p>
                 <label htmlFor="note" className="mt-2 block text-sm font-medium text-zinc-800">Motivo (obbligatorio)</label>
                 <textarea id="note" name="note" required maxLength={1000} rows={2} className={`${inputClass} mt-1 w-full`} />
-                <p className="mt-1 text-xs text-zinc-500">Il motivo resta nello storico dell&apos;ordine (lo vedono anche cliente e padroncino).</p>
+                <p className="mt-1 text-xs text-zinc-500">Il motivo è interno: lo vedono solo gli amministratori.</p>
               </>
             ) : (
               <p className="text-sm text-zinc-700">Stato successivo: {ORDER_STATUS_LABEL[next.to]}.</p>
             )}
           </ActionForm>
         ) : null}
-        {o.status === "assigned" ? (
+        {o.status === "assigned" || loaded ? (
           <ActionForm action={unassignJobAction} submitLabel="Rimuovi padroncino" variant="danger" className="rounded-md border border-zinc-200 p-3">
             <input type="hidden" name="orderId" value={o.id} />
             <label htmlFor="reason" className="block text-sm font-medium text-zinc-800">Motivo</label>
@@ -282,6 +284,11 @@ function Dispatch({ o, candidates }: { o: OrderDetail; candidates: Candidate[] }
               <option value="" disabled>Scegli…</option>
               {UNASSIGN_REASONS.map((r) => <option key={r.code} value={r.code}>{r.label}</option>)}
             </select>
+            {loaded ? (
+              <p className="mt-1 text-sm font-medium text-red-800">
+                Attenzione: il carico è già a bordo del padroncino. Dopo la rimozione l&apos;ordine torna «da assegnare»; organizza tu il recupero della merce.
+              </p>
+            ) : null}
             {windowPassed ? (
               <p className="mt-1 text-xs text-amber-900">La finestra di ritiro è già iniziata: dopo la rimozione l&apos;ordine non sarà assegnabile (serve un cambio data o un rimborso).</p>
             ) : <p className="mt-1 text-xs text-zinc-500">L&apos;ordine tornerà tra quelli da assegnare.</p>}

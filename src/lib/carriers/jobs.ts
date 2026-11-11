@@ -299,6 +299,7 @@ export const JOB_MSG = {
   notFound: "Corsa non trovata.",
   released: "Hai rinunciato alla corsa. Il team Transigo è stato avvisato.",
   releaseTooLate: "Il termine per rinunciare è scaduto. Per un problema con questa corsa contatta Transigo.",
+  releaseLoaded: "Il carico è già a bordo. Contatta Transigo.", // release_job 'loaded' (2026-11-11)
   notAssigned: "Questa corsa non è più assegnata a te.",
   forbidden: "Operazione non consentita.",
   generic: "Si è verificato un errore. Riprova tra poco.",
@@ -333,6 +334,8 @@ export function jobDbError(op: "accept" | "release", error: DbError): JobErrorVi
           return fail(JOB_MSG.vehicleNotSuitable);
         case "not_assigned":
           return fail(JOB_MSG.notAssigned);
+        case "loaded":
+          return fail(JOB_MSG.releaseLoaded);
       }
   }
   return fail(JOB_MSG.generic);

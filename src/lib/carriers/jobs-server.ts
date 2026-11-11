@@ -364,7 +364,10 @@ export async function acceptJob(db: SupabaseClient, userId: string, orderId: str
   return outcome;
 }
 
-/** `tooLate`: release_job refused with too_late (the deadline passed meanwhile) — the UI shows "Contatta Transigo". */
+/**
+ * `tooLate`: release_job refused with too_late (the deadline passed meanwhile) or loaded (the load is on board) —
+ * the UI shows "Contatta Transigo".
+ */
 export type ReleaseResult = { ok: true; message: string } | { ok: false; error: string; tooLate: boolean };
 
 /**
@@ -385,7 +388,7 @@ export async function releaseJob(db: SupabaseClient, userId: string, orderId: st
   const { data, error } = await db.rpc("release_job", { p_order_id: orderId }).single<{ released_at: string; order_number: string }>();
   if (error || !data) {
     if (error?.code !== "55000" && error?.code !== "22023") logDbError("release_job", error);
-    const tooLate = error?.code === "55000" && error.details === "too_late";
+    const tooLate = error?.code === "55000" && (error.details === "too_late" || error.details === "loaded");
     return { ok: false, error: jobDbError("release", error).message, tooLate };
   }
 

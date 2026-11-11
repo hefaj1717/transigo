@@ -513,15 +513,17 @@ describe("immutability and undo", () => {
     expect((await revert(orderId, "Arrivo segnato per errore")).data).toEqual({ leg_index: 0, step: "arrived_pickup", order_status: "assigned" });
     expect((await revert(orderId, "Niente")).error).toMatchObject({ code: "55000", details: "no_step" });
 
+    // history: only real status changes, without a note; the reasons are internal (order_admin_notes)
     const h = (await historyRows(orderId)).filter((r) => r.source === "admin_panel");
     expect(h.map((r) => [r.from_status, r.to_status, r.note, r.changed_by])).toEqual([
-      ["in_transit", "picked_up", "Partenza segnata per errore", admin.id],
-      ["picked_up", "assigned", "Carico non completo", admin.id],
-      ["assigned", "assigned", "Arrivo segnato per errore", admin.id],
+      ["in_transit", "picked_up", null, admin.id],
+      ["picked_up", "assigned", null, admin.id],
     ]);
-    // the parties see the reason in the history
-    const seen = await check(customer.client.from("order_status_history").select("note").eq("order_id", orderId).not("note", "is", null));
-    expect(seen.map((r) => r.note)).toContain("Carico non completo");
+    expect(await check(service.from("order_admin_notes").select("kind, leg_index, body, created_by").eq("order_id", orderId).order("id"))).toEqual([
+      { kind: "step_reverted", leg_index: 0, body: "Partenza segnata per errore", created_by: admin.id },
+      { kind: "step_reverted", leg_index: 0, body: "Carico non completo", created_by: admin.id },
+      { kind: "step_reverted", leg_index: 0, body: "Arrivo segnato per errore", created_by: admin.id },
+    ]);
     // audit: no free text
     const audit = await check(service.from("audit_log").select("action, data").eq("entity_id", orderId).eq("action", "order.step_reverted").order("id"));
     expect(audit.map((a) => a.data)).toEqual([
@@ -544,3 +546,142 @@ describe("immutability and undo", () => {
     expect((await revert(orderId, "Troppo tardi")).error).toMatchObject({ code: "55000", details: "not_in_progress" });
   });
 });
+
+describe("internal admin reasons (owner 2026-11-11)", () => {
+  it("the customer and the carrier never read a reason; the admin does", async () => {
+    const { orderId, c } = await runningJob({ storage: true });
+    await run(step(c.user, orderId, 0, "arrived_pickup"));
+    await check(revert(orderId, "Motivo interno: arrivo"));
+    await check(service.rpc("admin_allow_early_start", { p_order_id: orderId, p_leg_index: 1, p_admin_id: admin.id, p_reason: "Motivo interno: anticipo" }));
+    for (const to of ["picked_up", "in_transit", "delivered"]) {
+      await run(service.rpc("admin_advance_order", { p_order_id: orderId, p_admin_id: admin.id, p_to_status: to, p_note: to === "delivered" ? "Motivo interno: consegna" : null }));
+    }
+
+    for (const u of [customer, c.user, otherCustomer]) {
+      expect(await check(u.client.from("order_admin_notes").select("id").eq("order_id", orderId))).toHaveLength(0);
+      expect((await u.client.from("order_admin_notes").select("body")).data ?? []).toHaveLength(0);
+    }
+    expect((await anon.from("order_admin_notes").select("body")).data ?? []).toHaveLength(0);
+    const seen = [
+      ...(await check(customer.client.from("order_status_history").select("note").eq("order_id", orderId))),
+      ...(await check(c.user.client.from("order_status_history").select("note").eq("order_id", orderId))),
+    ];
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((r) => r.note === null)).toBe(true);
+    const all = await check(service.from("order_status_history").select("note").eq("order_id", orderId));
+    expect(all.every((r) => r.note === null)).toBe(true); // nowhere in the history, not only hidden
+    // no free text in the audit log either (D65)
+    const audit = JSON.stringify(await check(service.from("audit_log").select("data").eq("entity_id", orderId)));
+    expect(audit).not.toContain("Motivo interno");
+
+    const notes = await check(admin.client.from("order_admin_notes").select("kind, leg_index, body").eq("order_id", orderId).order("id"));
+    expect(notes).toEqual([
+      { kind: "step_reverted", leg_index: 0, body: "Motivo interno: arrivo" },
+      { kind: "early_start", leg_index: 1, body: "Motivo interno: anticipo" },
+      { kind: "delivered_without_pod", leg_index: null, body: "Motivo interno: consegna" },
+    ]);
+    // append-only, no direct writes
+    for (const client of [admin.client, service, customer.client]) {
+      await client.from("order_admin_notes").insert({ order_id: orderId, kind: "status_changed", body: "x", created_by: admin.id });
+      await client.from("order_admin_notes").update({ body: "y" }).eq("order_id", orderId);
+      await client.from("order_admin_notes").delete().eq("order_id", orderId);
+    }
+    expect(await check(service.from("order_admin_notes").select("body").eq("order_id", orderId))).toHaveLength(3);
+    expect(localSql(`update public.order_admin_notes set body = 'y' where order_id = '${orderId}';`).output).toContain("42501");
+  });
+});
+
+describe("no Rinuncia once the load is on board (owner 2026-11-11)", () => {
+  it("before loading the usual rules apply; after loaded on leg 0 → 'loaded', also in transit", async () => {
+    const { orderId, c } = await runningJob();
+    await run(step(c.user, orderId, 0, "arrived_pickup"));
+    await photo(c.user, orderId, 0, "pickup");
+    await run(step(c.user, orderId, 0, "loaded"));
+    expect((await release(c.user, orderId)).error).toMatchObject({ code: "55000", details: "loaded" });
+    await run(step(c.user, orderId, 0, "departed"));
+    expect((await release(c.user, orderId)).error).toMatchObject({ code: "55000", details: "loaded" });
+    expect((await order(orderId)).status).toBe("in_transit");
+    // the server code behind "Rinuncia": the Italian message and the "Contatta Transigo" box, no e-mail
+    const { releaseJob } = await import("@/lib/carriers/jobs-server");
+    let mails = 0;
+    const deps = { serviceDb: () => { mails++; return service; }, adminEmail: "ops@example.com", appUrl: "https://transigo.example" };
+    expect(await releaseJob(c.user.client, c.user.id, orderId, deps)).toEqual({ ok: false, error: "Il carico è già a bordo. Contatta Transigo.", tooLate: true });
+    expect(mails).toBe(0);
+    // another carrier still gets not_assigned (no information about the load)
+    const other = await activeCarrier();
+    expect((await release(other.user, orderId)).error).toMatchObject({ code: "55000", details: "not_assigned" });
+  });
+
+  it("only arrived_pickup (nothing loaded): Rinuncia within 15 minutes still works", async () => {
+    const { orderId, c } = await runningJob();
+    await run(step(c.user, orderId, 0, "arrived_pickup"));
+    expect((await release(c.user, orderId)).error).toBeNull();
+    expect((await order(orderId)).status).toBe("paid");
+  });
+
+  it("the admin can take a loaded job away (Rimuovi padroncino): steps reverted, the carrier loses access", async () => {
+    const { orderId, c } = await runningJob();
+    await run(step(c.user, orderId, 0, "arrived_pickup"));
+    await photo(c.user, orderId, 0, "pickup");
+    await run(step(c.user, orderId, 0, "loaded"));
+    await run(service.rpc("admin_unassign_job", { p_order_id: orderId, p_admin_id: admin.id, p_reason_code: "problema_veicolo" }));
+    expect(await order(orderId)).toMatchObject({ status: "paid", picked_up_at: null });
+    expect(await check(service.from("order_leg_steps").select("id").eq("order_id", orderId).is("reverted_at", null))).toHaveLength(0);
+    expect(await check(service.from("order_photos").select("id").eq("order_id", orderId))).toHaveLength(1); // kept for the admin
+    expect(await check(c.user.client.from("order_photos").select("id").eq("order_id", orderId))).toHaveLength(0);
+    expect((await step(c.user, orderId, 0, "departed")).error).toMatchObject({ details: "not_assigned" });
+    const audit = await check(service.from("audit_log").select("data").eq("entity_id", orderId).eq("action", "order.unassigned"));
+    expect(audit[0].data).toMatchObject({ from: "picked_up", goods_loaded: true });
+  });
+});
+
+describe("admin_allow_early_start (owner 2026-11-11)", () => {
+  it("leg 2 of a warehouse order may start before its pickup day; reason required; once", async () => {
+    const orderId = await paidOrder({ hoursAhead: 72, storage: true });
+    const c = await activeCarrier();
+    await check(accept(c.user, orderId, c.vehicleId));
+    const allow = (leg: number, reason: string | null, adminId = admin.id) =>
+      service.rpc("admin_allow_early_start", { p_order_id: orderId, p_leg_index: leg, p_admin_id: adminId, p_reason: reason }).single<{ allowed_at: string; newly_allowed: boolean }>();
+
+    for (const client of [c.user.client, customer.client, admin.client, anon]) {
+      expect((await client.rpc("admin_allow_early_start", { p_order_id: orderId, p_leg_index: 1, p_admin_id: admin.id, p_reason: "x" })).error).not.toBeNull();
+    }
+    for (const reason of [null, "", "  ", "x".repeat(1001)]) expect((await allow(1, reason)).error).toMatchObject({ code: "22023", details: "reason" });
+    expect((await allow(2, "x")).error).toMatchObject({ code: "22023", details: "leg" });
+    expect((await allow(1, "x", c.user.id)).error).toMatchObject({ code: "42501" });
+
+    // leg 0 too (3 days ahead): allowed early by the admin, without changing the status
+    expect((await step(c.user, orderId, 0, "arrived_pickup")).error).toMatchObject({ details: "too_early" });
+    expect((await allow(0, "Il cliente è pronto oggi")).data?.newly_allowed).toBe(true);
+    expect((await order(orderId)).status).toBe("assigned");
+    expect((await allow(0, "di nuovo")).data?.newly_allowed).toBe(false);
+    await doLeg(c.user, orderId, 0);
+
+    expect((await step(c.user, orderId, 1, "arrived_pickup")).error).toMatchObject({ code: "55000", details: "too_early" });
+    const first = await allow(1, "Il cliente ritira prima dal magazzino");
+    expect(first.data?.newly_allowed).toBe(true);
+    expect((await allow(1, "di nuovo")).data).toEqual({ allowed_at: first.data!.allowed_at, newly_allowed: false });
+    await doLeg(c.user, orderId, 1);
+    expect((await allow(1, "tardi")).data?.newly_allowed).toBe(false); // already set: no-op
+    expect((await complete(c.user, orderId, "Lucia", await signature(c.user, orderId))).error).toBeNull();
+
+    // the snapshot is still immutable apart from the two execution columns; set once
+    expect(localSql(`update public.order_legs set early_start_allowed_at = now(), distance_m = 1 where order_id = '${orderId}' and leg_index = 1;`).output).toContain("42501");
+    const notes = await check(service.from("order_admin_notes").select("kind, leg_index").eq("order_id", orderId).order("id"));
+    expect(notes).toEqual([{ kind: "early_start", leg_index: 0 }, { kind: "early_start", leg_index: 1 }]);
+    expect((await historyRows(orderId)).filter((h) => h.source === "admin_panel")).toHaveLength(0); // no status change, no history row
+  });
+
+  it("not after the leg started, not on a finished job", async () => {
+    const { orderId, c } = await runningJob();
+    await run(step(c.user, orderId, 0, "arrived_pickup"));
+    const allow = () => service.rpc("admin_allow_early_start", { p_order_id: orderId, p_leg_index: 0, p_admin_id: admin.id, p_reason: "x" });
+    expect((await allow()).error).toMatchObject({ code: "55000", details: "already_started" });
+    const done = await runningJob();
+    await doLeg(done.c.user, done.orderId, 0);
+    await run(complete(done.c.user, done.orderId, "Lucia", await signature(done.c.user, done.orderId)));
+    expect((await service.rpc("admin_allow_early_start", { p_order_id: done.orderId, p_leg_index: 0, p_admin_id: admin.id, p_reason: "x" })).error)
+      .toMatchObject({ code: "55000", details: "not_in_progress" });
+  });
+});
+
