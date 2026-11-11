@@ -111,7 +111,22 @@ stronie głównej, każda usługa ma własną podstronę i własny kreator. Teks
 2. Silnik cenowy (sekcja 2). ✔ (2026-11-11; stawka za piętro w `PricingConfig.portersService.floorNoElevatorCents` — loader wypełni ją z reguły `porters_floor_no_elevator` w kroku 3)
 3. Migracja 1 — cennik (SQL do akceptacji) + `/admin/listini`. ✔ (2026-11-11, D161; migracje `20261111190000_pricing_services_code.sql` + `20261111190001_pricing_services.sql` lokalnie; opublikowane cenniki bez zmian — usługi dostępne po „Crea bozza” → „Pubblica”)
 4. Strona publiczna (sekcja 4). ✔ (2026-11-11, D162; kalkulatory → `/contatti` do kroków 6–7 — wtedy zmienić `REQUEST_PATH` w `src/lib/public/requests.ts`)
-5. Migracja 2 — zlecenia (SQL do akceptacji) + filtr w `/admin/ordini`.
+5. Migracja 2 — zlecenia (SQL do akceptacji) + filtr w `/admin/ordini`. Podzielony (D163):
+   - **5a ✔** (2026-11-11, **lokalnie**): migracje `20261111200000_three_services_enum.sql` + `20261111200001_three_services.sql`
+     (SQL zatwierdzony przez właściciela, bez zmian względem szkicu), testy `tests/rls/three-services.test.ts` (29: tylko
+     service role, walidacje porters/storage, pojemność i wyścig o ostatni box, widoczność per rola, brak na liście kursów
+     i u kandydatów admina, kolumny niezmienne). Aplikacja: `src/lib/orders/service-type.ts` (etykiety, filtr, pomocnicze
+     depozytu), `/admin/ordini` — filtr „Servizio” (łączy się z filtrem statusu), oznaczenie typu, Deposito poza
+     „Da assegnare”; szczegóły admina i klienta bez odcinków (sekcja Facchinaggio / Deposito zamiast „Percorso”);
+     `orderTitle()` na kartach klienta; dashboard: alert bez Deposito, kwota przewoźnika facchinaggio w „Incassi”.
+     Test ręczny `docs/testy-reczne/tre-servizi.md` (A).
+   - Krok 6 przejmuje: przypisywanie facchinaggio (`offers_porters`, ekipa ≥ osoby) w `list_available_jobs` / `accept_job` /
+     `admin_job_candidates` / `admin_assign_job`. Krok 7: łańcuch, jedna płatność i faktura grupy. Krok 10: raty.
+   - **TODO z 5a (przed pierwszym zleceniem porters/storage z aplikacji, kroki 6–7):** mail `order_paid`
+     (`sendOrderPaidEmail` w `src/lib/payments/server.ts`), `customer-emails.ts` i `cancellation-server.ts` zakładają
+     odcinek `legs[0]`; Checkout dostaje pusty opis trasy. Klient nie czyta `warehouses` (RLS) — adres magazynu dla
+     „porto io” podać inaczej (funkcja albo snapshot w rezerwacji). Anulowanie depozytu: tekst „24 ore prima del ritiro”
+     liczy od północy pierwszego dnia — sprawdzić z D33.
 6. Kreator Facchini → płatność → admin przypisuje → „Consegnato”.
 7. Kreator Deposito, płatność z góry (bez rat): porto io / ritiro Transigo / consegna dalej.
 8. Kreator Trasporto: „Deposito Transigo”, tragarze z ceną.
