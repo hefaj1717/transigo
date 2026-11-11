@@ -685,3 +685,12 @@ describe("admin_allow_early_start (owner 2026-11-11)", () => {
   });
 });
 
+describe("TypeScript and database agree", () => {
+  it("LEG_STEPS = enum order_leg_step (same order); photo limit = register_order_photo", async () => {
+    const { LEG_STEPS, PHOTO_MAX_BYTES, SIGNATURE_MAX_BYTES } = await import("@/lib/carriers/execution");
+    expect(sql("select array_to_string(enum_range(null::public.order_leg_step), ',');")).toContain(LEG_STEPS.join(","));
+    const buckets = sql("select id || '=' || file_size_limit from storage.buckets where id in ('order-photos', 'pod-signatures') order by id;");
+    expect(buckets).toContain(`order-photos=${PHOTO_MAX_BYTES}`);
+    expect(buckets).toContain(`pod-signatures=${SIGNATURE_MAX_BYTES}`);
+  });
+});
