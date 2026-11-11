@@ -90,7 +90,19 @@ Uwagi techniczne:
   - [x] Krok 5: przegląd w przeglądarce na danych demo (lista, zlecenia we wszystkich statusach, z magazynem, „Assegna” w `/admin/ordini` → mail `order_assigned` w outboxie); lista `docs/testy-reczne/panel-klienta.md`. W cenie bez „× ilość” (nazwy pozycji już ją zawierają).
   - [x] Krok 6: `admin_order_dispatch`, `contact_requests`, `customer_order_carrier` **na stagingu od 2026-11-09** (za zgodą właściciela; `db:list` — lokalne = zdalne). `CONTACT_IP_HASH_SECRET` dodany na Vercel przez właściciela.
 
-## Odłożone: PWA przewoźnika (priorytet: najpierw demo dla klienta, 2026-11-09)
+## W toku: pełne demo strony (plan zatwierdzony 2026-11-11)
+
+Priorytet właściciela: najpierw cała strona (publiczna + panel klienta + panel admina) jako działające demo online, aplikacja przewoźnika potem. Pełne demo nie wymaga PWA — admin przypisuje przewoźnika i prowadzi statusy do „Consegnato” (D122, D123).
+
+- [ ] Krok 1: demo online — wdrożenie na Vercel (staging Supabase) + dane demo na stagingu (seed tylko z jawną flagą i za zgodą właściciela w danej rozmowie).
+- [ ] Krok 2: panel klienta — „Profilo” (dane, dane do faktury, zmiana hasła), anulowanie opłaconego zlecenia z opłatą i zwrotem Stripe (D33), „Reclami”, „Deposito”.
+- [ ] Krok 3: panel admina — „Clienti”, zwroty/anulowania (`cancellation_review`, `payment_review`), „Reclami”, „Impostazioni”, pozycje w magazynie, dashboard.
+- [ ] Krok 4: faktury klienta i admina (do decyzji: adapter „demo” z PDF oznaczonym DEMO zamiast Fatture in Cloud).
+- [ ] Krok 5: mapa trasy w kroku „Percorso”, przegląd strony publicznej (telefon + komputer).
+- Do decyzji: mapa trackingu u klienta — odłożyć z PWA albo symulacja przejazdu tylko na demo.
+- Odłożone razem z PWA: Stripe Connect i wypłaty (też ekran wypłat admina), faktura przewoźnika, GPS, „Segnala un problema”, SMS.
+
+## Odłożone: PWA przewoźnika (po pełnym demo strony, decyzja właściciela 2026-11-11)
 
 Decyzje właściciela (D117–D121 w spec):
 - **Magazyn:** teraz model A (kurs = całe zlecenie, jeden przewoźnik na oba odcinki). Model B (kurs i wypłata per odcinek) **przed Etapem 7 i przed startem produkcyjnym** — do tego czasu kreator **bez „stoccaggio lungo termine”**.
