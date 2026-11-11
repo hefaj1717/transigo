@@ -57,6 +57,7 @@ public/workbox-*.js.map
 
 # local seed password (scripts/lib/local-seed.mjs)
 /.seed-local/
+/.seed-staging/
 
 # end-to-end test build (playwright.config.ts)
 /.next-e2e/

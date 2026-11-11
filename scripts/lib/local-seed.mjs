@@ -1,23 +1,33 @@
-// Shared helpers for the LOCAL seed scripts (seed-demo.mjs, seed-local-carriers.mjs) — D64: local Supabase only,
-// never staging/production.
+// Shared helpers for the seed scripts (seed-demo.mjs, seed-local-carriers.mjs, seed-e2e-jobs.mjs).
+// Default target: the LOCAL Supabase (D64). The only exception is the website demo (plan of 2026-11-11):
+// seed-demo.mjs with the explicit flag --staging=<staging project ref> writes the demo data to the staging project —
+// only with the owner's consent in that conversation (CLAUDE.md). Never production, never any other project.
 //
-// Safety:
+// Safety (local):
 //   * guard 1: SUPABASE_URL / NEXT_PUBLIC_SUPABASE_URL, when set, must point at the local stack — otherwise refuse;
 //   * guard 2: `supabase status` must report this repo's local stack (127.0.0.1 / localhost, ports 55321 / 55322);
 //     the keys come from there (no secrets in files);
 //   * guard 3: plain SQL runs only through `docker exec` into supabase_db_TransiGo, with a check inside the
 //     transaction that the connection is the container's local socket.
+// Safety (staging):
+//   * only seed-demo.mjs, only with --staging=<STAGING_REF> spelled out (no npm script carries the flag);
+//   * keys read from .env.local only (not the shell, not .env.development.local), and its NEXT_PUBLIC_SUPABASE_URL
+//     must be exactly https://<STAGING_REF>.supabase.co — a production project gets a different ref and is refused;
+//   * no plain SQL at all (localSql refuses): everything goes through the API and the database functions;
+//   * payments are real Stripe TEST PaymentIntents (sk_test_ only), so refunds work on the demo orders.
 //
 // Idempotency: every seed account has a fixed e-mail and is found-or-created; each script checks a completion
 // marker before creating orders, so running it again prints the existing data instead of adding a second set.
 //
-// Password: never in the repo. Taken from SEED_PASSWORD, else from .seed-local/password (git-ignored), else
-// generated once and saved there. Every run sets it on every seed account it touches, so logins always match.
+// Password: never in the repo. Taken from SEED_PASSWORD, else from .seed-local/password (staging:
+// .seed-staging/password; both git-ignored), else generated once and saved there. Every run sets it on every seed
+// account it touches, so logins always match.
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { parseEnv } from "node:util";
 import { deflateSync } from "node:zlib";
 
 const require = createRequire(import.meta.url);
@@ -42,26 +52,52 @@ function refuse(message) {
   process.exit(1);
 }
 
-for (const key of ["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"]) {
-  const v = process.env[key];
-  if (v && !isLocalApiUrl(v)) refuse(`${key}=${v} is not this repo's local Supabase (http://127.0.0.1:55321).`);
-}
+/** The staging project (CLAUDE.md). Production will be a separate project with another ref — always refused here. */
+export const STAGING_REF = "bacabuzzevwwdxrswbnc";
+const stagingArgs = process.argv.slice(2).filter((a) => a.startsWith("--staging"));
+/** "local" (default) or "staging" (seed-demo.mjs --staging=<STAGING_REF> only). */
+export const TARGET = stagingArgs.length ? "staging" : "local";
 
-let status;
-try {
-  status = JSON.parse(execFileSync("npx", ["supabase", "status", "-o", "json"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
-} catch {
-  refuse("local Supabase is not running (npm run db:local:start).");
-}
-{
+let API_URL, ANON_KEY, SERVICE_KEY, STRIPE_KEY;
+if (TARGET === "staging") {
+  if (stagingArgs.length !== 1 || stagingArgs[0] !== `--staging=${STAGING_REF}`) {
+    refuse(`the staging flag must name the staging project: --staging=${STAGING_REF}`);
+  }
+  if (!/[/\\]seed-demo\.mjs$/.test(process.argv[1] ?? "")) refuse("only scripts/seed-demo.mjs may write to staging.");
+  let env;
+  try {
+    env = parseEnv(readFileSync(`${root}.env.local`, "utf8"));
+  } catch {
+    refuse(".env.local not found (the staging keys are read only from there).");
+  }
+  if (env.NEXT_PUBLIC_SUPABASE_URL !== `https://${STAGING_REF}.supabase.co`) {
+    refuse(`.env.local points at ${env.NEXT_PUBLIC_SUPABASE_URL}, not the staging project ${STAGING_REF}.`);
+  }
+  if (!env.NEXT_PUBLIC_SUPABASE_ANON_KEY || !env.SUPABASE_SERVICE_ROLE_KEY) refuse(".env.local lacks the Supabase keys.");
+  if (!env.STRIPE_SECRET_KEY?.startsWith("sk_test_")) refuse("STRIPE_SECRET_KEY in .env.local must be a TEST key (sk_test_…).");
+  ({ NEXT_PUBLIC_SUPABASE_URL: API_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY: ANON_KEY, SUPABASE_SERVICE_ROLE_KEY: SERVICE_KEY, STRIPE_SECRET_KEY: STRIPE_KEY } = env);
+  console.log(`Destinazione: STAGING — progetto ${STAGING_REF} (${API_URL}).`);
+} else {
+  for (const key of ["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"]) {
+    const v = process.env[key];
+    if (v && !isLocalApiUrl(v)) refuse(`${key}=${v} is not this repo's local Supabase (http://127.0.0.1:55321).`);
+  }
+
+  let status;
+  try {
+    status = JSON.parse(execFileSync("npx", ["supabase", "status", "-o", "json"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+  } catch {
+    refuse("local Supabase is not running (npm run db:local:start).");
+  }
   const db = new URL(status.DB_URL);
   if (!isLocalApiUrl(status.API_URL) || !LOCAL_HOSTS.has(db.hostname) || db.port !== "55322") {
     refuse(`${status.API_URL} / ${db.host} is not this repo's local Supabase (127.0.0.1:55321 / :55322).`);
   }
+  ({ API_URL, ANON_KEY, SERVICE_ROLE_KEY: SERVICE_KEY } = status);
 }
-export const API_URL = status.API_URL;
+export { API_URL };
 const opts = { auth: { persistSession: false, autoRefreshToken: false } };
-export const service = createClient(API_URL, status.SERVICE_ROLE_KEY, opts);
+export const service = createClient(API_URL, SERVICE_KEY, opts);
 
 /**
  * Right after `npm run db:local:reset` the REST API is still rebuilding its schema cache (PGRST002 "Could not query
@@ -74,17 +110,17 @@ async function waitForRest() {
     try {
       const { error } = await service.from("settings").select("id").limit(1);
       if (!error) {
-        if (i) console.log("API locale pronta.");
+        if (i) console.log("API pronta.");
         return;
       }
       last = `${error.code ?? ""} ${error.message ?? ""}`;
     } catch (e) {
       last = e instanceof Error ? e.message : String(e);
     }
-    if (i === 0) console.log("Attendo l'API locale (dopo il reset ricostruisce la cache dello schema)…");
+    if (i === 0) console.log("Attendo l'API (dopo il reset ricostruisce la cache dello schema)…");
     await new Promise((r) => setTimeout(r, 1000));
   }
-  refuse(`local REST API not ready after 60 s (${last.trim()}).`);
+  refuse(`REST API not ready after 60 s (${last.trim()}).`);
 }
 await waitForRest();
 
@@ -96,6 +132,7 @@ export const ok = async (p) => {
 
 /** Plain SQL inside the LOCAL database container (guard 3 inside the transaction). */
 export function localSql(sql) {
+  if (TARGET !== "local") throw new Error("localSql: plain SQL only on the local database");
   const res = spawnSync("docker", ["exec", "-i", "supabase_db_TransiGo", "psql", "-U", "postgres", "-d", "postgres", "-X", "-q", "-v", "ON_ERROR_STOP=1"], {
     input: `begin;
 do $$ begin
@@ -119,7 +156,7 @@ export const sqlUuid = (id) => {
 // ---------------------------------------------------------------------------
 // Password (outside the repo)
 // ---------------------------------------------------------------------------
-const PASSWORD_DIR = `${root}.seed-local`;
+const PASSWORD_DIR = `${root}${TARGET === "staging" ? ".seed-staging" : ".seed-local"}`;
 export const PASSWORD_FILE = `${PASSWORD_DIR}/password`;
 function seedPassword() {
   if (process.env.SEED_PASSWORD) {
@@ -167,7 +204,7 @@ export async function user(email, meta = {}) {
   } else {
     await ok(service.auth.admin.updateUserById(id, { password: PW }));
   }
-  const client = createClient(API_URL, status.ANON_KEY, opts);
+  const client = createClient(API_URL, ANON_KEY, opts);
   await ok(client.auth.signInWithPassword({ email, password: PW }));
   return { id, email, client, created };
 }
@@ -435,11 +472,32 @@ export async function order(customer, { from, to, daysAhead, window = "10-12", v
   return { id: created.id, number: created.order_number, total: result.quote.totalCents };
 }
 
+let stripe;
+/**
+ * Locally: fake Stripe ids (no network). On staging: a real Stripe TEST PaymentIntent paid with the test card
+ * (pm_card_visa), so the demo orders can be refunded through Stripe later.
+ */
+async function demoCharge(o) {
+  if (TARGET === "local") return { pi: `pi_demo_${randomUUID()}`, charge: `ch_demo_${randomUUID()}` };
+  if (!stripe) {
+    const Stripe = require("stripe");
+    stripe = new Stripe(STRIPE_KEY);
+  }
+  const pi = await stripe.paymentIntents.create({
+    amount: o.total, currency: "eur", payment_method: "pm_card_visa", confirm: true,
+    automatic_payment_methods: { enabled: true, allow_redirects: "never" },
+    description: `Transigo demo (seed) ${o.number}`, metadata: { order_id: o.id, source: "demo_seed" },
+  });
+  if (pi.status !== "succeeded" || typeof pi.latest_charge !== "string") throw new Error(`Stripe test payment ${pi.id}: ${pi.status}`);
+  return { pi: pi.id, charge: pi.latest_charge };
+}
+
 /** Pays the order the way the Stripe webhook does (start + confirm). */
 export async function pay(o) {
   const session = `cs_test_demo_${randomUUID()}`;
+  const { pi, charge } = await demoCharge(o);
   await ok(service.rpc("start_order_payment", { p_order_id: o.id, p_session_id: session, p_amount_cents: o.total, p_expires_at: new Date(Date.now() + 3_600_000).toISOString() }));
-  await ok(service.rpc("confirm_order_payment", { p_session_id: session, p_payment_intent_id: `pi_demo_${randomUUID()}`, p_charge_id: `ch_demo_${randomUUID()}`, p_amount_cents: o.total, p_currency: "eur" }));
+  await ok(service.rpc("confirm_order_payment", { p_session_id: session, p_payment_intent_id: pi, p_charge_id: charge, p_amount_cents: o.total, p_currency: "eur" }));
   return o;
 }
 
@@ -457,5 +515,5 @@ export async function printOrders(customerId) {
 export function printPasswordHint() {
   console.log(process.env.SEED_PASSWORD
     ? "\nPassword per tutti: quella di SEED_PASSWORD."
-    : `\nPassword per tutti: nel file .seed-local/password (fuori dal repo) — cat .seed-local/password`);
+    : `\nPassword per tutti: nel file ${PASSWORD_FILE.slice(root.length)} (fuori dal repo) — cat ${PASSWORD_FILE.slice(root.length)}`);
 }

@@ -95,6 +95,8 @@ Uwagi techniczne:
 Priorytet właściciela: najpierw cała strona (publiczna + panel klienta + panel admina) jako działające demo online, aplikacja przewoźnika potem. Pełne demo nie wymaga PWA — admin przypisuje przewoźnika i prowadzi statusy do „Consegnato” (D122, D123).
 
 - [ ] Krok 1: demo online — wdrożenie na Vercel (staging Supabase) + dane demo na stagingu (seed tylko z jawną flagą i za zgodą właściciela w danej rozmowie).
+  - Vercel: projekt `transi-go/transigo`, deploy z `main` działa (status „Vercel: success” na GitHub). Do sprawdzenia przez właściciela: zmienne środowiskowe i webhook Stripe na adres Vercel.
+  - Seed na stagingu: `node scripts/seed-demo.mjs --staging=bacabuzzevwwdxrswbnc` (bez skryptu npm; klucze tylko z `.env.local`, jego URL musi być stagingiem; bez SQL — daty z dnia seeda, kursy w toku przez `admin_allow_early_start`; płatności = prawdziwe PaymentIntent testowe Stripe, więc zwroty działają; hasło w `.seed-staging/password`, poza repo). Inne skrypty seed i każda inna flaga → odmowa.
 - [ ] Krok 2: panel klienta — „Profilo” (dane, dane do faktury, zmiana hasła), anulowanie opłaconego zlecenia z opłatą i zwrotem Stripe (D33), „Reclami”, „Deposito”.
 - [ ] Krok 3: panel admina — „Clienti”, zwroty/anulowania (`cancellation_review`, `payment_review`), „Reclami”, „Impostazioni”, pozycje w magazynie, dashboard.
 - [ ] Krok 4: faktury klienta i admina (do decyzji: adapter „demo” z PDF oznaczonym DEMO zamiast Fatture in Cloud).

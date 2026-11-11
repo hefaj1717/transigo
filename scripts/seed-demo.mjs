@@ -1,5 +1,11 @@
-// Demo data for the customer demo and the carrier job screens — LOCAL Supabase only (D64), never staging/production.
-// Usage:  npm run db:local:reset && npm run db:local:seed-demo
+// Demo data for the customer demo and the carrier job screens.
+// Usage (local, default):  npm run db:local:reset && npm run db:local:seed-demo
+// Staging (website demo online, plan of 2026-11-11) — ONLY with the owner's consent in that conversation:
+//          node scripts/seed-demo.mjs --staging=bacabuzzevwwdxrswbnc
+//   Same accounts and orders, but no plain SQL: dates are not moved into the past (delivered orders keep the dates
+//   of the seed run), the jobs under way start through admin_allow_early_start ("Consenti inizio anticipato") and
+//   payments are real Stripe TEST PaymentIntents. It also activates 8 provinces, adds the Milan warehouse and, when
+//   the active price list has no porter packages, publishes a new version with them.
 // Running it again does not add anything: it prints the existing orders and logins (and sets the seed password
 // on the accounts again). For fresh dates (e.g. "Rinuncia bloccata" depends on the clock) reset and seed again.
 // Guards, password and helpers: scripts/lib/local-seed.mjs. Manual tests: docs/testy-reczne/corse-padroncino.md.
@@ -21,7 +27,7 @@
 //       22 warehouse like 21, no porters                  → admin: "Rimuovi padroncino" → "Da gestire" (D136)
 // Delivered orders and the blocked-Rinuncia job are moved into the past with plain SQL in the local container.
 import {
-  ADMIN_EMAIL, approveCarrier, carrierAccount, companyDocs, completeDelivery, ensurePorterPackages, existingUserId, legsToTodaySql, localSql, ok, order,
+  ADMIN_EMAIL, TARGET, approveCarrier, carrierAccount, companyDocs, completeDelivery, ensurePorterPackages, existingUserId, legsToTodaySql, localSql, ok, order,
   orderPhoto, pay, printOrders, printPasswordHint, privateCustomer, recordStep, seedAdmin, service, sqlUuid, stepTimesSql, user, vehicle,
 } from "./lib/local-seed.mjs";
 
@@ -36,12 +42,14 @@ const EXECUTION_DEMO = {
   "Scaffalature metalliche e 6 scatoloni di archivio": "admin: «Rimuovi padroncino» con la merce in magazzino → «Da gestire» (D136)",
 };
 
+const LOCAL = TARGET === "local";
+const BASE = LOCAL ? "http://localhost:3000" : "<indirizzo Vercel>";
 function printLogins() {
   console.log("\nLogin:");
-  console.log(`  Admin:              ${ADMIN_EMAIL.padEnd(26)} → http://localhost:3000/admin/ordini`);
-  console.log(`  Cliente:            ${EMAILS.customer.padEnd(26)} → http://localhost:3000/cliente`);
-  console.log(`  Padroncino (Ferri): ${EMAILS.ferri.padEnd(26)} → http://localhost:3000/padroncino  (furgone medio)`);
-  console.log(`  Padroncino (Galli): ${EMAILS.galli.padEnd(26)} → http://localhost:3000/padroncino  (camion con sponda)`);
+  console.log(`  Admin:              ${ADMIN_EMAIL.padEnd(26)} → ${BASE}/admin/ordini`);
+  console.log(`  Cliente:            ${EMAILS.customer.padEnd(26)} → ${BASE}/cliente`);
+  console.log(`  Padroncino (Ferri): ${EMAILS.ferri.padEnd(26)} → ${BASE}/padroncino  (furgone medio)`);
+  console.log(`  Padroncino (Galli): ${EMAILS.galli.padEnd(26)} → ${BASE}/padroncino  (camion con sponda)`);
   printPasswordHint();
 }
 
@@ -67,10 +75,15 @@ if (ids.some(Boolean)) {
     return r.count;
   };
   const count = await countOrders();
-  // Completion marker: the last step moves the delivered orders into the past.
-  const past = await countOrders((q) => q.eq("status", "delivered").lt("delivered_at", new Date(Date.now() - 20 * 86_400_000).toISOString()));
-  if (ids.some((id) => !id) || count !== EXPECTED_ORDERS || !past) {
-    console.error("Seed demo incompleto (un'esecuzione precedente si è interrotta). Ricomincia da zero:\n  npm run db:local:reset && npm run db:local:seed-demo");
+  // Completion marker: locally the last step moves the delivered orders into the past; on staging (no SQL) the last
+  // step is the POD of order 20.
+  const done = LOCAL
+    ? await countOrders((q) => q.eq("status", "delivered").lt("delivered_at", new Date(Date.now() - 20 * 86_400_000).toISOString()))
+    : await countOrders((q) => q.eq("status", "delivered").eq("goods_description", "10 scatoloni di libri e una cassettiera"));
+  if (ids.some((id) => !id) || count !== EXPECTED_ORDERS || !done) {
+    console.error(LOCAL
+      ? "Seed demo incompleto (un'esecuzione precedente si è interrotta). Ricomincia da zero:\n  npm run db:local:reset && npm run db:local:seed-demo"
+      : "Seed demo incompleto sullo staging (un'esecuzione precedente si è interrotta). Non lo completo da solo: serve una pulizia degli account demo, da decidere con il proprietario.");
     process.exit(1);
   }
   await seedAdmin();
@@ -199,7 +212,13 @@ const j21 = await pay(await mk({ from: "milanoNavigli", to: "bergamo", daysAhead
 const j22 = await pay(await mk({ from: "milanoNavigli", to: "bergamo", daysAhead: 1, window: "10-12", storage: { days: 4, pallets: 1 }, goods: { description: "Scaffalature metalliche e 6 scatoloni di archivio", items: 10, weightKg: 260 }, contacts: ["Giulia Conti", "Archivio Conti"] }));
 for (const j of [j18, j19, j20, j21, j22]) await accept(ferri, j, ferriVan);
 // 18, 19 → today; 20 → yesterday; 21 → leg 1 yesterday, leg 2 in 3 days (storage 4 days kept).
-localSql(`set local session_replication_role = replica;
+// Staging (no SQL): the pickups stay tomorrow / in 2 days; the admin allows the early start of leg 0 instead.
+if (!LOCAL) {
+  for (const j of [j18, j19, j20, j21, j22]) {
+    await ok(service.rpc("admin_allow_early_start", { p_order_id: j.id, p_leg_index: 0, p_admin_id: admin.id, p_reason: "Demo (seed): inizio anticipato" }));
+  }
+}
+if (LOCAL) localSql(`set local session_replication_role = replica;
 ${shiftDays(j18.id, 1)}
 ${shiftDays(j19.id, 1)}
 ${shiftDays(j20.id, 3)}
@@ -234,7 +253,7 @@ const ago = (min) => `(now() - interval '${min} minutes')`;
 const a20 = legStart(j20);
 const a21 = legStart(j21);
 const a22 = legStart(j22);
-localSql(`set local session_replication_role = replica;
+if (LOCAL) localSql(`set local session_replication_role = replica;
 update public.order_leg_steps set created_at = ${ago(25)} where order_id = ${sqlUuid(j18.id)};
 ${stepTimesSql(j19.id, { "0:arrived_pickup": ago(110), "0:loaded": ago(65), "0:departed": ago(60) })}
 ${stepTimesSql(j20.id, { "0:arrived_pickup": a20(10), "0:loaded": a20(55), "0:departed": a20(60), "0:arrived_delivery": a20(95), "0:unloaded": a20(130) })}
@@ -243,12 +262,12 @@ ${stepTimesSql(j22.id, { "0:arrived_pickup": a22(5), "0:loaded": a22(30), "0:dep
 
 // 20: POD after the shifted steps, so complete_delivery stores the real porter minutes; then the delivery to yesterday.
 await completeDelivery(ferri, j20.id, "Anna Conti", POS.monza);
-localSql(`set local session_replication_role = replica;
+if (LOCAL) localSql(`set local session_replication_role = replica;
 update public.delivery_proofs set signed_at = ${a20(140)} where order_id = ${sqlUuid(j20.id)};
 update public.orders set delivered_at = ${a20(140)} where id = ${sqlUuid(j20.id)};
 update public.order_status_history set created_at = ${a20(140)} where order_id = ${sqlUuid(j20.id)} and to_status = 'delivered';`);
 
-localSql(`set local session_replication_role = replica;
+if (LOCAL) localSql(`set local session_replication_role = replica;
 ${legsToTodaySql(j16.id)}
 ${legsToTodaySql(j17.id)}
 ${shiftBooking(j14.id, 2)}
