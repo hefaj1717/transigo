@@ -2,7 +2,7 @@ import "server-only";
 import type { AdminDeps } from "@/lib/admin/deps";
 import { sendOrderAssignedEmail, sendOrderDeliveredEmail } from "./customer-emails";
 import { ORDER_STATUS_LABEL } from "./status";
-import { advanceSchema, assignSchema, DISPATCH_MSG, dispatchDbError, unassignSchema } from "./dispatch";
+import { advanceSchema, assignSchema, DISPATCH_MSG, dispatchDbError, handoverSchema, unassignSchema } from "./dispatch";
 
 // Admin dispatch (D122, D123). Called by the Server Actions in src/app/(admin)/admin/ordini/actions.ts AFTER the
 // admin check in the session (adminDeps); `admin.userId` always comes from that session, never from the form.
@@ -49,6 +49,29 @@ export async function assignJob(deps: AdminDeps, input: Record<string, string>):
   }
   await notifyCustomer("order_assigned", () => sendOrderAssignedEmail(deps.serviceDb, orderId, deps.appUrl));
   return { ok: true, message: DISPATCH_MSG.assigned };
+}
+
+/** "Da gestire": assign a carrier directly with the current address of the goods and an internal reason. */
+export async function assignHandover(deps: AdminDeps, input: Record<string, string>): Promise<DispatchResult> {
+  const parsed = handoverSchema.safeParse(input);
+  if (!parsed.success) {
+    const field = parsed.error.issues[0]?.path[0];
+    return {
+      ok: false,
+      error: field === "address" ? DISPATCH_MSG.addressRequired : field === "reason" ? DISPATCH_MSG.handoverReasonRequired : DISPATCH_MSG.chooseCandidate,
+    };
+  }
+  const { orderId, candidate, address, reason } = parsed.data;
+  const { error } = await deps.serviceDb.rpc("admin_assign_handover", {
+    p_order_id: orderId, p_carrier_id: candidate.carrierId, p_vehicle_id: candidate.vehicleId, p_admin_id: deps.admin.userId,
+    p_address: address, p_reason: reason,
+  });
+  if (error) {
+    if (!expected(error)) log("admin_assign_handover", error);
+    return { ok: false, error: dispatchDbError(error) };
+  }
+  await notifyCustomer("order_assigned", () => sendOrderAssignedEmail(deps.serviceDb, orderId, deps.appUrl));
+  return { ok: true, message: DISPATCH_MSG.handoverAssigned };
 }
 
 export async function unassignJob(deps: AdminDeps, input: Record<string, string>): Promise<DispatchResult> {

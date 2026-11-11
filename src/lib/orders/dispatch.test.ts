@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { advanceSchema, assignSchema, DISPATCH_MSG, dispatchDbError, NEXT_STATUS, unassignSchema, UNASSIGN_REASONS } from "./dispatch";
+import { advanceSchema, assignSchema, DISPATCH_MSG, dispatchDbError, handoverSchema, isHandoverPending, NEXT_STATUS, ORDER_FILTERS, unassignSchema, UNASSIGN_REASONS } from "./dispatch";
 
 const O = "11111111-1111-4111-8111-111111111111";
 const C = "22222222-2222-4222-8222-222222222222";
@@ -48,3 +48,30 @@ describe("dispatchDbError", () => {
     expect(dispatchDbError(null)).toBe(DISPATCH_MSG.generic);
   });
 });
+
+describe("da gestire (handover)", () => {
+  const C = "7d0e6f3a-1b2c-4d5e-8f90-a1b2c3d4e5f6";
+  const V = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+  it("isHandoverPending only with the flag, no carrier and a running status", () => {
+    const base = { handover_required_at: "2026-11-11T10:00:00Z", carrier_id: null, status: "picked_up" };
+    expect(isHandoverPending(base)).toBe(true);
+    expect(isHandoverPending({ ...base, status: "in_transit" })).toBe(true);
+    expect(isHandoverPending({ ...base, status: "delivered" })).toBe(false);
+    expect(isHandoverPending({ ...base, carrier_id: C })).toBe(false);
+    expect(isHandoverPending({ ...base, handover_required_at: null })).toBe(false);
+    expect(ORDER_FILTERS.find((f) => f.key === "da-gestire")).toMatchObject({ handover: true, unassigned: true });
+  });
+  it("handoverSchema: candidate, address and reason required (trimmed, limits)", () => {
+    const ok = { orderId: C, candidate: `${C}:${V}`, address: " Via X 1 ", reason: " Panne " };
+    expect(handoverSchema.parse(ok)).toEqual({ orderId: C, candidate: { carrierId: C, vehicleId: V }, address: "Via X 1", reason: "Panne" });
+    expect(handoverSchema.safeParse({ ...ok, address: "  " }).success).toBe(false);
+    expect(handoverSchema.safeParse({ ...ok, address: "x".repeat(501) }).success).toBe(false);
+    expect(handoverSchema.safeParse({ ...ok, reason: "" }).success).toBe(false);
+    expect(handoverSchema.safeParse({ ...ok, candidate: "x" }).success).toBe(false);
+  });
+  it("database errors", () => {
+    expect(dispatchDbError({ code: "55000", details: "not_handover" })).toBe(DISPATCH_MSG.notHandover);
+    expect(dispatchDbError({ code: "22023", details: "address" })).toBe(DISPATCH_MSG.addressRequired);
+  });
+});
+

@@ -30,6 +30,10 @@ export const DISPATCH_MSG = {
   deliveredWithoutPod: "Consegna registrata senza firma e foto: il pagamento al padroncino non partirà in automatico.",
   chooseCandidate: "Scegli un padroncino e un veicolo.",
   chooseReason: "Scegli il motivo.",
+  handoverAssigned: "Padroncino assegnato: vedrà l'indirizzo dove ritirare la merce.",
+  addressRequired: "Scrivi dove si trova ora la merce (massimo 500 caratteri).",
+  handoverReasonRequired: "Scrivi il motivo (massimo 1000 caratteri).",
+  notHandover: "L'ordine non è più «da gestire». Ricarica la pagina.",
   noteRequired: "Scrivi il motivo della consegna senza firma e foto (massimo 1000 caratteri).",
   alreadyTaken: "L'ordine è già stato assegnato (forse da un padroncino dall'app). Ricarica la pagina.",
   notAvailable: "L'ordine non è più da assegnare. Ricarica la pagina.",
@@ -59,6 +63,21 @@ export const assignSchema = z.object({
   }),
 });
 
+/** "Da gestire" (load on board of a removed carrier): direct assignment with the current address of the goods. */
+export const HANDOVER_BADGE = "Da gestire: carico a bordo del padroncino rimosso";
+
+export const handoverSchema = z.object({
+  orderId: uuid,
+  candidate: assignSchema.shape.candidate,
+  address: z.string().trim().min(1).max(500),
+  reason: z.string().trim().min(1).max(1000),
+});
+
+/** The order waits for the admin: flag set, no carrier, still running (admin_unassign_job with the load on board). */
+export function isHandoverPending(o: { handover_required_at: string | null; carrier_id: string | null; status: string }): boolean {
+  return o.handover_required_at !== null && o.carrier_id === null && (o.status === "picked_up" || o.status === "in_transit");
+}
+
 export const unassignSchema = z.object({
   orderId: uuid,
   reason: z.enum(UNASSIGN_REASONS.map((r) => r.code) as [UnassignReason, ...UnassignReason[]], { error: DISPATCH_MSG.chooseReason }),
@@ -83,6 +102,7 @@ export function dispatchDbError(error: DbError): string {
       return DISPATCH_MSG.forbidden;
     case "22023":
       if (detail === "note") return DISPATCH_MSG.noteRequired;
+      if (detail === "address") return DISPATCH_MSG.addressRequired;
       return detail === "reason" ? DISPATCH_MSG.chooseReason : DISPATCH_MSG.notFound;
     case "55000":
       if (detail.startsWith("carrier_not_eligible")) return DISPATCH_MSG.carrierNotEligible;
@@ -99,6 +119,8 @@ export function dispatchDbError(error: DbError): string {
           return DISPATCH_MSG.vehicleNotSuitable;
         case "not_assigned":
           return DISPATCH_MSG.notAssigned;
+        case "not_handover":
+          return DISPATCH_MSG.notHandover;
         default:
           return DISPATCH_MSG.notNextStatus; // admin_advance_order: detail = current status
       }
@@ -107,8 +129,9 @@ export function dispatchDbError(error: DbError): string {
 }
 
 /** Orders list filters (status sets; "da-assegnare" also needs carrier_id null). */
-export const ORDER_FILTERS: { key: string; label: string; statuses: string[] | null; unassigned?: boolean }[] = [
+export const ORDER_FILTERS: { key: string; label: string; statuses: string[] | null; unassigned?: boolean; handover?: boolean }[] = [
   { key: "tutti", label: "Tutti", statuses: null },
+  { key: "da-gestire", label: "Da gestire", statuses: ["picked_up", "in_transit"], unassigned: true, handover: true },
   { key: "da-assegnare", label: "Da assegnare", statuses: ["paid"], unassigned: true },
   { key: "in-corso", label: "In corso", statuses: ["assigned", "picked_up", "in_transit"] },
   { key: "consegnati", label: "Consegnati", statuses: ["delivered", "completed"] },

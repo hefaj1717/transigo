@@ -7,12 +7,12 @@ import { ActionForm } from "@/components/admin/action-form";
 import { AdminShell, inputClass } from "@/components/admin/admin-nav";
 import { adminDeps } from "@/lib/admin/deps";
 import { ADMIN_CARRIER_PATHS } from "@/lib/carriers/admin";
-import { ADMIN_ORDER_PATHS, NEXT_STATUS, UNASSIGN_REASONS } from "@/lib/orders/dispatch";
+import { ADMIN_ORDER_PATHS, HANDOVER_BADGE, isHandoverPending, NEXT_STATUS, UNASSIGN_REASONS } from "@/lib/orders/dispatch";
 import { loadCandidates, type Candidate } from "@/lib/orders/dispatch-server";
 import { ORDER_STATUS_LABEL, PAYMENT_STATE_LABEL, paymentState } from "@/lib/orders/status";
 import { formatCents } from "@/lib/pricing/money";
 import { createClient } from "@/lib/supabase/server";
-import { advanceOrderAction, assignJobAction, unassignJobAction } from "../actions";
+import { advanceOrderAction, assignHandoverAction, assignJobAction, unassignJobAction } from "../actions";
 
 export const metadata = { title: "Ordine – Transigo" };
 
@@ -42,6 +42,7 @@ type OrderDetail = {
   pickup_contact_name: string; pickup_contact_phone: string; delivery_contact_name: string; delivery_contact_phone: string;
   customer_notes: string | null; carrier_id: string | null; assigned_at: string | null; picked_up_at: string | null;
   in_transit_at: string | null; delivered_at: string | null; delivered_without_pod: boolean;
+  handover_required_at: string | null; handover_leg_index: number | null;
   vehicle_types: { name_it: string } | null;
   carriers: { company_name: string } | null;
   carrier_vehicles: { plate: string; vehicle_types: { name_it: string } | null } | null;
@@ -56,7 +57,7 @@ const SELECT = [
   "id, order_number, status, created_at, payment_due_at, paid_at, pickup_window_start, goods_description, items_count, weight_kg",
   "largest_item_length_cm, largest_item_width_cm, largest_item_height_cm, pallets_count, packing_items_count, storage_type, storage_days",
   "pickup_contact_name, pickup_contact_phone, delivery_contact_name, delivery_contact_phone, customer_notes",
-  "carrier_id, assigned_at, picked_up_at, in_transit_at, delivered_at, delivered_without_pod",
+  "carrier_id, assigned_at, picked_up_at, in_transit_at, delivered_at, delivered_without_pod, handover_required_at, handover_leg_index",
   "vehicle_types(name_it), carriers(company_name), carrier_vehicles(plate, vehicle_types(name_it))",
   "customers(customer_type, profiles(first_name, last_name, email, phone))",
   "order_legs(leg_index, pickup_address, delivery_address, pickup_window_start, pickup_window_end, distance_m, duration_s, pickup_floor, pickup_has_elevator, delivery_floor, delivery_has_elevator, is_urgent, porters_count, porters_included_hours, pickup_warehouse_id, delivery_warehouse_id, order_leg_carrier_terms(carrier_amount_cents))",
@@ -98,7 +99,7 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
   // Carrier terms hang off the legs (foreign key to order_legs, not to orders).
   const carrierAmount = legs.reduce((sum, l) => sum + (l.order_leg_carrier_terms?.carrier_amount_cents ?? 0), 0);
   const pay = paymentState({ ...o, refunded_cents: o.order_charges?.refunded_cents, total_cents: o.order_charges?.total_cents }, new Date());
-  const assignable = o.status === "paid" && !o.carrier_id;
+  const assignable = (o.status === "paid" && !o.carrier_id) || isHandoverPending(o);
   const candidates = assignable ? await loadCandidates(deps, o.id) : [];
 
   // Who changed the status (admins and carriers have profiles the admin can read).
@@ -247,6 +248,8 @@ function Dispatch({ o, candidates }: { o: OrderDetail; candidates: Candidate[] }
     );
   }
 
+  if (isHandoverPending(o)) return <Handover o={o} candidates={candidates} />;
+
   if (!o.carrier_id) return null;
   return (
     <section className={section} aria-labelledby="dispatch">
@@ -286,12 +289,67 @@ function Dispatch({ o, candidates }: { o: OrderDetail; candidates: Candidate[] }
             </select>
             {loaded ? (
               <p className="mt-1 text-sm font-medium text-red-800">
-                Attenzione: il carico è già a bordo del padroncino. Dopo la rimozione l&apos;ordine torna «da assegnare»; organizza tu il recupero della merce.
+                Attenzione: il carico è già a bordo del padroncino. Dopo la rimozione l&apos;ordine diventa «da gestire»: non torna tra le corse
+                disponibili e dovrai assegnarlo tu a un padroncino (con l&apos;indirizzo dove si trova la merce) o chiuderlo come consegnato.
               </p>
-            ) : null}
-            {windowPassed ? (
+            ) : windowPassed ? (
               <p className="mt-1 text-xs text-amber-900">La finestra di ritiro è già iniziata: dopo la rimozione l&apos;ordine non sarà assegnabile (serve un cambio data o un rimborso).</p>
             ) : <p className="mt-1 text-xs text-zinc-500">L&apos;ordine tornerà tra quelli da assegnare.</p>}
+          </ActionForm>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+/** "Da gestire": the admin removed the carrier with the load on board — assign directly or close without POD. */
+function Handover({ o, candidates }: { o: OrderDetail; candidates: Candidate[] }) {
+  const next = NEXT_STATUS[o.status];
+  return (
+    <section className={section} aria-labelledby="handover">
+      <h2 id="handover" className={h2}>Da gestire</h2>
+      <p className="rounded-md bg-red-50 p-3 text-sm font-medium text-red-900">
+        {HANDOVER_BADGE}
+        {o.handover_leg_index !== null && o.order_legs.length > 1 ? ` (tratta ${o.handover_leg_index + 1})` : ""} — dal {rome(o.handover_required_at)}.
+        <span className="mt-1 block font-normal">L&apos;ordine non è visibile ai padroncini. Il cliente vede ancora «{ORDER_STATUS_LABEL[o.status]}».</span>
+      </p>
+      <div className="mt-3 grid gap-4 sm:grid-cols-2">
+        {candidates.length ? (
+          <ActionForm action={assignHandoverAction} submitLabel="Assegna padroncino" className="rounded-md border border-zinc-200 p-3">
+            <input type="hidden" name="orderId" value={o.id} />
+            <label htmlFor="handover-candidate" className="block text-sm font-medium text-zinc-800">Padroncino e veicolo</label>
+            <select id="handover-candidate" name="candidate" required defaultValue="" className={`${inputClass} mt-1 w-full`}>
+              <option value="" disabled>Scegli…</option>
+              {candidates.map((c) => (
+                <option key={c.vehicle_id} value={`${c.carrier_id}:${c.vehicle_id}`}>
+                  {c.company_name} — {c.plate} ({c.vehicle_type_name}{c.payload_kg ? `, ${c.payload_kg} kg` : ""})
+                </option>
+              ))}
+            </select>
+            <label htmlFor="handover-address" className="mt-2 block text-sm font-medium text-zinc-800">Dove si trova ora la merce (obbligatorio)</label>
+            <textarea id="handover-address" name="address" required maxLength={500} rows={2} className={`${inputClass} mt-1 w-full`} />
+            <p className="mt-1 text-xs text-zinc-500">Lo vede solo il nuovo padroncino (non il cliente): ritirerà la merce qui.</p>
+            <label htmlFor="handover-reason" className="mt-2 block text-sm font-medium text-zinc-800">Motivo (obbligatorio)</label>
+            <textarea id="handover-reason" name="reason" required maxLength={1000} rows={2} className={`${inputClass} mt-1 w-full`} />
+            <p className="mt-1 text-xs text-zinc-500">Il motivo è interno: lo vedono solo gli amministratori.</p>
+          </ActionForm>
+        ) : (
+          <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-900">Nessun padroncino attivo ha un veicolo adatto e pronto per questo ordine.</p>
+        )}
+        {next ? (
+          <ActionForm action={advanceOrderAction} submitLabel={next.label} className="rounded-md border border-zinc-200 p-3">
+            <input type="hidden" name="orderId" value={o.id} />
+            <input type="hidden" name="to" value={next.to} />
+            {next.to === "delivered" ? (
+              <>
+                <p className="text-sm text-amber-900">Senza firma e foto del destinatario: nessun pagamento automatico.</p>
+                <label htmlFor="handover-note" className="mt-2 block text-sm font-medium text-zinc-800">Motivo (obbligatorio)</label>
+                <textarea id="handover-note" name="note" required maxLength={1000} rows={2} className={`${inputClass} mt-1 w-full`} />
+                <p className="mt-1 text-xs text-zinc-500">Il motivo è interno: lo vedono solo gli amministratori.</p>
+              </>
+            ) : (
+              <p className="text-sm text-zinc-700">Stato successivo: {ORDER_STATUS_LABEL[next.to]}.</p>
+            )}
           </ActionForm>
         ) : null}
       </div>

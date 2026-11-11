@@ -5,7 +5,7 @@ import type { ActionResult } from "@/lib/admin/action-result";
 import { adminDeps } from "@/lib/admin/deps";
 import { formValues } from "@/lib/carriers/admin";
 import { ADMIN_ORDER_PATHS, DISPATCH_MSG } from "@/lib/orders/dispatch";
-import { advanceOrder, assignJob, unassignJob, type DispatchResult } from "@/lib/orders/dispatch-server";
+import { advanceOrder, assignHandover, assignJob, unassignJob, type DispatchResult } from "@/lib/orders/dispatch-server";
 
 // Admin dispatch actions (D122, D123). EVERY action starts with adminDeps(): the DAL checks the session
 // (anonymous, other roles and blocked accounts are redirected before anything else runs) and the admin id passed
@@ -41,4 +41,10 @@ export async function unassignJobAction(_prev: ActionResult, fd: FormData): Prom
 export async function advanceOrderAction(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
   const deps = await adminDeps(ADMIN_ORDER_PATHS.list);
   return respond("advanceOrder", () => advanceOrder(deps, formValues(fd)));
+}
+
+/** "Da gestire": form orderId + candidate + address (where the goods are now) + reason (internal). */
+export async function assignHandoverAction(_prev: ActionResult, fd: FormData): Promise<ActionResult> {
+  const deps = await adminDeps(ADMIN_ORDER_PATHS.list);
+  return respond("assignHandover", () => assignHandover(deps, formValues(fd)));
 }

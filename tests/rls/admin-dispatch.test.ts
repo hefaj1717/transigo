@@ -137,20 +137,23 @@ describe("admin_unassign_job (D39, D122)", () => {
     expect((await unassign(orderId, "richiesta_padroncino")).error).toBeNull();
     expect(await orderRow(orderId)).toMatchObject({ status: "paid", carrier_id: null, carrier_vehicle_id: null, assigned_at: null });
     expect((await history(orderId)).at(-1)).toEqual({ from_status: "assigned", to_status: "paid", changed_by: admin.id, source: "admin_panel" });
-    expect((await lastAudit(orderId)).data).toEqual({ carrier_id: c.user.id, vehicle_id: c.vehicleId, reason_code: "richiesta_padroncino", from: "assigned", goods_loaded: false, pickup_window_passed: false });
+    expect((await lastAudit(orderId)).data).toEqual({ carrier_id: c.user.id, vehicle_id: c.vehicleId, reason_code: "richiesta_padroncino", from: "assigned", goods_loaded: false, handover_leg_index: null, pickup_window_passed: false });
     expect((await check(candidates(orderId))).map((r: { vehicle_id: string }) => r.vehicle_id)).toContain(c.vehicleId);
   });
 
-  it("also after pickup (load on board): back to paid, times cleared, audit goods_loaded (owner 2026-11-11)", async () => {
+  it("after pickup (load on board): \"da gestire\" — status kept, no history row, audit goods_loaded (owner 2026-11-11)", async () => {
     const orderId = await paidOrder();
     const c = await activeCarrier();
     await run(assign(orderId, c.user.id, c.vehicleId));
     await run(advance(orderId, "picked_up"));
     await run(advance(orderId, "in_transit"));
+    const before = (await history(orderId)).length;
     expect((await unassign(orderId, "problema_veicolo")).error).toBeNull();
-    expect(await fullOrder(orderId)).toMatchObject({ status: "paid", carrier_id: null, picked_up_at: null, in_transit_at: null });
-    expect((await history(orderId)).at(-1)).toEqual({ from_status: "in_transit", to_status: "paid", changed_by: admin.id, source: "admin_panel" });
-    expect((await lastAudit(orderId)).data).toMatchObject({ reason_code: "problema_veicolo", from: "in_transit", goods_loaded: true });
+    expect(await fullOrder(orderId)).toMatchObject({ status: "in_transit", carrier_id: null });
+    expect((await fullOrder(orderId)).in_transit_at).toBeTruthy();
+    expect(await history(orderId)).toHaveLength(before);
+    expect((await lastAudit(orderId)).data).toMatchObject({ reason_code: "problema_veicolo", from: "in_transit", goods_loaded: true, handover_leg_index: 0 });
+    expect((await unassign(orderId, "altro")).error).toMatchObject({ code: "55000", details: "not_assigned" }); // nobody to remove
   });
 
   it("unknown or missing reason code → 22023; not assigned → 55000", async () => {

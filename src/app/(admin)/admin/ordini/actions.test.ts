@@ -9,6 +9,7 @@ const session = vi.hoisted(() => ({ ctx: { state: "anonymous" } as AccountContex
 const serviceAccess = vi.hoisted(() => ({ props: [] as string[] }));
 const server = vi.hoisted(() => ({
   assignJob: vi.fn(async () => ({ ok: true, message: "ok" })),
+  assignHandover: vi.fn(async () => ({ ok: true, message: "ok" })),
   unassignJob: vi.fn(async () => ({ ok: true, message: "ok" })),
   advanceOrder: vi.fn(async () => ({ ok: true, message: "ok" })),
   loadCandidates: vi.fn(async () => []),
@@ -66,7 +67,7 @@ beforeEach(() => {
 describe("admin dispatch Server Actions", () => {
   it("the file exports the expected actions (a new action is covered automatically)", () => {
     expect(exported.map(([name]) => name).sort()).toEqual([
-      "advanceOrderAction", "assignJobAction", "unassignJobAction",
+      "advanceOrderAction", "assignHandoverAction", "assignJobAction", "unassignJobAction",
     ]);
   });
 
