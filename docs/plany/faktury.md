@@ -3,6 +3,7 @@
 **Status:** plan zatwierdzony 2026-11-11 (D144–D149), razem z `pdf-lib` i jednorazowym wystawieniem faktur demo dla
 już opłaconych zleceń. Migracja `invoices` zatwierdzona 2026-11-11 ze zmianami D150 (patrz niżej) —
 `supabase/migrations/20261111180000_invoices.sql` (lokalnie), testy `tests/rls/invoices.test.ts`.
+Kroki 1–5 zrobione 2026-11-11 (stan w CLAUDE.md); krok 6 (staging) czeka na zgodę właściciela.
 
 Cel: klient i admin widzą faktury i noty korygujące jak w docelowym produkcie, ale dokumenty wystawia adapter DEMO
 (PDF ze znakiem „DEMO — documento senza valore fiscale”). Później Fatture in Cloud (D1) = nowy adapter + zmienna
