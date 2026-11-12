@@ -3,6 +3,7 @@ import { makeConfig, V } from "@/lib/pricing/__fixtures__/config";
 import { calculatePortersPrice } from "@/lib/pricing/porters-service";
 import { calculateStoragePrice } from "@/lib/pricing/storage-service";
 import { portersEstimate, publicAvailability, storageEstimate, toPublicRates, withVat } from "./rates";
+import { parseStoragePrefill } from "@/lib/booking/storage/state";
 import { parsePortersRequest, parseStorageRequest, portersContactHref, portersRequestHref, requestMessage, storageRequestHref } from "./requests";
 
 const config = makeConfig();
@@ -116,6 +117,8 @@ describe("calculator → wizard (Facchinaggio, step 6) or contact request (Depos
 
   it("round trip storage (box and pallets)", () => {
     const box = storageRequestHref({ unit: "box", boxCode: "L", days: 60 });
+    expect(box).toBe("/prenota/deposito?servizio=deposito&giorni=60&box=L"); // the wizard (step 7)
+    expect(parseStoragePrefill(Object.fromEntries(params(box).entries()), ["L"])).toEqual({ boxCode: "L", pallets: undefined, days: 60 });
     expect(parseStorageRequest(params(box), rates)).toEqual({ unit: "box", boxCode: "L", days: 60 });
     expect(requestMessage(params(box), rates)).toContain("Box L (10 m³) per 60 giorni");
     const pal = storageRequestHref({ unit: "pallet", pallets: 5, days: 1 });

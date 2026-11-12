@@ -226,7 +226,7 @@ export function StorageCalculator({ rates }: { rates: PublicRates }) {
             </div>
           </div>
           <PriceBox estimate={estimate} customerType={customerType} note={note} excluded="Trasporto da e per il magazzino escluso." />
-          <RequestButton href={input ? storageRequestHref(input) : "#"} enabled={!!estimate && !!input} />
+          <RequestButton href={input ? storageRequestHref(input) : "#"} enabled={!!estimate && !!input} online />
         </>
       )}
     </div>

@@ -1,6 +1,6 @@
 // Calculator → booking link (D162). Facchinaggio: the calculator leads to the wizard /prenota/facchini (step 6),
-// which reads the same parameters (parsePortersPrefill). Deposito: still /contatti until its wizard (step 7) —
-// the contact page pre-fills the message ("prenotazione online in arrivo"); then only REQUEST_PATH changes.
+// which reads the same parameters (parsePortersPrefill). Deposito: the wizard /prenota/deposito (step 7,
+// parseStoragePrefill). /contatti still pre-fills the message from the same parameters (links already shared).
 // portersContactHref() keeps the /contatti request for Facchinaggio outside the service area.
 //
 // The query string is user-controlled: parsing accepts only known keys with integer values in range and a box
@@ -8,7 +8,7 @@
 
 import { PALLETS_MAX, STORAGE_MAX_DAYS, type PortersEstimateInput, type PublicRates, type StorageEstimateInput } from "./rates";
 
-const REQUEST_PATH = { facchinaggio: "/prenota/facchini", deposito: "/contatti" } as const;
+const REQUEST_PATH = { facchinaggio: "/prenota/facchini", deposito: "/prenota/deposito" } as const;
 
 const portersQuery = (input: PortersEstimateInput) =>
   new URLSearchParams({
