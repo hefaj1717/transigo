@@ -66,7 +66,7 @@ export type VehicleRate = {
 
 /** Porters-only service settings of a price list (D151, D157). Rate per person-hour = rule porter_hour. */
 export type PortersServiceConfig = {
-  minPersons: number; // D157: at least 2
+  minPersons: number; // D177: at least 1 (price list porters_min_persons)
   minHours: number; // minimum billed hours per person
   floorNoElevatorCents: number | null; // per floor without elevator; null = no surcharge
 };

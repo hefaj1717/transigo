@@ -332,11 +332,11 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
                 {personsOptions.map((n) => (
                   <label key={n} className={`flex cursor-pointer items-center gap-2 rounded-md border px-4 py-2 text-sm ${state.persons === n ? "border-blue-600 bg-blue-50" : "border-zinc-300"}`}>
                     <input type="radio" name="persons" checked={state.persons === n} onChange={() => update({ persons: n })} />
-                    {n} facchini
+                    {n === 1 ? "1 facchino" : `${n} facchini`}
                   </label>
                 ))}
               </div>
-              <p className="mt-2 text-xs text-zinc-500">Minimo {options.minPersons} facchini. Per mobili pesanti o tanti piani a piedi conviene una squadra più grande.</p>
+              <p className="mt-2 text-xs text-zinc-500">{options.minPersons > 1 ? `Minimo ${options.minPersons} facchini. ` : ""}Per mobili pesanti o tanti piani a piedi conviene una squadra più grande.</p>
             </fieldset>
           ) : null}
 
@@ -401,7 +401,7 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
                 <>
                   <QuoteBreakdown quote={selected.quote} />
                   <p className="text-sm text-zinc-700">
-                    Nel prezzo {selected.job.persons} facchini per {selected.job.includedHours} {selected.job.includedHours === 1 ? "ora" : "ore"} di lavoro
+                    Nel prezzo {selected.job.persons === 1 ? "1 facchino" : `${selected.job.persons} facchini`} per {selected.job.includedHours} {selected.job.includedHours === 1 ? "ora" : "ore"} di lavoro
                     {overtime ? `; ogni ora successiva iniziata ${overtime} a persona (tolleranza ${selected.job.overtimeGraceMinutes} minuti).` : "."}
                   </p>
                   <p className="text-xs text-zinc-500">Prezzo valido fino alle {new Date(selected.validUntil).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}. Dopo, lo ricalcoliamo prima della conferma.</p>
@@ -444,7 +444,7 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
                 <dt className="text-zinc-500">Quando</dt>
                 <dd>{state.date} {state.window ? TIME_WINDOW_LABEL[state.window] : ""}</dd>
                 <dt className="text-zinc-500">Squadra</dt>
-                <dd>{state.persons} facchini, {selected?.job.includedHours ?? state.hours} ore</dd>
+                <dd>{state.persons === 1 ? "1 facchino" : `${state.persons} facchini`}, {selected?.job.includedHours ?? state.hours} ore</dd>
                 <dt className="text-zinc-500">Cosa spostare</dt>
                 <dd className="whitespace-pre-line">{state.description}</dd>
               </dl>
@@ -489,7 +489,7 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
         {selected ? (
           <div className="mt-2">
             <Headline cents={selected.quote.display === "gross" ? selected.quote.totalCents : selected.quote.subtotalCents} display={selected.quote.display} />
-            <p className="mt-1 text-xs text-zinc-500">{selected.job.persons} facchini · {selected.job.includedHours} ore · {selected.city}</p>
+            <p className="mt-1 text-xs text-zinc-500">{selected.job.persons === 1 ? "1 facchino" : `${selected.job.persons} facchini`} · {selected.job.includedHours} ore · {selected.city}</p>
             {quoting ? <p className="text-xs text-zinc-400">Aggiornamento…</p> : null}
           </div>
         ) : (

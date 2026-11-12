@@ -36,7 +36,7 @@ const settingsSchema = z.object({
   storage_billing_unit: z.enum(["day", "pallet_day"]),
   porter_overtime_grace_minutes: z.coerce.number().int().min(0).max(120),
   porters_min_hours: z.coerce.number().int().min(1).max(12), // D157
-  porters_min_persons: z.coerce.number().int().min(2).max(4), // D157, D54
+  porters_min_persons: z.coerce.number().int().min(1).max(4), // D177, D54
   notes: z.string().max(1000),
 });
 

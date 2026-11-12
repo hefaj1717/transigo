@@ -18,9 +18,9 @@ describe("porters wizard state", () => {
     ]) expect(portersPriceKey(changed)).not.toBe(key);
   });
 
-  it("schema bounds: 2–4 persons, 1–12 hours, floor ≤ 20; bad stored state is dropped", () => {
+  it("schema bounds: 1–4 persons (D177), 1–12 hours, floor ≤ 20; bad stored state is dropped", () => {
     expect(portersStateSchema.safeParse(s).success).toBe(true);
-    for (const bad of [{ ...s, persons: 1 }, { ...s, persons: 5 }, { ...s, hours: 0 }, { ...s, hours: 13 }, { ...s, place: { ...s.place!, floor: 21 } }, { ...s, date: "2026-02-30" }]) {
+    for (const bad of [{ ...s, persons: 0 }, { ...s, persons: 5 }, { ...s, hours: 0 }, { ...s, hours: 13 }, { ...s, place: { ...s.place!, floor: 21 } }, { ...s, date: "2026-02-30" }]) {
       expect(portersStateSchema.safeParse(bad).success).toBe(false);
     }
     expect(parseStoredPortersState(JSON.stringify(s))).toEqual(s);

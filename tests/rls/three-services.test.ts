@@ -181,7 +181,7 @@ describe("porters (Facchinaggio)", () => {
   });
 
   it("minimums of the price list (D157): fewer persons or billed hours below the minimum are refused", async () => {
-    await refused(portersPayload({ persons: 1 }), "22023", MIN); // also below the column check
+    await refused(portersPayload({ persons: 1 }), "22023", MIN); // the column allows 1 (D177), this price list asks for 2
     await refused(portersPayload({ requested: 1, billed: 1 }), "22023", MIN);
     await refused(portersPayload({ requested: 3, billed: 2 }), "22023", MIN);
     await created(portersPayload({ requested: 1, billed: 2 })); // billed = max(requested, minimum)

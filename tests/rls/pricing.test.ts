@@ -408,10 +408,14 @@ describe("porters-only service and storage boxes (D154, D157)", () => {
       const { error } = await admin.client.from("price_list_storage_boxes").insert(newBox(draftId, code));
       expect(error, code).not.toBeNull();
     }
-    for (const patch of [{ porters_min_hours: 0 }, { porters_min_hours: 13 }, { porters_min_persons: 1 }, { porters_min_persons: 5 }]) {
+    for (const patch of [{ porters_min_hours: 0 }, { porters_min_hours: 13 }, { porters_min_persons: 0 }, { porters_min_persons: 5 }]) {
       const { error } = await admin.client.from("price_lists").update(patch).eq("id", draftId);
       expect(error, JSON.stringify(patch)).not.toBeNull();
     }
+    // D177: one person is a valid minimum
+    const one = await admin.client.from("price_lists").update({ porters_min_persons: 1 }).eq("id", draftId).select("porters_min_persons");
+    expect(one.error).toBeNull();
+    expect(one.data).toEqual([{ porters_min_persons: 1 }]);
     const { error } = await admin.client.from("price_rules").update({ kind: "fixed" }).eq("price_list_id", draftId).eq("code", "porters_floor_no_elevator");
     expect(error).not.toBeNull();
   });

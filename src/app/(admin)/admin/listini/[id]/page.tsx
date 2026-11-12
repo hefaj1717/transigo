@@ -99,7 +99,7 @@ async function Content({ params }: { params: Promise<{ id: string }> }) {
             </label>
             <label className="flex flex-col gap-1">Facchinaggio: tolleranza ore extra (min)<input name="porter_overtime_grace_minutes" defaultValue={list.porter_overtime_grace_minutes} className={inputClass} /></label>
             <label className="flex flex-col gap-1">Facchinaggio senza trasporto: ore minime<input name="porters_min_hours" defaultValue={list.porters_min_hours} className={inputClass} /></label>
-            <label className="flex flex-col gap-1">Facchinaggio senza trasporto: persone minime (2–4)<input name="porters_min_persons" defaultValue={list.porters_min_persons} className={inputClass} /></label>
+            <label className="flex flex-col gap-1">Facchinaggio senza trasporto: persone minime (1–4)<input name="porters_min_persons" defaultValue={list.porters_min_persons} className={inputClass} /></label>
             <label className="col-span-2 flex flex-col gap-1 sm:col-span-4">Note<input name="notes" defaultValue={list.notes ?? ""} className={inputClass} /></label>
           </div>
         </ActionForm>

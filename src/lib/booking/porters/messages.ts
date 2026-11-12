@@ -26,7 +26,7 @@ export function portersErrorMessage(e: PortersError, ctx: PortersErrorContext): 
     case "service_unavailable":
       return "Il servizio di facchinaggio non è disponibile al momento.";
     case "invalid_input":
-      return `Controlla i dati: servono almeno ${ctx.minPersons} facchini e ${ctx.minHours} ${ctx.minHours === 1 ? "ora" : "ore"}.`;
+      return `Controlla i dati: servono almeno ${ctx.minPersons === 1 ? "1 facchino" : `${ctx.minPersons} facchini`} e ${ctx.minHours} ${ctx.minHours === 1 ? "ora" : "ore"}.`;
     case "incomplete":
       return "Inserisci l'indirizzo, la data e la fascia oraria.";
     case "invalid_window":

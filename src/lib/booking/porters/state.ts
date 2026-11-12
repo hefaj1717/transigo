@@ -10,7 +10,7 @@ export const PORTERS_STORAGE_KEY = "transigo.booking.facchini.v1";
 export const PORTERS_WIZARD_PATH = "/prenota/facchini"; // D158
 
 /** Lower bounds of the form; the price list may ask for more (porters_min_persons / porters_min_hours, D157). */
-export const PORTERS_FORM_MIN_PERSONS = 2;
+export const PORTERS_FORM_MIN_PERSONS = 1; // D177 (was 2, D157)
 
 export const portersStateSchema = z.object({
   version: z.literal(1),
