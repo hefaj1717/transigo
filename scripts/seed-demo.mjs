@@ -100,16 +100,36 @@ async function seedServices({ admin, customer, ferri, galli }) {
   // ---------------------------------------------------------------------------
   // Facchinaggio (step 6 of docs/plany/tre-servizi.md; docs/testy-reczne/tre-servizi.md B)
   // ---------------------------------------------------------------------------
+  // Every order is looked up first by its goods (unique in the seed), so an interrupted staging top-up resumes
+  // where it stopped instead of adding duplicates.
+  const found = async (c, description) => {
+    const r = await ok(service.from("orders").select("id, order_number, status").eq("customer_id", c.id).eq("goods_description", description)
+      .order("order_number").limit(1));
+    return r[0] ? { id: r[0].id, number: r[0].order_number, status: r[0].status } : null;
+  };
+  const paidOnce = async (c, description, create) => {
+    const o = await found(c, description);
+    if (!o) return pay(await create());
+    if (o.status === "pending_payment") throw new Error(`Ordine ${o.number} non pagato: completare a mano.`);
+    return o;
+  };
   // P1. Paid, 2 facchini — on the list of Ferri (team 2) and Galli (team 4); "Assegna facchini" in the admin.
-  const p1 = await pay(await portersOrder(customer, { place: "milanoCentro", daysAhead: 3, window: "10-12", persons: 2, hours: 3, floor: 4, elevator: false, description: "Salita di un divano e di un armadio al 4° piano", contact: "Giulia Conti", notes: "Citofono Conti" }));
+  const P1 = "Salita di un divano e di un armadio al 4° piano";
+  const p1 = await paidOnce(customer, P1, () => portersOrder(customer, { place: "milanoCentro", daysAhead: 3, window: "10-12", persons: 2, hours: 3, floor: 4, elevator: false, description: P1, contact: "Giulia Conti", notes: "Citofono Conti" }));
   // P2. Paid, 3 facchini — only Galli sees it (Ferri's team is too small).
-  await pay(await portersOrder(customer, { place: "monza", daysAhead: 4, window: "08-10", persons: 3, hours: 4, floor: 0, elevator: false, description: "Scarico di un camion: 40 scatoloni e mobili da ufficio", contact: "Studio Conti" }));
+  const P2 = "Scarico di un camion: 40 scatoloni e mobili da ufficio";
+  await paidOnce(customer, P2, () => portersOrder(customer, { place: "monza", daysAhead: 4, window: "08-10", persons: 3, hours: 4, floor: 0, elevator: false, description: P2, contact: "Studio Conti" }));
   // P3. Assigned to Ferri by the admin, work started → "Segna lavoro concluso" in the admin.
-  const p3 = await pay(await portersOrder(customer, { place: "milanoNavigli", daysAhead: 2, window: "14-16", persons: 2, hours: 2, floor: 2, elevator: true, description: "Spostamento mobili tra due stanze", contact: "Giulia Conti" }));
-  await ok(service.rpc("admin_assign_porter_job", { p_order_id: p3.id, p_carrier_id: ferri.id, p_admin_id: admin.id }));
-  await advance(p3, "picked_up");
+  const P3 = "Spostamento mobili tra due stanze";
+  const p3 = await paidOnce(customer, P3, () => portersOrder(customer, { place: "milanoNavigli", daysAhead: 2, window: "14-16", persons: 2, hours: 2, floor: 2, elevator: true, description: P3, contact: "Giulia Conti" }));
+  const p3Status = p3.status ?? "paid";
+  if (p3Status === "paid") await ok(service.rpc("admin_assign_porter_job", { p_order_id: p3.id, p_carrier_id: ferri.id, p_admin_id: admin.id }));
+  if (p3Status === "paid" || p3Status === "assigned") {
+    await ok(service.rpc("admin_advance_order", { p_order_id: p3.id, p_admin_id: admin.id, p_to_status: "picked_up", p_note: null }));
+  }
   // P4. Pending payment (the customer can pay it from "I miei ordini").
-  await portersOrder(customer, { place: "milanoCentro", daysAhead: 6, window: "16-18", persons: 2, hours: 2, description: "Montaggio e salita di una libreria", contact: "Giulia Conti" });
+  const P4 = "Montaggio e salita di una libreria";
+  if (!(await found(customer, P4))) await portersOrder(customer, { place: "milanoCentro", daysAhead: 6, window: "16-18", persons: 2, hours: 2, description: P4, contact: "Giulia Conti" });
   console.log(`\nFacchinaggio: ${p1.number} da assegnare (Ferri e Galli), ${p3.number} in corso (Ferri) — /admin/ordini?servizio=facchinaggio`);
 
   // ---------------------------------------------------------------------------
@@ -117,18 +137,22 @@ async function seedServices({ admin, customer, ferri, galli }) {
   // ---------------------------------------------------------------------------
   await ensureWarehouseCapacity(admin);
   // D1. Box M, "porto io" + "ritiro io", paid → the customer sees the warehouse address (D171).
-  const d1 = await pay(await storageOrder(customer, { box: "m", startIn: 3, days: 30, description: "Mobili del soggiorno e 12 scatoloni" }));
+  const D1 = "Mobili del soggiorno e 12 scatoloni";
+  const d1 = await paidOnce(customer, D1, () => storageOrder(customer, { box: "m", startIn: 3, days: 30, description: D1 }));
   // D2. Chain (D153): ritiro Transigo with a porter → box L for 45 days → consegna Transigo; one payment for the group,
-  //     the two transports in "Da assegnare" (pickup and delivery on the first and last day).
-  const d2 = await pay(await storageOrder(customer, {
-    box: "l", startIn: 5, days: 45, description: "Trasloco: arredo di un bilocale in attesa della nuova casa", contact: "Giulia Conti", weightKg: 600,
+  //     the two transports in "Da assegnare" (pickup and delivery on the first and last day). The chain is created in
+  //     one transaction, so its first order (the parent, which carries the payment) stands for all three.
+  const D2 = "Trasloco: arredo di un bilocale in attesa della nuova casa";
+  const d2 = await paidOnce(customer, D2, () => storageOrder(customer, {
+    box: "l", startIn: 5, days: 45, description: D2, contact: "Giulia Conti", weightKg: 600,
     intake: { place: "milanoNavigli", window: "10-12", km: 9, floor: 3, elevator: false, porters: "parcels" },
     outbound: { place: "monza", window: "14-16", km: 20 },
   }));
   // D3. Business: 4 pallets, "porto io", "lo deciderò più avanti", paid.
   const azienda = await businessCustomer({ email: EMAILS.business, firstName: "Paolo", lastName: "Rinaldi", phone: "+393409990011", company: "Rinaldi Ricambi Srl", vatIndex: 7 });
-  const d3 = await pay(await storageOrder(azienda, { customerType: "business", pallets: 4, startIn: 2, days: 20, outbound: "later", description: "4 pallet di ricambi auto" }));
-  console.log(`\nDeposito: ${d1.number} box (porto io), ${d2.orders.map((x) => x.order_number).join(" → ")} catena ritiro → deposito → consegna (${d2.number} = pagamento e fattura), ${d3.number} pallet (azienda).`);
+  const D3 = "4 pallet di ricambi auto";
+  const d3 = await paidOnce(azienda, D3, () => storageOrder(azienda, { customerType: "business", pallets: 4, startIn: 2, days: 20, outbound: "later", description: D3 }));
+  console.log(`\nDeposito: ${d1.number} box (porto io), ${d2.orders ? d2.orders.map((x) => x.order_number).join(" → ") : d2.number} catena ritiro → deposito → consegna (${d2.number} = pagamento e fattura), ${d3.number} pallet (azienda).`);
 }
 
 // ---------------------------------------------------------------------------
@@ -150,9 +174,10 @@ if (ids.some(Boolean)) {
     ? await countOrders((q) => q.eq("status", "delivered").lt("delivered_at", new Date(Date.now() - 20 * 86_400_000).toISOString()))
     : await countOrders((q) => q.eq("status", "delivered").eq("goods_description", "10 scatoloni di libri e una cassettiera"));
   // Staging seeded before steps 6–7 (2026-11-11: 25 orders, no azienda@example.com): add only Facchinaggio and
-  // Deposito. Runs once — afterwards the customer has EXPECTED_ORDERS and azienda exists.
+  // Deposito. Also resumes an interrupted top-up (seedServices skips the orders that exist).
+  const businessOrders = async (id) => (await ok(service.from("orders").select("id").eq("customer_id", id).limit(1))).length;
   const [custId, ferriId, galliId, businessId] = ids;
-  if (!LOCAL && custId && ferriId && galliId && !businessId && count === ORDERS_BEFORE_SERVICES && done) {
+  if (!LOCAL && custId && ferriId && galliId && done && count >= ORDERS_BEFORE_SERVICES && (count < EXPECTED_ORDERS || !businessId || !(await businessOrders(businessId)))) {
     const admin = await seedAdmin();
     await ensurePorterPackages(admin);
     const [customer, ferri, galli] = await Promise.all([EMAILS.customer, EMAILS.ferri, EMAILS.galli].map((e) => user(e)));
