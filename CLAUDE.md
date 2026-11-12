@@ -146,6 +146,15 @@ Plan `docs/plany/tre-servizi.md`, decyzje D151–D160. Trasporto, Facchinaggio i
   - Seed: pojemność magazynu, TG-30 box, TG-31→32→33 łańcuch, `azienda@example.com` (palety, TG-34), `EXPECTED_ORDERS = 33`. Test ręczny `docs/testy-reczne/tre-servizi.md` (C). TODO po kroku 7 — w planie (nadpłata łańcucha, dostawa z magazynu daleko w przyszłości na liście kursów, telefon magazynu z `company_phone`, teksty o ratach na `/deposito`).
 - [ ] Kroki 8–11: wg planu (kreator Trasporto i wybór usługi w `/prenota`; panele; raty i „Prolunga”; seed i staging).
 
+## W toku: uwagi właściciela do kreatorów (2026-11-12, D174–D178)
+
+- [x] A (D174, D175, bez bazy, wypchnięte): Trasporto bez „Urgente” i „Servizi extra”, „Aiuto per carico e scarico” (0–4 osoby, pakiet `parcels`) w „Percorso”, krok „Account” tylko gdy potrzebny (`wizardSteps()` we wszystkich 3 kreatorach), wymiary w jednym rzędzie; `vercel.json` `regions: ["lhr1"]` (funkcje obok bazy w Londynie).
+- [x] B (D176): kategoria przesyłki + „Sovrapponibile”, „Veicolo intero” = wybór pojazdu w „Merce”. Migracja `20261112120000_shipment_category.sql` (**lokalnie**).
+- [x] C (D177): facchini od 1 osoby. Migracja `20261112130000_porters_one_person.sql` (**lokalnie**); w kreatorze po nowej wersji cennika z minimum 1.
+- [x] D (D178): kilka magazynów, krok „Magazzino” z wyszukiwaniem po mieście. Migracja `20261112140000_many_warehouses.sql` (**lokalnie**); seed: Bologna.
+- **Commity B–D tylko lokalnie — `git push` dopiero po `db:push` na staging** (kod czyta nowe kolumny; deploy z `main` idzie na staging).
+- TODO: `list_available_jobs()` bez kategorii przesyłki (lista kursów przed przyjęciem); magazyn Bologna na stagingu (admin `/admin/magazzino` + pojemność).
+
 ## Odłożone: PWA przewoźnika (po pełnym demo strony, decyzja właściciela 2026-11-11)
 
 Decyzje właściciela (D117–D121 w spec):
