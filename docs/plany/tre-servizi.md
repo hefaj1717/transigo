@@ -127,7 +127,41 @@ stronie głównej, każda usługa ma własną podstronę i własny kreator. Teks
      odcinek `legs[0]`; Checkout dostaje pusty opis trasy. Klient nie czyta `warehouses` (RLS) — adres magazynu dla
      „porto io” podać inaczej (funkcja albo snapshot w rezerwacji). Anulowanie depozytu: tekst „24 ore prima del ritiro”
      liczy od północy pierwszego dnia — sprawdzić z D33.
-6. Kreator Facchini → płatność → admin przypisuje → „Consegnato”.
+6. Kreator Facchini → płatność → admin przypisuje → „Consegnato”. ✔ (2026-11-12, D164–D168; migracja
+   `20261112100000_porters_dispatch.sql` **lokalnie — czeka na `db:push`**, kod 6e jej wymaga):
+   - **6a** — migracja: `list_available_porter_jobs` / `accept_porter_job` (sesja przewoźnika, bez pojazdu),
+     `admin_porter_candidates` / `admin_assign_porter_job` / `admin_set_carrier_porters` (service role, audit
+     `carrier.porters_updated`), `carrier_fits_porter_job`, `vehicle_fits_order()` tylko dla transportu,
+     `admin_advance_order` dla porters `assigned → picked_up → delivered` (bez `in_transit`), `admin_unassign_job`
+     odmawia po rozpoczęciu (`work_started`). Testy `tests/rls/porters-dispatch.test.ts`.
+   - **6b** — `src/lib/orders/order-summary.ts`: jedno podsumowanie per usługa zamiast `legs[0]` w mailach
+     (`order_paid`, `order_assigned`, `order_delivered`, `order_cancelled`, `cancellation_requested`,
+     `carrier_job_cancelled`) i w opisie Stripe Checkout. Zamyka TODO z 5a poza adresem magazynu dla klienta (krok 7).
+   - **6c** — `src/lib/booking/porters/`: stan kreatora, `quotePorters` (miejsce ustala serwer, pełna wycena w
+     `quotes` z `kind = 'porters'`, przeglądarka dostaje `toPublicQuote`), `placePortersOrder` (kontrole jak D76,
+     `create_service_order`, kwota przewoźnika tylko w `porter_terms`).
+   - **6d** — kreator `/prenota/facchini` (`/api/booking/porters-quote`, `submitPortersBooking` → Stripe Checkout);
+     wspólne z kreatorem transportu: `AccountStep`, `BillingFields`, `TermsCheckbox`, `toWizardSession`. Kalkulator
+     `/facchinaggio` → kreator z wypełnionymi wartościami (`parsePortersPrefill`; `REQUEST_PATH.facchinaggio`).
+   - **6e** — admin: „Assegna facchini” (bez pojazdu), „Segna lavoro iniziato” / „Segna lavoro concluso” (z powodem,
+     D123), „Rimuovi padroncino” tylko w `assigned`, „Squadra insufficiente” (lista i szczegóły),
+     `/admin/padroncini/[id]` „Offre facchinaggio” + ekipa z ostrzeżeniem (D167). PWA: karta facchinaggio na liście,
+     „Accetta” bez pojazdu (`acceptJobAction` z `kind=porters`), „Le mie corse” z adresem, kontaktem i ekipą,
+     „Rinuncia”. Etykiety statusów per usługa (`orderStatusLabel`, `customerStatusLabel`, `carrierJobStatusLabel`,
+     `nextStatusFor`), pasek klienta bez „In viaggio”. Testy `tests/rls/porters-screens.test.ts`.
+   - **6f** — seed demo (Ferri ekipa 2, Galli ekipa 4, TG-26…29 przez `portersOrder()` = silnik + payload kreatora,
+     `EXPECTED_ORDERS = 29`), szczegóły admina bez „Esecuzione” i ze znacznikiem „Concluso senza firma del cliente”,
+     test ręczny `docs/testy-reczne/tre-servizi.md` (B).
+   - **TODO po kroku 6:**
+     - Nadgodziny tragarzy facchinaggio: `order_porter_jobs.worked_minutes` zostaje `NULL`, ekran realizacji
+       facchinaggio w PWA (start/koniec pracy, podpis klienta, D68/D69) — z resztą PWA (D166).
+     - Powiadomienia przewoźników o nowych kursach facchinaggio (D168) — z powiadomieniami PWA.
+     - Wypłata (Etap 6): facchinaggio od `delivered`, kwota z `order_porter_carrier_terms` (nie od `worked_minutes`);
+       `delivered_without_pod = true` (zakończenie przez admina) tylko decyzją admina — test.
+     - Seed stagingu z 2026-11-11 ma 25 zleceń, a `EXPECTED_ORDERS = 29` — ponowny seed na stagingu kończy się
+       „Seed demo incompleto sullo staging” i niczego nie dokłada; rozwiązać w kroku 11 (np. dosiew samych zleceń
+       facchinaggio albo pulizia kont demo — decyzja właściciela).
+     - `/prenota` to nadal kreator transportu; wybór usługi w `/prenota` (D158) — krok 8.
 7. Kreator Deposito, płatność z góry (bez rat): porto io / ritiro Transigo / consegna dalej.
 8. Kreator Trasporto: „Deposito Transigo”, tragarze z ceną.
 9. Panele klienta i admina (sekcja 7).
