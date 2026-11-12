@@ -522,6 +522,122 @@ export async function portersOrder(customer, { place, daysAhead, window = "10-12
   return { id: created.id, number: created.order_number, total: r.quote.totalCents };
 }
 
+// ---------------------------------------------------------------------------
+// Deposito (step 7 of docs/plany/tre-servizi.md, D153–D156)
+// ---------------------------------------------------------------------------
+
+/** A business customer (pallets, D154) with its company data, like the sign-up as "Azienda". */
+export async function businessCustomer({ email, firstName, lastName, phone, company, vatIndex }) {
+  const c = await user(email, { first_name: firstName, last_name: lastName });
+  const settings = await ok(service.from("settings").select("terms_version, privacy_version").single());
+  if (c.created) await ok(service.from("customers").insert({ profile_id: c.id, customer_type: "business", company_name: company, vat_number: vat(vatIndex), sdi_code: "M5UXCR1" }));
+  const now = new Date().toISOString();
+  await ok(service.from("profiles").update({
+    first_name: firstName, last_name: lastName, phone,
+    terms_accepted_at: now, terms_version: settings.terms_version, privacy_accepted_at: now, privacy_version: settings.privacy_version,
+  }).eq("id", c.id));
+  return c;
+}
+
+/**
+ * Capacity of the active warehouse (D156), only where none is set yet (an admin's numbers are kept): boxes of the
+ * active price list and pallet places. Written with the admin's session, as /admin/magazzino (service role: read only).
+ */
+export async function ensureWarehouseCapacity(admin, { boxes = { s: 10, m: 8, l: 3 }, pallets = 40 } = {}) {
+  const b = await loadBooking();
+  const codes = b.config.storageBoxes.filter((x) => x.isEnabled).map((x) => x.code);
+  const existing = await ok(service.from("warehouse_box_capacity").select("box_code").eq("warehouse_id", b.warehouse.id));
+  const missing = codes.filter((c) => !existing.some((e) => e.box_code === c)).map((c) => ({ warehouse_id: b.warehouse.id, box_code: c, quantity: boxes[c] ?? 5 }));
+  if (missing.length) await ok(admin.client.from("warehouse_box_capacity").insert(missing));
+  const w = await ok(service.from("warehouses").select("pallet_capacity").eq("id", b.warehouse.id).single());
+  if (!w.pallet_capacity) await ok(admin.client.from("warehouses").update({ pallet_capacity: pallets }).eq("id", b.warehouse.id));
+}
+
+let storage;
+async function loadStorage() {
+  if (storage) return storage;
+  await loadBooking();
+  const { createJiti } = require("jiti");
+  const jiti = createJiti(import.meta.url, { alias: { "@": `${root}src`, "server-only": `${root}tests/stubs/server-only.ts` } });
+  const { calculateStoragePrice } = await jiti.import("@/lib/pricing/storage-service");
+  const { buildStorageOrderPayload } = await jiti.import("@/lib/booking/storage/payload");
+  const { EMPTY_STORAGE_STATE, storagePriceKey } = await jiti.import("@/lib/booking/storage/state");
+  const { windowRange, addDaysIso } = await jiti.import("@/lib/booking/windows");
+  storage = { calculateStoragePrice, buildStorageOrderPayload, EMPTY_STORAGE_STATE, storagePriceKey, windowRange, addDaysIso };
+  return storage;
+}
+
+/**
+ * Creates a Deposito order (pending payment) and its chain (D153) priced like the wizard /prenota/deposito: the same
+ * engine (calculateStoragePrice, calculatePrice for the one-leg transports to / from the warehouse) and payload
+ * builder (buildStorageOrderPayload) as the app, through create_service_order. Distances are fixed (no Google).
+ * intake / outbound: { place, window, km, porters? } for "Ritiro / Consegna Transigo"; outbound "later" or "self".
+ * Returns the root (the order to pay) with the group total.
+ */
+export async function storageOrder(customer, { customerType = "private", box = null, pallets = null, startIn, days, intake = null, outbound = "self", description, contact = null, weightKg = 150 }) {
+  const b = await loadBooking();
+  const s = await loadStorage();
+  const start = romeDate(startIn);
+  const end = s.addDaysIso(start, days - 1);
+  const T = (t) => ({ place: { placeId: PLACES[t.place].placeId, label: PLACES[t.place].address, floor: t.floor ?? 0, hasElevator: t.elevator ?? true }, window: t.window, porters: t.porters ? { packageCode: t.porters } : null });
+  const outboundTransigo = outbound && typeof outbound === "object";
+  const state = {
+    ...s.EMPTY_STORAGE_STATE,
+    customerTypeView: customerType, boxCode: box, pallets, startDate: start, endDate: end,
+    intake: intake ? "transigo" : "self", outbound: outboundTransigo ? "transigo" : outbound,
+    intakeTransport: intake ? T(intake) : s.EMPTY_STORAGE_STATE.intakeTransport,
+    outboundTransport: outboundTransigo ? T(outbound) : s.EMPTY_STORAGE_STATE.outboundTransport,
+    goods: { ...s.EMPTY_STORAGE_STATE.goods, description, weightKg },
+  };
+  const unit = customerType === "private" ? { unit: "box", boxCode: box } : { unit: "pallet", pallets };
+  const priced = s.calculateStoragePrice({ customerType, days, ...unit }, b.config);
+  if (!priced.ok) throw new Error(`storage price (${description}): ${JSON.stringify(priced.error)}`);
+
+  const w = b.warehouse;
+  const wh = { address: w.address, placeId: null, lat: w.lat, lng: w.lng, city: w.city, postalCode: null, province: w.province, warehouseId: w.id };
+  const vehicleId = await vehicleTypeId("van_medium");
+  const transport = (role, t, date) => {
+    const P = { ...PLACES[t.place], warehouseId: null };
+    const range = s.windowRange(date, t.window);
+    const side = { e: P, floor: t.floor ?? 0, lift: t.elevator ?? true };
+    const [from, to] = role === "intake" ? [side, { e: wh, floor: 0, lift: true }] : [{ e: wh, floor: 0, lift: true }, side];
+    const r = b.calculatePrice({
+      customerType, now: new Date(),
+      legs: [{ distanceM: t.km * 1000, vehicleTypeId: vehicleId, pickupAt: range.start, pickupProvince: from.e.province, pickupFloor: from.floor, pickupHasElevator: from.lift, deliveryFloor: to.floor, deliveryHasElevator: to.lift }],
+      porters: t.porters ? [{ legIndex: 0, packageCode: t.porters }] : undefined,
+    }, b.config);
+    if (!r.ok) throw new Error(`transport price (${description}, ${role}): ${JSON.stringify(r.error)}`);
+    return {
+      vehicleTypeId: vehicleId, vehicleName: "Furgone medio", quote: r.quote,
+      leg: {
+        pickup: from.e, delivery: to.e, pickupDate: date, windowStart: range.start.toISOString(), windowEnd: range.end.toISOString(),
+        pickupFloor: from.floor, pickupHasElevator: from.lift, deliveryFloor: to.floor, deliveryHasElevator: to.lift,
+        distanceM: t.km * 1000, durationS: Math.round(t.km * 75),
+      },
+    };
+  };
+  const at = new Date();
+  const input = {
+    kind: "storage", key: s.storagePriceKey(state, customerType), ownerId: customer.id, state, warehouseId: w.id, days, storage: priced.quote,
+    transports: { ...(intake ? { intake: transport("intake", intake, start) } : {}), ...(outboundTransigo ? { outbound: transport("outbound", outbound, end) } : {}) },
+    now: at.toISOString(),
+  };
+  const person = await ok(service.from("profiles").select("first_name, last_name, email").eq("id", customer.id).single());
+  const company = customerType === "business" ? await ok(service.from("customers").select("company_name, vat_number, sdi_code").eq("profile_id", customer.id).single()) : null;
+  const billingDetails = company
+    ? { customer_type: "business", first_name: person.first_name, last_name: person.last_name, email: person.email, company_name: company.company_name, vat_number: company.vat_number, sdi_code: company.sdi_code, pec: null, street: "Via Lecco 5", city: "Milano", postal_code: "20124", province: "MI", country: "IT" }
+    : { customer_type: "private", first_name: person.first_name, last_name: person.last_name, email: person.email, fiscal_code: "CNTGLI85M41F205X", street: "Via Dante 12", city: "Milano", postal_code: "20121", province: "MI", country: "IT" };
+  const payload = s.buildStorageOrderPayload({
+    customerId: customer.id, customerType, input,
+    siteContact: contact ? { name: contact, phone: "+393331234567" } : null,
+    warehouseContact: { name: "Magazzino Transigo Milano", phone: "+390212345678" },
+    notes: "", description, billingDetails, termsVersion: b.settings.terms_version, termsAcceptedAt: at,
+  });
+  const created = await ok(service.rpc("create_service_order", { p: payload }));
+  const total = priced.quote.totalCents + (input.transports.intake?.quote.totalCents ?? 0) + (input.transports.outbound?.quote.totalCents ?? 0);
+  return { id: created.id, number: created.order_number, total, orders: created.orders };
+}
+
 let stripe;
 /**
  * Locally: fake Stripe ids (no network). On staging: a real Stripe TEST PaymentIntent paid with the test card
@@ -562,7 +678,7 @@ export async function printOrders(customerId) {
     .eq("customer_id", customerId).order("order_number"));
   for (const r of rows) {
     const pickup = new Date(r.pickup_window_start).toLocaleString("it-IT", { timeZone: "Europe/Rome", dateStyle: "short", timeStyle: "short" });
-    console.log(`  ${r.order_number}  ${r.status.padEnd(15)} ${pickup.padEnd(17)} ${(r.vehicle_types?.name_it ?? (r.service_type === "porters" ? "Facchinaggio" : "")).padEnd(28)} ${r.goods_description}${r.carriers ? `  → ${r.carriers.company_name}` : ""}`);
+    console.log(`  ${r.order_number}  ${r.status.padEnd(15)} ${pickup.padEnd(17)} ${(r.vehicle_types?.name_it ?? (r.service_type === "porters" ? "Facchinaggio" : r.service_type === "storage" ? "Deposito" : "")).padEnd(28)} ${r.goods_description}${r.carriers ? `  → ${r.carriers.company_name}` : ""}`);
   }
 }
 

@@ -33,12 +33,15 @@
 // Delivered orders and the blocked-Rinuncia job are moved into the past with plain SQL in the local container.
 import { randomUUID } from "node:crypto";
 import {
-  ADMIN_EMAIL, TARGET, approveCarrier, carrierAccount, companyDocs, completeDelivery, ensurePorterPackages, existingUserId, legsToTodaySql, localSql, ok, order,
-  orderPhoto, pay, portersOrder, printOrders, printPasswordHint, privateCustomer, recordStep, seedAdmin, service, sqlUuid, stepTimesSql, user, vehicle,
+  ADMIN_EMAIL, TARGET, approveCarrier, businessCustomer, carrierAccount, companyDocs, completeDelivery, ensurePorterPackages, ensureWarehouseCapacity, existingUserId,
+  legsToTodaySql, localSql, ok, order, orderPhoto, pay, portersOrder, printOrders, printPasswordHint, privateCustomer, recordStep, seedAdmin, service, sqlUuid,
+  stepTimesSql, storageOrder, user, vehicle,
 } from "./lib/local-seed.mjs";
 
-const EMAILS = { customer: "cliente@example.com", ferri: "padroncino@example.com", galli: "padroncino2@example.com" };
-const EXPECTED_ORDERS = 29; // 25 + 4 Facchinaggio (step 6). The staging seed of 2026-11-11 has 25: see docs/plany/tre-servizi.md (step 11).
+const EMAILS = { customer: "cliente@example.com", ferri: "padroncino@example.com", galli: "padroncino2@example.com", business: "azienda@example.com" };
+// Orders of cliente@example.com: 25 + 4 Facchinaggio (step 6) + 4 Deposito (step 7: a box alone, a chain of 3).
+// The staging seed of 2026-11-11 has 25: see docs/plany/tre-servizi.md (step 11).
+const EXPECTED_ORDERS = 33;
 // Orders 18–21 by their goods (unique in the seed), for the guide printed at the end and for tests/e2e.
 const EXECUTION_DEMO = {
   "Cucina componibile smontata": "admin: «Annulla ultimo passo» (solo «Sono arrivato al ritiro»)",
@@ -56,6 +59,7 @@ function printLogins() {
   console.log(`  Cliente:            ${EMAILS.customer.padEnd(26)} → ${BASE}/cliente`);
   console.log(`  Padroncino (Ferri): ${EMAILS.ferri.padEnd(26)} → ${BASE}/padroncino  (furgone medio)`);
   console.log(`  Padroncino (Galli): ${EMAILS.galli.padEnd(26)} → ${BASE}/padroncino  (camion con sponda)`);
+  console.log(`  Azienda (pallet):   ${EMAILS.business.padEnd(26)} → ${BASE}/cliente`);
   printPasswordHint();
 }
 
@@ -312,6 +316,24 @@ await advance(p3, "picked_up");
 // P4. Pending payment (the customer can pay it from "I miei ordini").
 await portersOrder(customer, { place: "milanoCentro", daysAhead: 6, window: "16-18", persons: 2, hours: 2, description: "Montaggio e salita di una libreria", contact: "Giulia Conti" });
 console.log(`\nFacchinaggio: ${p1.number} da assegnare (Ferri e Galli), ${p3.number} in corso (Ferri) — /admin/ordini?servizio=facchinaggio`);
+
+// ---------------------------------------------------------------------------
+// Deposito (step 7 of docs/plany/tre-servizi.md; docs/testy-reczne/tre-servizi.md C)
+// ---------------------------------------------------------------------------
+await ensureWarehouseCapacity(admin);
+// D1. Box M, "porto io" + "ritiro io", paid → the customer sees the warehouse address (D171).
+const d1 = await pay(await storageOrder(customer, { box: "m", startIn: 3, days: 30, description: "Mobili del soggiorno e 12 scatoloni" }));
+// D2. Chain (D153): ritiro Transigo with a porter → box L for 45 days → consegna Transigo; one payment for the group,
+//     the two transports in "Da assegnare" (pickup and delivery on the first and last day).
+const d2 = await pay(await storageOrder(customer, {
+  box: "l", startIn: 5, days: 45, description: "Trasloco: arredo di un bilocale in attesa della nuova casa", contact: "Giulia Conti", weightKg: 600,
+  intake: { place: "milanoNavigli", window: "10-12", km: 9, floor: 3, elevator: false, porters: "parcels" },
+  outbound: { place: "monza", window: "14-16", km: 20 },
+}));
+// D3. Business: 4 pallets, "porto io", "lo deciderò più avanti", paid.
+const azienda = await businessCustomer({ email: EMAILS.business, firstName: "Paolo", lastName: "Rinaldi", phone: "+393409990011", company: "Rinaldi Ricambi Srl", vatIndex: 7 });
+const d3 = await pay(await storageOrder(azienda, { customerType: "business", pallets: 4, startIn: 2, days: 20, outbound: "later", description: "4 pallet di ricambi auto" }));
+console.log(`\nDeposito: ${d1.number} box (porto io), ${d2.orders.map((x) => x.order_number).join(" → ")} catena ritiro → deposito → consegna (${d2.number} = pagamento e fattura), ${d3.number} pallet (azienda).`);
 
 // ---------------------------------------------------------------------------
 console.log("\nOrdini demo:");
