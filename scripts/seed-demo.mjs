@@ -42,6 +42,7 @@ const EMAILS = { customer: "cliente@example.com", ferri: "padroncino@example.com
 // Orders of cliente@example.com: 25 + 4 Facchinaggio (step 6) + 4 Deposito (step 7: a box alone, a chain of 3).
 // The staging seed of 2026-11-11 has 25: see docs/plany/tre-servizi.md (step 11).
 const EXPECTED_ORDERS = 33;
+const ORDERS_BEFORE_SERVICES = 25;
 // Orders 18–21 by their goods (unique in the seed), for the guide printed at the end and for tests/e2e.
 const EXECUTION_DEMO = {
   "Cucina componibile smontata": "admin: «Annulla ultimo passo» (solo «Sono arrivato al ritiro»)",
@@ -50,6 +51,16 @@ const EXECUTION_DEMO = {
   "Arredo ufficio: 2 scrivanie e 10 scatoloni": "padroncino: «In magazzino»; admin: «Consenti inizio anticipato» (tratta 2)",
   "Scaffalature metalliche e 6 scatoloni di archivio": "admin: «Rimuovi padroncino» con la merce in magazzino → «Da gestire» (D136)",
 };
+
+// Clean accounts with no orders, for the owner's own tests (booking from scratch, a second admin). Created or
+// refreshed (password) on every run, also when the demo is already seeded.
+const TESTERS = { admin: "admin.test@example.com", private: "privato.test@example.com", business: "azienda.test@example.com" };
+async function ensureTesters() {
+  const a = await user(TESTERS.admin, { first_name: "Marta", last_name: "Bassi" });
+  await ok(service.from("profiles").update({ role: "admin", first_name: "Marta", last_name: "Bassi" }).eq("id", a.id));
+  await privateCustomer({ email: TESTERS.private, firstName: "Davide", lastName: "Russo", phone: "+393401234500" });
+  await businessCustomer({ email: TESTERS.business, firstName: "Chiara", lastName: "Lombardi", phone: "+393401234501", company: "Lombardi Arredi Srl", vatIndex: 8 });
+}
 
 const LOCAL = TARGET === "local";
 const BASE = LOCAL ? "http://localhost:3000" : "<indirizzo Vercel>";
@@ -60,6 +71,10 @@ function printLogins() {
   console.log(`  Padroncino (Ferri): ${EMAILS.ferri.padEnd(26)} → ${BASE}/padroncino  (furgone medio)`);
   console.log(`  Padroncino (Galli): ${EMAILS.galli.padEnd(26)} → ${BASE}/padroncino  (camion con sponda)`);
   console.log(`  Azienda (pallet):   ${EMAILS.business.padEnd(26)} → ${BASE}/cliente`);
+  console.log("Account di prova puliti (nessun ordine):");
+  console.log(`  Admin:              ${TESTERS.admin.padEnd(26)} → ${BASE}/admin`);
+  console.log(`  Privato:            ${TESTERS.private.padEnd(26)} → ${BASE}/prenota`);
+  console.log(`  Azienda:            ${TESTERS.business.padEnd(26)} → ${BASE}/prenota`);
   printPasswordHint();
 }
 
@@ -70,6 +85,50 @@ async function printExecutionGuide(customerId) {
     console.log(`  ${r.order_number}  ${EXECUTION_DEMO[r.goods_description]}`);
     console.log(`          /admin/ordini/${r.id} · /cliente/ordini/${r.id} · /padroncino/le-mie-corse/${r.id}`);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Facchinaggio and Deposito (steps 6–7 of docs/plany/tre-servizi.md). A function, because on staging it also runs
+// on its own: the staging seed of 2026-11-11 has orders 1–25 only (see the top-up below).
+// ---------------------------------------------------------------------------
+async function seedServices({ admin, customer, ferri, galli }) {
+  // Facchinaggio (D152, D167): Ferri with a team of 2, Galli with a team of 4 — set like the admin panel does.
+  for (const [c, team] of [[ferri, 2], [galli, 4]]) {
+    await ok(service.rpc("admin_set_carrier_porters", { p_carrier_id: c.id, p_admin_id: admin.id, p_offers: true, p_team_size: team }).single());
+  }
+
+  // ---------------------------------------------------------------------------
+  // Facchinaggio (step 6 of docs/plany/tre-servizi.md; docs/testy-reczne/tre-servizi.md B)
+  // ---------------------------------------------------------------------------
+  // P1. Paid, 2 facchini — on the list of Ferri (team 2) and Galli (team 4); "Assegna facchini" in the admin.
+  const p1 = await pay(await portersOrder(customer, { place: "milanoCentro", daysAhead: 3, window: "10-12", persons: 2, hours: 3, floor: 4, elevator: false, description: "Salita di un divano e di un armadio al 4° piano", contact: "Giulia Conti", notes: "Citofono Conti" }));
+  // P2. Paid, 3 facchini — only Galli sees it (Ferri's team is too small).
+  await pay(await portersOrder(customer, { place: "monza", daysAhead: 4, window: "08-10", persons: 3, hours: 4, floor: 0, elevator: false, description: "Scarico di un camion: 40 scatoloni e mobili da ufficio", contact: "Studio Conti" }));
+  // P3. Assigned to Ferri by the admin, work started → "Segna lavoro concluso" in the admin.
+  const p3 = await pay(await portersOrder(customer, { place: "milanoNavigli", daysAhead: 2, window: "14-16", persons: 2, hours: 2, floor: 2, elevator: true, description: "Spostamento mobili tra due stanze", contact: "Giulia Conti" }));
+  await ok(service.rpc("admin_assign_porter_job", { p_order_id: p3.id, p_carrier_id: ferri.id, p_admin_id: admin.id }));
+  await advance(p3, "picked_up");
+  // P4. Pending payment (the customer can pay it from "I miei ordini").
+  await portersOrder(customer, { place: "milanoCentro", daysAhead: 6, window: "16-18", persons: 2, hours: 2, description: "Montaggio e salita di una libreria", contact: "Giulia Conti" });
+  console.log(`\nFacchinaggio: ${p1.number} da assegnare (Ferri e Galli), ${p3.number} in corso (Ferri) — /admin/ordini?servizio=facchinaggio`);
+
+  // ---------------------------------------------------------------------------
+  // Deposito (step 7 of docs/plany/tre-servizi.md; docs/testy-reczne/tre-servizi.md C)
+  // ---------------------------------------------------------------------------
+  await ensureWarehouseCapacity(admin);
+  // D1. Box M, "porto io" + "ritiro io", paid → the customer sees the warehouse address (D171).
+  const d1 = await pay(await storageOrder(customer, { box: "m", startIn: 3, days: 30, description: "Mobili del soggiorno e 12 scatoloni" }));
+  // D2. Chain (D153): ritiro Transigo with a porter → box L for 45 days → consegna Transigo; one payment for the group,
+  //     the two transports in "Da assegnare" (pickup and delivery on the first and last day).
+  const d2 = await pay(await storageOrder(customer, {
+    box: "l", startIn: 5, days: 45, description: "Trasloco: arredo di un bilocale in attesa della nuova casa", contact: "Giulia Conti", weightKg: 600,
+    intake: { place: "milanoNavigli", window: "10-12", km: 9, floor: 3, elevator: false, porters: "parcels" },
+    outbound: { place: "monza", window: "14-16", km: 20 },
+  }));
+  // D3. Business: 4 pallets, "porto io", "lo deciderò più avanti", paid.
+  const azienda = await businessCustomer({ email: EMAILS.business, firstName: "Paolo", lastName: "Rinaldi", phone: "+393409990011", company: "Rinaldi Ricambi Srl", vatIndex: 7 });
+  const d3 = await pay(await storageOrder(azienda, { customerType: "business", pallets: 4, startIn: 2, days: 20, outbound: "later", description: "4 pallet di ricambi auto" }));
+  console.log(`\nDeposito: ${d1.number} box (porto io), ${d2.orders.map((x) => x.order_number).join(" → ")} catena ritiro → deposito → consegna (${d2.number} = pagamento e fattura), ${d3.number} pallet (azienda).`);
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +149,22 @@ if (ids.some(Boolean)) {
   const done = LOCAL
     ? await countOrders((q) => q.eq("status", "delivered").lt("delivered_at", new Date(Date.now() - 20 * 86_400_000).toISOString()))
     : await countOrders((q) => q.eq("status", "delivered").eq("goods_description", "10 scatoloni di libri e una cassettiera"));
+  // Staging seeded before steps 6–7 (2026-11-11: 25 orders, no azienda@example.com): add only Facchinaggio and
+  // Deposito. Runs once — afterwards the customer has EXPECTED_ORDERS and azienda exists.
+  const [custId, ferriId, galliId, businessId] = ids;
+  if (!LOCAL && custId && ferriId && galliId && !businessId && count === ORDERS_BEFORE_SERVICES && done) {
+    const admin = await seedAdmin();
+    await ensurePorterPackages(admin);
+    const [customer, ferri, galli] = await Promise.all([EMAILS.customer, EMAILS.ferri, EMAILS.galli].map((e) => user(e)));
+    console.log("Staging con il seed del 2026-11-11: aggiungo solo Facchinaggio e Deposito.");
+    await seedServices({ admin, customer, ferri, galli });
+    console.log("\nOrdini demo:");
+    await printOrders(customer.id);
+    await printExecutionGuide(customer.id);
+    await ensureTesters();
+    printLogins();
+    process.exit(0);
+  }
   if (ids.some((id) => !id) || count !== EXPECTED_ORDERS || !done) {
     console.error(LOCAL
       ? "Seed demo incompleto (un'esecuzione precedente si è interrotta). Ricomincia da zero:\n  npm run db:local:reset && npm run db:local:seed-demo"
@@ -101,6 +176,7 @@ if (ids.some(Boolean)) {
   console.log("Seed demo già presente: nessun dato aggiunto.\n\nOrdini demo:");
   await printOrders(customerId);
   await printExecutionGuide(customerId);
+  await ensureTesters();
   printLogins();
   process.exit(0);
 }
@@ -121,10 +197,6 @@ const galli = await carrierAccount({ email: EMAILS.galli, firstName: "Luca", las
 await companyDocs(galli);
 await vehicle(galli, "GL456CD", { type: "truck_tail_lift", payloadKg: 3000 });
 await approveCarrier(galli, admin);
-// Facchinaggio (D152, D167): Ferri with a team of 2, Galli with a team of 4 — set like the admin panel does.
-for (const [c, team] of [[ferri, 2], [galli, 4]]) {
-  await ok(service.rpc("admin_set_carrier_porters", { p_carrier_id: c.id, p_admin_id: admin.id, p_offers: true, p_team_size: team }).single());
-}
 
 // ---------------------------------------------------------------------------
 // Orders of the customer demo
@@ -302,41 +374,11 @@ ${shiftDays(o6.id, 1)}
 ${shiftDays(o7.id, 11)}
 ${shiftDays(o8.id, 26)}`);
 
-// ---------------------------------------------------------------------------
-// Facchinaggio (step 6 of docs/plany/tre-servizi.md; docs/testy-reczne/tre-servizi.md B)
-// ---------------------------------------------------------------------------
-// P1. Paid, 2 facchini — on the list of Ferri (team 2) and Galli (team 4); "Assegna facchini" in the admin.
-const p1 = await pay(await portersOrder(customer, { place: "milanoCentro", daysAhead: 3, window: "10-12", persons: 2, hours: 3, floor: 4, elevator: false, description: "Salita di un divano e di un armadio al 4° piano", contact: "Giulia Conti", notes: "Citofono Conti" }));
-// P2. Paid, 3 facchini — only Galli sees it (Ferri's team is too small).
-await pay(await portersOrder(customer, { place: "monza", daysAhead: 4, window: "08-10", persons: 3, hours: 4, floor: 0, elevator: false, description: "Scarico di un camion: 40 scatoloni e mobili da ufficio", contact: "Studio Conti" }));
-// P3. Assigned to Ferri by the admin, work started → "Segna lavoro concluso" in the admin.
-const p3 = await pay(await portersOrder(customer, { place: "milanoNavigli", daysAhead: 2, window: "14-16", persons: 2, hours: 2, floor: 2, elevator: true, description: "Spostamento mobili tra due stanze", contact: "Giulia Conti" }));
-await ok(service.rpc("admin_assign_porter_job", { p_order_id: p3.id, p_carrier_id: ferri.id, p_admin_id: admin.id }));
-await advance(p3, "picked_up");
-// P4. Pending payment (the customer can pay it from "I miei ordini").
-await portersOrder(customer, { place: "milanoCentro", daysAhead: 6, window: "16-18", persons: 2, hours: 2, description: "Montaggio e salita di una libreria", contact: "Giulia Conti" });
-console.log(`\nFacchinaggio: ${p1.number} da assegnare (Ferri e Galli), ${p3.number} in corso (Ferri) — /admin/ordini?servizio=facchinaggio`);
-
-// ---------------------------------------------------------------------------
-// Deposito (step 7 of docs/plany/tre-servizi.md; docs/testy-reczne/tre-servizi.md C)
-// ---------------------------------------------------------------------------
-await ensureWarehouseCapacity(admin);
-// D1. Box M, "porto io" + "ritiro io", paid → the customer sees the warehouse address (D171).
-const d1 = await pay(await storageOrder(customer, { box: "m", startIn: 3, days: 30, description: "Mobili del soggiorno e 12 scatoloni" }));
-// D2. Chain (D153): ritiro Transigo with a porter → box L for 45 days → consegna Transigo; one payment for the group,
-//     the two transports in "Da assegnare" (pickup and delivery on the first and last day).
-const d2 = await pay(await storageOrder(customer, {
-  box: "l", startIn: 5, days: 45, description: "Trasloco: arredo di un bilocale in attesa della nuova casa", contact: "Giulia Conti", weightKg: 600,
-  intake: { place: "milanoNavigli", window: "10-12", km: 9, floor: 3, elevator: false, porters: "parcels" },
-  outbound: { place: "monza", window: "14-16", km: 20 },
-}));
-// D3. Business: 4 pallets, "porto io", "lo deciderò più avanti", paid.
-const azienda = await businessCustomer({ email: EMAILS.business, firstName: "Paolo", lastName: "Rinaldi", phone: "+393409990011", company: "Rinaldi Ricambi Srl", vatIndex: 7 });
-const d3 = await pay(await storageOrder(azienda, { customerType: "business", pallets: 4, startIn: 2, days: 20, outbound: "later", description: "4 pallet di ricambi auto" }));
-console.log(`\nDeposito: ${d1.number} box (porto io), ${d2.orders.map((x) => x.order_number).join(" → ")} catena ritiro → deposito → consegna (${d2.number} = pagamento e fattura), ${d3.number} pallet (azienda).`);
+await seedServices({ admin, customer, ferri, galli });
 
 // ---------------------------------------------------------------------------
 console.log("\nOrdini demo:");
 await printOrders(customer.id);
 await printExecutionGuide(customer.id);
+await ensureTesters();
 printLogins();
