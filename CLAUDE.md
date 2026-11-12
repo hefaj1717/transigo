@@ -144,7 +144,10 @@ Plan `docs/plany/tre-servizi.md`, decyzje D151–D160. Trasporto, Facchinaggio i
   - Kreator `/prenota/deposito` (`src/lib/booking/storage/`: stan, `quoteStorage`, `placeStorageOrder`; API `/api/booking/storage-quote`, `/api/booking/storage-availability` — tylko tak/nie), kalkulator `/deposito` → kreator. Tylko płatność z góry, bez wzmianki o ratach (D172).
   - Panele (minimum): karta `OrderGroupCard` u klienta i admina, adres magazynu u klienta, płatność grupy i limit zwrotu u admina. Lista `/cliente` z grupą, `warehouse_bookings.status` w panelach — krok 9.
   - Seed: pojemność magazynu, TG-30 box, TG-31→32→33 łańcuch, `azienda@example.com` (palety, TG-34), `EXPECTED_ORDERS = 33`. Test ręczny `docs/testy-reczne/tre-servizi.md` (C). TODO po kroku 7 — w planie (nadpłata łańcucha, dostawa z magazynu daleko w przyszłości na liście kursów, telefon magazynu z `company_phone`, teksty o ratach na `/deposito`).
-- [ ] Kroki 8–11: wg planu (kreator Trasporto i wybór usługi w `/prenota`; panele; raty i „Prolunga”; seed i staging).
+- [x] Krok 8: zamknięty bez kodu (D179, zastąpiony przez D174).
+- [x] Krok 9 (demo, D179, bez bazy): 9a — łańcuch jako jedna karta na `/cliente` (`customerListEntries()`); 9b — faza rezerwacji magazynu `src/lib/orders/booking-phase.ts` (wyliczana z dat i transportów łańcucha; status w bazie ≠ `booked` wygrywa) w panelach, `/cliente/deposito` i `/admin/magazzino` („Prenotazioni deposito” + zajętość magazynów) przez `loadStorageBookings()`. Po demo: przyjęcie/wydanie towaru przez admina (migracja), edycja pojemności magazynu.
+- [ ] Krok 10 (opcjonalny dla demo): raty i „Prolunga”.
+- [ ] Krok 11: seed zgodny z lokalnym (kategorie przesyłki, Bologna, facchino 1 os.) i staging — za zgodą właściciela.
 
 ## W toku: uwagi właściciela do kreatorów (2026-11-12, D174–D178)
 

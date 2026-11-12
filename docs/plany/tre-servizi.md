@@ -195,11 +195,18 @@ stronie głównej, każda usługa ma własną podstronę i własny kreator. Teks
      - `warehouse_bookings.status`: krok 7 ustawia tylko `cancelled` (anulowanie klienta); `in_storage` / `released`
        i lista `/cliente` z grupą jako jedną kartą — krok 9.
      - Pojazd transportów łańcucha dobiera serwer (najmniejszy pasujący do wagi / wymiarów / palet); klient nie wybiera.
-     - Strona `/deposito` (FAQ, lista korzyści) wspomina raty powyżej 2 miesięcy, a kreator ich jeszcze nie ma (D172) —
-       teksty do przeglądu albo krok 10.
+     - ~~Strona `/deposito` wspomina raty~~ — sprawdzone 2026-11-12: teksty już bez rat.
      - Seed stagingu: nadal 25 zleceń (`EXPECTED_ORDERS = 33`) — krok 11.
-8. Kreator Trasporto: „Deposito Transigo”, tragarze z ceną.
-9. Panele klienta i admina (sekcja 7).
+8. Kreator Trasporto: „Deposito Transigo”, tragarze z ceną. — **zamknięty bez kodu (D179)**: zastąpiony przez D174.
+9. Panele klienta i admina (sekcja 7). Demo (D179):
+   - **9a ✔** (2026-11-12) — `/cliente`: łańcuch = jedna karta (`customerListEntries()` w `customer-view.ts`), części z
+     etykietą roli i statusem, suma grupy, płatność na zleceniu nadrzędnym.
+   - **9b ✔** (2026-11-12, bez bazy) — faza rezerwacji `booking-phase.ts` (odznaka `BookingPhaseBadge`) na liście i w
+     szczegółach klienta i admina; `loadStorageBookings()` (`order-group-server.ts`) + `bookingEntries()` /
+     `occupancy()` (`storage-bookings.ts`): `/cliente/deposito` i `/admin/magazzino` („Prenotazioni deposito”, zajętość
+     każdego magazynu vs pojemność) pokazują rezerwacje z kreatora; stary model A jako „Trasporti con deposito”.
+   - Po demo: przyjęcie / wydanie towaru przez admina (`warehouse_bookings.status`, migracja), edycja pojemności
+     magazynu w `/admin/magazzino` (dziś tylko seed / SQL), „Richiedi la consegna” dla `outbound = later`.
 10. Raty miesięczne (subskrypcja Stripe z datą końca, faktura za ratę, alert „Rata non pagata”) i „Prolunga”.
 11. Seed demo, testy ręczne (`docs/testy-reczne/tre-servizi.md`), E2E, staging — za zgodą właściciela.
 
