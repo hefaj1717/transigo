@@ -209,6 +209,9 @@ stronie głównej, każda usługa ma własną podstronę i własny kreator. Teks
      magazynu w `/admin/magazzino` (dziś tylko seed / SQL), „Richiedi la consegna” dla `outbound = later`.
 10. Raty miesięczne (subskrypcja Stripe z datą końca, faktura za ratę, alert „Rata non pagata”) i „Prolunga”.
 11. Seed demo, testy ręczne (`docs/testy-reczne/tre-servizi.md`), E2E, staging — za zgodą właściciela.
+   - **11a ✔** (2026-11-12, lokalnie) — `seedWizardFeedback()`: cennik od 1 facchino, Bologna, kategorie przesyłki
+     (TG-35…40), `EXPECTED_ORDERS = 39`; ten sam przebieg dosiewa staging (zlecenia szukane po opisie towaru).
+   - 11b — staging (zgoda właściciela) + `docs/testy-reczne/demo-a-z.md`.
 
 ## 9. Do pamiętania
 

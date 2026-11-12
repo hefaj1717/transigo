@@ -4,8 +4,10 @@
 //          node scripts/seed-demo.mjs --staging=bacabuzzevwwdxrswbnc
 //   Same accounts and orders, but no plain SQL: dates are not moved into the past (delivered orders keep the dates
 //   of the seed run), the jobs under way start through admin_allow_early_start ("Consenti inizio anticipato") and
-//   payments are real Stripe TEST PaymentIntents. It also activates 8 provinces, adds the Milan warehouse and, when
-//   the active price list has no porter packages, publishes a new version with them.
+//   payments are real Stripe TEST PaymentIntents. It also activates the provinces, adds the Milan and Bologna
+//   warehouses with their capacity and, when the active price list lacks porter packages / boxes or asks for more
+//   than 1 facchino, publishes a new version (as the admin, with audit rows). On a staging seeded earlier it adds
+//   only the missing orders (looked up by their goods).
 // Running it again does not add anything: it prints the existing orders and logins (and sets the seed password
 // on the accounts again). For fresh dates (e.g. "Rinuncia bloccata" depends on the clock) reset and seed again.
 // Guards, password and helpers: scripts/lib/local-seed.mjs. Manual tests: docs/testy-reczne/corse-padroncino.md.
@@ -33,15 +35,16 @@
 // Delivered orders and the blocked-Rinuncia job are moved into the past with plain SQL in the local container.
 import { randomUUID } from "node:crypto";
 import {
-  ADMIN_EMAIL, TARGET, approveCarrier, businessCustomer, carrierAccount, companyDocs, completeDelivery, ensurePorterPackages, ensureWarehouseCapacity, existingUserId,
+  ADMIN_EMAIL, BOLOGNA_ADDRESS, TARGET, approveCarrier, businessCustomer, ensurePortersMinOne, carrierAccount, companyDocs, completeDelivery, ensurePorterPackages, ensureWarehouseCapacity, existingUserId,
   legsToTodaySql, localSql, ok, order, orderPhoto, pay, portersOrder, printOrders, printPasswordHint, privateCustomer, recordStep, seedAdmin, service, sqlUuid,
   stepTimesSql, storageOrder, user, vehicle,
 } from "./lib/local-seed.mjs";
 
 const EMAILS = { customer: "cliente@example.com", ferri: "padroncino@example.com", galli: "padroncino2@example.com", business: "azienda@example.com" };
-// Orders of cliente@example.com: 25 + 4 Facchinaggio (step 6) + 4 Deposito (step 7: a box alone, a chain of 3).
-// The staging seed of 2026-11-11 has 25: see docs/plany/tre-servizi.md (step 11).
-const EXPECTED_ORDERS = 33;
+// Orders of cliente@example.com: 25 + 4 Facchinaggio (step 6) + 4 Deposito (step 7: a box alone, a chain of 3)
+// + 6 for the wizard feedback (D176–D178: 4 shipment categories, 1 facchino, a box in Bologna).
+// Staging: seeded 2026-11-11 with 25, topped up 2026-11-12 to 33 — a run tops it up again (step 11).
+const EXPECTED_ORDERS = 39;
 const ORDERS_BEFORE_SERVICES = 25;
 // Orders 18–21 by their goods (unique in the seed), for the guide printed at the end and for tests/e2e.
 const EXECUTION_DEMO = {
@@ -91,6 +94,53 @@ async function printExecutionGuide(customerId) {
 // Facchinaggio and Deposito (steps 6–7 of docs/plany/tre-servizi.md). A function, because on staging it also runs
 // on its own: the staging seed of 2026-11-11 has orders 1–25 only (see the top-up below).
 // ---------------------------------------------------------------------------
+// Every order is looked up first by its goods (unique in the seed), so an interrupted staging top-up resumes where it
+// stopped instead of adding duplicates.
+const found = async (c, description) => {
+  const r = await ok(service.from("orders").select("id, order_number, status").eq("customer_id", c.id).eq("goods_description", description)
+    .order("order_number").limit(1));
+  return r[0] ? { id: r[0].id, number: r[0].order_number, status: r[0].status } : null;
+};
+const paidOnce = async (c, description, create) => {
+  const o = await found(c, description);
+  if (!o) return pay(await create());
+  if (o.status === "pending_payment") throw new Error(`Ordine ${o.number} non pagato: completare a mano.`);
+  return o;
+};
+const once = async (c, description, create) => (await found(c, description)) ?? create();
+
+// ---------------------------------------------------------------------------
+// Wizard feedback of 2026-11-12 (D176–D178): shipment categories, Facchinaggio with 1 person, a box in Bologna.
+// Idempotent like seedServices — also the staging top-up (step 11 of docs/plany/tre-servizi.md).
+// ---------------------------------------------------------------------------
+async function seedWizardFeedback({ admin, customer, ferri }) {
+  await ensurePortersMinOne(admin);
+  await ensureWarehouseCapacity(admin); // Milano and Bologna with their capacity
+  const ferriVan = (await ok(service.from("carrier_vehicles").select("id").eq("carrier_id", ferri.id).eq("plate", "FT123AB").single())).id;
+  // T1. 2 pallet sovrapponibili, paid → "Da assegnare".
+  const T1 = "2 pallet di piastrelle";
+  const t1 = await paidOnce(customer, T1, () => order(customer, { from: "milanoNavigli", to: "bergamo", daysAhead: 4, window: "08-10", shipment: { category: "pallet", stackable: true }, goods: { description: T1, items: 2, weightKg: 600, pallets: 2 }, contacts: ["Giulia Conti", "Edilizia Bergamo"] }));
+  // T2. 6 colli, paid and assigned to Ferri.
+  const T2 = "6 colli di abbigliamento";
+  const t2 = await paidOnce(customer, T2, () => order(customer, { from: "monza", to: "como", daysAhead: 3, window: "14-16", shipment: { category: "package", stackable: false }, goods: { description: T2, items: 6, weightKg: 60, largest: { lengthCm: 60, widthCm: 40, heightCm: 40 } }, contacts: ["Giulia Conti", "Boutique Como"] }));
+  if ((await ok(service.from("orders").select("status").eq("id", t2.id).single())).status === "paid") {
+    await ok(service.rpc("admin_assign_job", { p_order_id: t2.id, p_carrier_id: ferri.id, p_vehicle_id: ferriVan, p_admin_id: admin.id }));
+  }
+  // T3. Documenti (buste), paid.
+  const T3 = "3 buste di documenti originali";
+  await paidOnce(customer, T3, () => order(customer, { from: "milanoCentro", to: "torino", daysAhead: 2, window: "10-12", vehicle: "van_small", shipment: { category: "document" }, goods: { description: T3, items: 3, weightKg: 2 }, contacts: ["Giulia Conti", "Studio legale Torino"] }));
+  // T4. Veicolo intero (furgone grande), waiting for payment → "Paga ora".
+  const T4 = "Furgone intero per il trasloco di un negozio";
+  await once(customer, T4, () => order(customer, { from: "bergamo", to: "brescia", daysAhead: 6, window: "08-10", vehicle: "van_large", shipment: { category: "full_vehicle" }, goods: { description: T4 }, contacts: ["Giulia Conti", "Negozio Brescia"] }));
+  // P5. Facchinaggio with 1 person (D177), paid → "Assegna facchini".
+  const P5 = "Montaggio di un armadio";
+  await paidOnce(customer, P5, () => portersOrder(customer, { place: "milanoCentro", daysAhead: 5, window: "10-12", persons: 1, hours: 2, floor: 1, elevator: true, description: P5, contact: "Giulia Conti" }));
+  // B1. Box S in Bologna (D178), "porto io" + "ritiro io", paid.
+  const B1 = "Sci, scarponi e 4 scatoloni";
+  const b1 = await paidOnce(customer, B1, () => storageOrder(customer, { box: "s", startIn: 6, days: 30, description: B1, warehouseAddress: BOLOGNA_ADDRESS }));
+  console.log(`\nNovità prenotazione: ${t1.number} pallet sovrapponibili, ${t2.number} colli (Ferri), «${T3}», «${T4}» (da pagare), facchinaggio 1 persona, ${b1.number} box a Bologna.`);
+}
+
 async function seedServices({ admin, customer, ferri, galli }) {
   // Facchinaggio (D152, D167): Ferri with a team of 2, Galli with a team of 4 — set like the admin panel does.
   for (const [c, team] of [[ferri, 2], [galli, 4]]) {
@@ -100,19 +150,6 @@ async function seedServices({ admin, customer, ferri, galli }) {
   // ---------------------------------------------------------------------------
   // Facchinaggio (step 6 of docs/plany/tre-servizi.md; docs/testy-reczne/tre-servizi.md B)
   // ---------------------------------------------------------------------------
-  // Every order is looked up first by its goods (unique in the seed), so an interrupted staging top-up resumes
-  // where it stopped instead of adding duplicates.
-  const found = async (c, description) => {
-    const r = await ok(service.from("orders").select("id, order_number, status").eq("customer_id", c.id).eq("goods_description", description)
-      .order("order_number").limit(1));
-    return r[0] ? { id: r[0].id, number: r[0].order_number, status: r[0].status } : null;
-  };
-  const paidOnce = async (c, description, create) => {
-    const o = await found(c, description);
-    if (!o) return pay(await create());
-    if (o.status === "pending_payment") throw new Error(`Ordine ${o.number} non pagato: completare a mano.`);
-    return o;
-  };
   // P1. Paid, 2 facchini — on the list of Ferri (team 2) and Galli (team 4); "Assegna facchini" in the admin.
   const P1 = "Salita di un divano e di un armadio al 4° piano";
   const p1 = await paidOnce(customer, P1, () => portersOrder(customer, { place: "milanoCentro", daysAhead: 3, window: "10-12", persons: 2, hours: 3, floor: 4, elevator: false, description: P1, contact: "Giulia Conti", notes: "Citofono Conti" }));
@@ -181,8 +218,9 @@ if (ids.some(Boolean)) {
     const admin = await seedAdmin();
     await ensurePorterPackages(admin);
     const [customer, ferri, galli] = await Promise.all([EMAILS.customer, EMAILS.ferri, EMAILS.galli].map((e) => user(e)));
-    console.log("Staging con il seed del 2026-11-11: aggiungo solo Facchinaggio e Deposito.");
+    console.log("Staging con un seed precedente: aggiungo solo gli ordini mancanti (Facchinaggio, Deposito, novità prenotazione).");
     await seedServices({ admin, customer, ferri, galli });
+    await seedWizardFeedback({ admin, customer, ferri });
     console.log("\nOrdini demo:");
     await printOrders(customer.id);
     await printExecutionGuide(customer.id);
@@ -400,6 +438,7 @@ ${shiftDays(o7.id, 11)}
 ${shiftDays(o8.id, 26)}`);
 
 await seedServices({ admin, customer, ferri, galli });
+await seedWizardFeedback({ admin, customer, ferri });
 
 // ---------------------------------------------------------------------------
 console.log("\nOrdini demo:");

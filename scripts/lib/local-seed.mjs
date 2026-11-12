@@ -319,6 +319,27 @@ export async function ensurePorterPackages(admin) {
   console.log(`Listino: pubblicata una nuova versione con i pacchetti facchini e i box deposito (da v${active.version}).`);
 }
 
+/**
+ * D177: Facchinaggio from 1 person. Published price lists keep their minimum, so when the active one asks for more
+ * than 1, the admin clones it, sets "persone minime" = 1 on the draft and publishes it — like "Crea bozza" →
+ * Impostazioni → "Pubblica" in /admin/listini, with the same audit rows.
+ */
+export async function ensurePortersMinOne(admin) {
+  const active = await ok(service.from("price_lists").select("id, version, porters_min_persons").eq("status", "active").single());
+  if (active.porters_min_persons <= 1) return;
+  const draftId = await ok(admin.client.rpc("clone_price_list", { p_source_id: active.id }));
+  await ok(admin.client.from("price_lists").update({ porters_min_persons: 1 }).eq("id", draftId).select("id").single());
+  await ok(admin.client.rpc("publish_price_list", { p_price_list_id: draftId }));
+  const audit = (action, entityId, data) => ({ actor_id: admin.id, actor_email: admin.email, action, entity_type: "price_list", entity_id: entityId, data });
+  await ok(service.from("audit_log").insert([
+    audit("price_list.clone", draftId, { source_id: active.id }),
+    audit("price_list.update", draftId, { porters_min_persons: 1 }),
+    audit("price_list.publish", draftId, {}),
+  ]));
+  booking = undefined; // reload the pricing config
+  console.log(`Listino: pubblicata una nuova versione con facchinaggio da 1 persona (da v${active.version}).`);
+}
+
 /** A valid, deterministic partita IVA (check digit as in src/lib/auth/italian-ids.ts); `k` keeps them unique. */
 export function vat(k) {
   const d = String(5_550_000_000 + k);
@@ -422,9 +443,9 @@ async function loadBooking() {
 
   await ok(service.from("service_area_provinces").update({ is_active: true }).in("province_code", ["MI", "MB", "BG", "BS", "CO", "VA", "TO", "NO", "BO"]));
   // The demo orders use the first warehouse (Milano); D178 allows more active ones (Bologna: ensureWarehouseCapacity).
-  let warehouse = (await ok(service.from("warehouses").select("id, address, city, province, lat, lng").eq("is_active", true).order("created_at").limit(1)))[0];
+  let warehouse = (await ok(service.from("warehouses").select("id, name, address, city, province, lat, lng").eq("is_active", true).order("created_at").limit(1)))[0];
   if (!warehouse) {
-    warehouse = await ok(service.from("warehouses").insert({ name: "Magazzino Transigo Milano", address: "Via Toffetti 20, 20139 Milano MI", city: "Milano", province: "MI", lat: 45.4398, lng: 9.2237, is_active: true }).select("id, address, city, province, lat, lng").single());
+    warehouse = await ok(service.from("warehouses").insert({ name: "Magazzino Transigo Milano", address: "Via Toffetti 20, 20139 Milano MI", city: "Milano", province: "MI", lat: 45.4398, lng: 9.2237, is_active: true }).select("id, name, address, city, province, lat, lng").single());
   }
   const settings = await ok(service.from("settings").select("terms_version, privacy_version").single());
   const config = await loadPricingConfig(service);
@@ -433,7 +454,7 @@ async function loadBooking() {
 }
 
 /** Creates an order (pending payment) for a private customer, priced like the wizard. */
-export async function order(customer, { from, to, daysAhead, window = "10-12", vehicle = "van_medium", goods, packing = 0, storage = null, porters = null, portersDelivery = null, contacts, notes = "" }) {
+export async function order(customer, { from, to, daysAhead, window = "10-12", vehicle = "van_medium", goods, packing = 0, storage = null, porters = null, portersDelivery = null, contacts, notes = "", shipment = null }) {
   const b = await loadBooking();
   const vehicleId = await vehicleTypeId(vehicle);
   const A = { ...PLACES[from], warehouseId: null };
@@ -445,7 +466,9 @@ export async function order(customer, { from, to, daysAhead, window = "10-12", v
     delivery: { placeId: B.placeId, label: B.address, floor: goods.deliveryFloor ?? 0, hasElevator: goods.deliveryElevator ?? true },
     pickupDate: romeDate(daysAhead),
     pickupWindow: window,
-    goods: { ...E.goods, description: goods.description, itemsCount: goods.items ?? null, weightKg: goods.weightKg ?? null, largestItem: goods.largest ?? E.goods.largestItem, palletsCount: goods.pallets ?? null, loadCategory: porters ?? portersDelivery ?? null },
+    goods: { ...E.goods, description: goods.description, itemsCount: goods.items ?? null, weightKg: goods.weightKg ?? null, largestItem: goods.largest ?? E.goods.largestItem, palletsCount: goods.pallets ?? null, loadCategory: shipment ? null : porters ?? portersDelivery ?? null,
+      // D176: what the wizard's "Cosa spedisci?" sets (older demo orders have none)
+      shipmentCategory: shipment?.category ?? null, stackable: shipment?.stackable ?? false },
     portersPickup: porters ? { packageCode: porters } : null,
     portersDelivery: storage && portersDelivery ? { packageCode: portersDelivery } : null,
     packingItems: packing,
@@ -544,11 +567,12 @@ export async function businessCustomer({ email, firstName, lastName, phone, comp
  * Capacity of the active warehouse (D156), only where none is set yet (an admin's numbers are kept): boxes of the
  * active price list and pallet places. Written with the admin's session, as /admin/magazzino (service role: read only).
  */
+export const BOLOGNA_ADDRESS = "Via del Lavoro 15, 40127 Bologna BO";
 export async function ensureWarehouseCapacity(admin, { boxes = { s: 10, m: 8, l: 3 }, pallets = 40 } = {}) {
   const b = await loadBooking();
   const codes = b.config.storageBoxes.filter((x) => x.isEnabled).map((x) => x.code);
   // D178: a second, example warehouse in Bologna (the customer picks one in the Deposito wizard). Added once.
-  const BOLOGNA = "Via del Lavoro 15, 40127 Bologna BO";
+  const BOLOGNA = BOLOGNA_ADDRESS;
   let bologna = (await ok(service.from("warehouses").select("id").eq("address", BOLOGNA).limit(1)))[0];
   if (!bologna) {
     bologna = await ok(admin.client.from("warehouses").insert({ name: "Magazzino Transigo Bologna", address: BOLOGNA, street: "Via del Lavoro 15", city: "Bologna", postal_code: "40127", province: "BO", lat: 44.5126, lng: 11.3633, is_active: true }).select("id").single());
@@ -583,8 +607,12 @@ async function loadStorage() {
  * intake / outbound: { place, window, km, porters? } for "Ritiro / Consegna Transigo"; outbound "later" or "self".
  * Returns the root (the order to pay) with the group total.
  */
-export async function storageOrder(customer, { customerType = "private", box = null, pallets = null, startIn, days, intake = null, outbound = "self", description, contact = null, weightKg = 150 }) {
+export async function storageOrder(customer, { customerType = "private", box = null, pallets = null, startIn, days, intake = null, outbound = "self", description, contact = null, weightKg = 150, warehouseAddress = null }) {
   const b = await loadBooking();
+  // D178: the first warehouse (Milano) unless the order names another active one by its address.
+  const w = warehouseAddress
+    ? await ok(service.from("warehouses").select("id, name, address, city, province, lat, lng").eq("address", warehouseAddress).eq("is_active", true).single())
+    : b.warehouse;
   const s = await loadStorage();
   const start = romeDate(startIn);
   const end = s.addDaysIso(start, days - 1);
@@ -592,7 +620,7 @@ export async function storageOrder(customer, { customerType = "private", box = n
   const outboundTransigo = outbound && typeof outbound === "object";
   const state = {
     ...s.EMPTY_STORAGE_STATE,
-    customerTypeView: customerType, warehouseId: b.warehouse.id, boxCode: box, pallets, startDate: start, endDate: end,
+    customerTypeView: customerType, warehouseId: w.id, boxCode: box, pallets, startDate: start, endDate: end,
     intake: intake ? "transigo" : "self", outbound: outboundTransigo ? "transigo" : outbound,
     intakeTransport: intake ? T(intake) : s.EMPTY_STORAGE_STATE.intakeTransport,
     outboundTransport: outboundTransigo ? T(outbound) : s.EMPTY_STORAGE_STATE.outboundTransport,
@@ -602,7 +630,6 @@ export async function storageOrder(customer, { customerType = "private", box = n
   const priced = s.calculateStoragePrice({ customerType, days, ...unit }, b.config);
   if (!priced.ok) throw new Error(`storage price (${description}): ${JSON.stringify(priced.error)}`);
 
-  const w = b.warehouse;
   const wh = { address: w.address, placeId: null, lat: w.lat, lng: w.lng, city: w.city, postalCode: null, province: w.province, warehouseId: w.id };
   const vehicleId = await vehicleTypeId("van_medium");
   const transport = (role, t, date) => {
@@ -639,7 +666,7 @@ export async function storageOrder(customer, { customerType = "private", box = n
   const payload = s.buildStorageOrderPayload({
     customerId: customer.id, customerType, input,
     siteContact: contact ? { name: contact, phone: "+393331234567" } : null,
-    warehouseContact: { name: "Magazzino Transigo Milano", phone: "+390212345678" },
+    warehouseContact: { name: w.name ?? "Magazzino Transigo", phone: "+390212345678" },
     notes: "", description, billingDetails, termsVersion: b.settings.terms_version, termsAcceptedAt: at,
   });
   const created = await ok(service.rpc("create_service_order", { p: payload }));

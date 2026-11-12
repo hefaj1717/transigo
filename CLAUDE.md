@@ -147,7 +147,9 @@ Plan `docs/plany/tre-servizi.md`, decyzje D151–D160. Trasporto, Facchinaggio i
 - [x] Krok 8: zamknięty bez kodu (D179, zastąpiony przez D174).
 - [x] Krok 9 (demo, D179, bez bazy): 9a — łańcuch jako jedna karta na `/cliente` (`customerListEntries()`); 9b — faza rezerwacji magazynu `src/lib/orders/booking-phase.ts` (wyliczana z dat i transportów łańcucha; status w bazie ≠ `booked` wygrywa) w panelach, `/cliente/deposito` i `/admin/magazzino` („Prenotazioni deposito” + zajętość magazynów) przez `loadStorageBookings()`. Po demo: przyjęcie/wydanie towaru przez admina (migracja), edycja pojemności magazynu.
 - [ ] Krok 10 (opcjonalny dla demo): raty i „Prolunga”.
-- [ ] Krok 11: seed zgodny z lokalnym (kategorie przesyłki, Bologna, facchino 1 os.) i staging — za zgodą właściciela.
+- [ ] Krok 11: seed zgodny z lokalnym i staging — za zgodą właściciela.
+  - [x] 11a (lokalnie, 2026-11-12): `seedWizardFeedback()` w `scripts/seed-demo.mjs` — cennik z facchinaggio od 1 osoby (`ensurePortersMinOne()`: klon → `porters_min_persons = 1` → publikacja, z auditem), magazyny Milano + Bologna z pojemnością, TG-35 pallet sovrapponibili, TG-36 colli (Ferri), TG-37 documenti, TG-38 veicolo intero (do zapłaty), TG-39 facchinaggio 1 osoba, TG-40 box S w Bolonii; `EXPECTED_ORDERS = 39`. Na stagingu ten sam przebieg dokłada tylko brakujące zlecenia (szukane po opisie towaru).
+  - [ ] 11b: seed na stagingu (zgoda), test ręczny `docs/testy-reczne/demo-a-z.md`.
 
 ## W toku: uwagi właściciela do kreatorów (2026-11-12, D174–D178)
 
