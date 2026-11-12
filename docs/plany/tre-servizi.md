@@ -162,7 +162,42 @@ stronie głównej, każda usługa ma własną podstronę i własny kreator. Teks
        „Seed demo incompleto sullo staging” i niczego nie dokłada; rozwiązać w kroku 11 (np. dosiew samych zleceń
        facchinaggio albo pulizia kont demo — decyzja właściciela).
      - `/prenota` to nadal kreator transportu; wybór usługi w `/prenota` (D158) — krok 8.
-7. Kreator Deposito, płatność z góry (bez rat): porto io / ritiro Transigo / consegna dalej.
+7. Kreator Deposito, płatność z góry (bez rat): porto io / ritiro Transigo / consegna dalej. ✔ (2026-11-12, D169–D173;
+   migracja `20261112110000_storage_chain.sql` — **lokalnie**, na staging po zgodzie właściciela):
+   - **7a** — migracja: `create_service_order` tworzy łańcuch w jednej transakcji (`intake_transport` /
+     `outbound_transport` w kształcie `create_order`, jeden odcinek do / z magazynu rezerwacji, odbiór w `start_date`,
+     dostawa w `end_date`; ciało `create_order` przeniesione do wewnętrznej `create_transport_order`), zlecenia
+     podrzędne biorą termin płatności nadrzędnego; płatność, wygaszanie, `payment_review`, `queue_invoice` i zwroty dla
+     całej grupy (zwrot na konkretnym zleceniu, limit = jego kwota); `customer_cancel_order` — grupa tylko w całości
+     (D169), depozyt do startu (D170); `customer_order_warehouse()` (D171). Testy `tests/rls/storage-chain.test.ts`.
+   - **7b** — `src/lib/orders/order-group.ts` (+ `order-group-server.ts`): Checkout i „Annulla ordine” na zleceniu
+     nadrzędnym, jedna pozycja Checkout z opisem łańcucha, jeden mail `order_paid` / `order_cancelled` z częściami
+     grupy (adres magazynu przy „porto io”), faktura i noty DEMO z pozycjami całej grupy, wiele zwrotów Stripe.
+   - **7c** — `src/lib/booking/storage/`: `quoteStorage` (cena depozytu, pojemność, transporty łańcucha z polecanym
+     pojazdem i `calculatePrice`), `placeStorageOrder`; testy `tests/rls/place-storage-order.test.ts`.
+   - **7d** — kreator `/prenota/deposito` (`/api/booking/storage-quote`, `/api/booking/storage-availability` — tylko
+     tak/nie), kalkulator `/deposito` → kreator (`parseStoragePrefill`, `REQUEST_PATH.deposito`).
+   - **7e** — `OrderGroupCard` w `/cliente/ordini/[id]` i `/admin/ordini/[id]`; u admina płatność grupy i limit zwrotu
+     zlecenia; u klienta adres magazynu i podgląd anulowania grupy (`groupCancellationPreview`).
+   - **7f** — seed: pojemność magazynu (`ensureWarehouseCapacity`, tylko gdy pusta), TG-30 box, TG-31→32→33 łańcuch,
+     `azienda@example.com` z paletami (TG-34), `EXPECTED_ORDERS = 33`; test ręczny `docs/testy-reczne/tre-servizi.md` (C).
+   - Zamyka TODO z 5a: adres magazynu dla klienta (D171), tekst anulowania depozytu (D170).
+   - **TODO po kroku 7:**
+     - Nadpłata łańcucha (więcej niż suma grupy) → zwrot przez admina odmawia `overpaid_chain`, różnica ręcznie w
+       Stripe — razem z otwartą decyzją o nadpłacie (D141).
+     - Zwrot podwójnej płatności łańcucha jest dzielony na zlecenia i liczy się do ich limitów (jak dziś przy
+       pojedynczym zleceniu) — do przemyślenia z D141.
+     - Dostawa z magazynu (np. za 6 miesięcy) trafia na listę kursów od razu po opłaceniu — do decyzji: pokazywać
+       przewoźnikom dopiero X dni przed terminem.
+     - Kontakt magazynu w transportach łańcucha = nazwa magazynu + `settings.company_phone`; bez telefonu firmy —
+       telefon klienta (lokalnie tak jest). Uzupełnić `company_*` przed startem (TODO już w CLAUDE.md).
+     - `admin_decide_cancellation` nie obsługuje grup (zlecenie z grupy nigdy nie trafia do `cancellation_review`).
+     - `warehouse_bookings.status`: krok 7 ustawia tylko `cancelled` (anulowanie klienta); `in_storage` / `released`
+       i lista `/cliente` z grupą jako jedną kartą — krok 9.
+     - Pojazd transportów łańcucha dobiera serwer (najmniejszy pasujący do wagi / wymiarów / palet); klient nie wybiera.
+     - Strona `/deposito` (FAQ, lista korzyści) wspomina raty powyżej 2 miesięcy, a kreator ich jeszcze nie ma (D172) —
+       teksty do przeglądu albo krok 10.
+     - Seed stagingu: nadal 25 zleceń (`EXPECTED_ORDERS = 33`) — krok 11.
 8. Kreator Trasporto: „Deposito Transigo”, tragarze z ceną.
 9. Panele klienta i admina (sekcja 7).
 10. Raty miesięczne (subskrypcja Stripe z datą końca, faktura za ratę, alert „Rata non pagata”) i „Prolunga”.

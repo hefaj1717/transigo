@@ -129,3 +129,74 @@ Wypisany `whsec_…` musi być równy `STRIPE_WEBHOOK_SECRET` w `.env.local` (po
 
 27. Kreator `/prenota/facchini`, `/cliente/ordini/[id]` i PWA (`/padroncino/corse`, „Le mie corse”) przy szerokości
     telefonu: bez poziomego przewijania, przyciski w zasięgu kciuka, okno „Accetta” mieści się na ekranie.
+
+## C. Krok 7 — Deposito: kreator, łańcuch, jedna płatność i faktura (lokalnie)
+
+Przygotowanie: `npm run db:local:reset && npm run db:local:seed-demo` (seed ustawia też pojemność magazynu: boxy S 10,
+M 8, L 3, 40 miejsc paletowych — tylko gdy nie są ustawione). Do płatności w kreatorze — `stripe listen` jak w Etapie 3.
+Zlecenia demo:
+- **TG-30** — box M, „porto io” + „ritiro io”, opłacone;
+- **TG-31 → TG-32 → TG-33** — łańcuch: odbiór Transigo z facchino (nadrzędne, płatność i faktura) → box L na 45 dni →
+  dostawa Transigo, opłacony jedną płatnością;
+- **TG-34** — `azienda@example.com`: 4 palety, „porto io”, „lo deciderò più avanti”.
+
+### C1. Kalkulator → kreator (`/deposito`)
+
+1. Kalkulator: box S, 30 dni → „Prenota online” → `/prenota/deposito?servizio=deposito&giorni=30&box=s`; w kroku 1
+   zaznaczony box S. Po wpisaniu daty początku data końca uzupełnia się sama (30 dni, początek i koniec wliczone).
+2. Ręcznie zmienić adres na `?box=xl&giorni=99999&pallet=-1` → nic nie jest wybrane (tylko znane wartości).
+3. Niezalogowany: przełącznik „Privato – box / Azienda – pallet”. Zalogowany klient widzi tylko swój typ (D154).
+
+### C2. Okres i dostępność
+
+4. Wybrać daty → komunikat „Disponibile: …” albo „Non disponibile per queste date” (tylko tak/nie, bez liczby wolnych
+   miejsc). Box L na okres TG-32 (dni 5–49) → przy pojemności 3 dostępny; po zajęciu wszystkich (np. SQL lokalnie:
+   `update warehouse_box_capacity set quantity = 1 where box_code = 'l'`) → „Non disponibile”, „Avanti” zablokowane.
+5. Data końca przed początkiem → komunikat; początek w przeszłości → pole `min` i błąd serwera.
+
+### C3. Arrivo / Uscita / Merce / Facchini
+
+6. „La porto io” → tekst z miastem magazynu, bez adresu (adres przychodzi po płatności).
+7. „Ritiro Transigo” → adres (Google), piętro, winda, okno w dniu początku. Adres w prowincji poza obszarem → komunikat
+   „Al momento non effettuiamo ritiri in questa zona.” + „Lasciaci una richiesta”.
+8. „Consegna Transigo” → adres, okno w dniu końca; „Lo deciderò più avanti” — bez adresu.
+9. „Merce”: opis obowiązkowy; waga / wymiary / „Si tratta di un trasloco?” tylko z transportem. Krok „Facchini” pojawia
+   się tylko z transportem Transigo; wybór „Pochi colli…” zmienia cenę odbioru.
+
+### C4. Preventivo, zamówienie, płatność
+
+10. „Preventivo”: osobno „Ritiro e trasporto al deposito – X km, pojazd”, „Deposito – Box …, N giorni”, „Consegna dal
+    deposito …” i „Totale da pagare”. Brak informacji o ratach przy okresie > 2 mies. (D172). Dostawa w sobotę → dopłata
+    weekendowa w części dostawy.
+11. Account → Contatti (z transportem: osoba i telefon obowiązkowe; bez transportu tylko notatki) → Riepilogo → „Conferma
+    e paga” → Stripe Checkout: **jedna pozycja** „Ordine TG-… – Deposito e trasporti” na sumę grupy, w opisie wszystkie
+    części. Karta 4242 → wszystkie zlecenia grupy „Confermato” jednocześnie.
+12. Mail `order_paid` (outbox, `/admin/email`): **jeden**, na zleceniu nadrzędnym, z wierszami „Ritiro e trasporto al
+    deposito”, „Deposito”, „Consegna dal deposito” i sumą. Dla „porto io”: wiersz „Magazzino: nazwa, adres”.
+13. Faktura DEMO (`/cliente/fatture`): jedna, na zleceniu nadrzędnym, na sumę grupy; w PDF pozycje z prefiksami części.
+14. Wyjście z Checkout bez płatności → „Annulla ordine” na dowolnym zleceniu grupy → wszystkie „Scaduto”; termin
+    płatności wspólny.
+
+### C5. Klient (`cliente@example.com`)
+
+15. TG-30: karta „Deposito” z „Magazzino: Magazzino Transigo Milano, Via Toffetti 20…” i „Apri in Google Maps” (D171).
+    Anulowanie: „Puoi annullare gratuitamente fino a … (inizio del deposito; poi contattaci)”.
+16. TG-32 (i TG-31, TG-33): karta „Prenotazione collegata” — trzy zlecenia z linkami, statusem i kwotą, „Totale della
+    prenotazione”, „Un solo pagamento… La fattura è nell'ordine TG-31”.
+17. „Annulla ordine” na TG-32 → tekst „L'annullamento riguarda tutta la prenotazione”; potwierdzić → wszystkie trzy
+    „Annullato”, trzy zwroty (lokalnie `pending`: sztuczne `pi_demo_`), jeden mail `order_cancelled` na TG-31 z sumą.
+18. Po przypisaniu przewoźnika do TG-33 („Assegna”) → na żadnym zleceniu grupy nie ma „Annulla ordine” (D169), tylko
+    „contattaci”. Depozyt, który się zaczął (lokalnie: przesunąć `start_date`/`pickup_window_start` SQL-em) → to samo (D170).
+
+### C6. Admin (`admin@example.com`)
+
+19. `/admin/ordini` „Da assegnare”: TG-31 i TG-33 (transporty łańcucha), **bez** TG-32 (depozyt). Przed opłaceniem
+    grupy żadnego z nich nie ma.
+20. TG-33: „Ordini collegati (deposito)”, „Pagamento unico della prenotazione, registrato sull'ordine TG-31”, „Rimborso
+    manuale (ancora rimborsabile …)” = kwota TG-33, nie całej płatności. Zwrot większy → błąd.
+21. Przewoźnik (Ferri): na liście kursów TG-31 i TG-33 z oznaczeniem magazynu; po przyjęciu widzi tylko swój transport
+    (bez depozytu, bez kwot klienta).
+
+### C7. Telefon
+
+22. `/prenota/deposito` i `/cliente/ordini/[id]` z kartą grupy przy szerokości telefonu: bez poziomego przewijania.
