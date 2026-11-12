@@ -7,6 +7,10 @@ import { isIsoDate, TIME_WINDOWS } from "./windows";
 
 export const WIZARD_STORAGE_KEY = "transigo.booking.v1";
 
+/** What the customer ships (D176) — replaces the move type in the transport wizard. */
+export const SHIPMENT_CATEGORIES = ["pallet", "package", "document", "gitterbox", "full_vehicle"] as const;
+export type ShipmentCategory = (typeof SHIPMENT_CATEGORIES)[number];
+
 const dimension = z.number().int().min(1).max(2_000).nullable(); // cm
 
 const isoDate = z.string().refine(isIsoDate, { error: "Data non valida" });
@@ -42,7 +46,9 @@ export const wizardStateSchema = z.object({
     largestItem: z
       .object({ lengthCm: dimension, widthCm: dimension, heightCm: dimension })
       .default({ lengthCm: null, widthCm: null, heightCm: null }),
-    palletsCount: z.number().int().min(1).max(100).nullable().default(null), // EUR pallets
+    palletsCount: z.number().int().min(1).max(100).nullable().default(null), // EUR pallets (gitterbox: their number)
+    shipmentCategory: z.enum(SHIPMENT_CATEGORIES).nullable().default(null), // D176
+    stackable: z.boolean().default(false), // D176: only for pallet, package, gitterbox
   }),
   /** Porters at pickup (leg 1) and — with storage only — at delivery (leg 2), D74. */
   portersPickup: porterChoice.nullable(),
@@ -79,6 +85,8 @@ export const EMPTY_WIZARD_STATE: WizardState = {
     loadCategory: null,
     largestItem: { lengthCm: null, widthCm: null, heightCm: null },
     palletsCount: null,
+    shipmentCategory: null,
+    stackable: false,
   },
   portersPickup: null,
   portersDelivery: null,
@@ -92,7 +100,42 @@ export const EMPTY_WIZARD_STATE: WizardState = {
  * derived from the pickup date (D49) — a state saved by an older version of the wizard is brought in line.
  */
 export function transportOnly(s: WizardState): WizardState {
-  return { ...s, urgent: false, storage: null, portersDelivery: null, packingItems: 0 };
+  return { ...s, urgent: false, storage: null, portersDelivery: null, packingItems: 0, goods: { ...s.goods, loadCategory: null } };
+}
+
+/** Categories that are counted in EUR pallet places (vehicle check D86). */
+const PALLET_LIKE: readonly ShipmentCategory[] = ["pallet", "gitterbox"];
+export const isStackableCategory = (c: ShipmentCategory | null) => c === "pallet" || c === "package" || c === "gitterbox";
+
+/**
+ * Goods as they are checked and stored for a category (D176): fields the category does not ask for are cleared,
+ * so a value typed before switching category does not reach the vehicle check or the order.
+ *   pallet / gitterbox: number (palletsCount), weight, stackable
+ *   package: number of parcels, weight, largest item, stackable
+ *   document: number of envelopes / boxes only
+ *   full_vehicle: nothing — the customer picks the vehicle
+ */
+export function goodsForCategory(g: WizardState["goods"]): WizardState["goods"] {
+  const c = g.shipmentCategory;
+  const none = { lengthCm: null, widthCm: null, heightCm: null };
+  return {
+    ...g,
+    loadCategory: null,
+    palletsCount: c && PALLET_LIKE.includes(c) ? g.palletsCount : null,
+    itemsCount: c === "package" || c === "document" ? g.itemsCount : null,
+    weightKg: c === "full_vehicle" || c === "document" ? null : g.weightKg,
+    largestItem: c === "package" ? g.largestItem : none,
+    stackable: isStackableCategory(c) ? g.stackable : false,
+  };
+}
+
+/** Error of the "Merce" step for a category, or null (D176). */
+export function goodsStepError(g: WizardState["goods"]): string | null {
+  if (!g.shipmentCategory) return "Scegli cosa spedisci.";
+  if (PALLET_LIKE.includes(g.shipmentCategory) && !g.palletsCount) return g.shipmentCategory === "pallet" ? "Indica il numero di pallet." : "Indica il numero di gitterbox.";
+  if (g.shipmentCategory === "package" && !g.itemsCount) return "Indica il numero di colli.";
+  if (!g.description.trim()) return "Descrivi brevemente la merce.";
+  return null;
 }
 
 /** Help with loading and unloading = the "parcels" porter package (1 h included) with the chosen persons. */
@@ -131,10 +174,12 @@ export function priceRelevantKey(state: WizardState): string {
 
 /** What the vehicle check needs from the wizard state (D82–D86). */
 export function loadNeeds(state: WizardState) {
+  // Older states and the Deposito chain have no category: their goods are checked as entered.
+  const g = state.goods.shipmentCategory ? goodsForCategory(state.goods) : state.goods;
   return {
-    weightKg: state.goods.weightKg,
-    largestItem: state.goods.largestItem,
-    pallets: state.goods.palletsCount,
-    loadCategory: state.goods.loadCategory,
+    weightKg: g.weightKg,
+    largestItem: g.largestItem,
+    pallets: g.palletsCount,
+    loadCategory: g.loadCategory,
   };
 }

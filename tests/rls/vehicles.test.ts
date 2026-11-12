@@ -120,6 +120,53 @@ describe("create_order stores the goods snapshot (D86)", () => {
     expect(own.data).toEqual({ pallets_count: 2, load_category: "bilocale" });
   });
 
+  it("D176: shipment category and stackable are stored, read by the customer; an unknown category is refused", async () => {
+    const [{ data: list }, { data: vt }] = await Promise.all([
+      service.from("price_lists").select("id, version").eq("status", "active").single(),
+      service.from("vehicle_types").select("id").eq("code", "van_medium").single(),
+    ]);
+    const now = new Date().toISOString();
+    const payload = (patch: Record<string, unknown>) => ({
+      customer_id: cliente.id,
+      vehicle_type_id: vt!.id,
+      goods_description: "Bancali",
+      pallets_count: 3,
+      pickup_contact_name: "Mario", pickup_contact_phone: "+393331234567",
+      delivery_contact_name: "Lucia", delivery_contact_phone: "+393337654321",
+      storage: null,
+      legs: [{
+        leg_index: 0, pickup_address: "A", pickup_lat: 45, pickup_lng: 9, pickup_city: "Milano", pickup_province: "MI",
+        delivery_address: "B", delivery_lat: 45, delivery_lng: 7, delivery_city: "Torino", distance_m: 140000,
+        pickup_date: "2026-12-01", pickup_window_start: "2026-12-01T09:00:00Z", pickup_window_end: "2026-12-01T11:00:00Z", is_urgent: false,
+      }],
+      charges: { price_list_id: list!.id, price_list_version: list!.version, customer_type: "private", vat_rate_bp: 2200, subtotal_cents: 10000, vat_cents: 2200, total_cents: 12200, billing_details: {}, terms_accepted_at: now, terms_version: "x", quoted_at: now },
+      lines: [{ sort_order: 0, leg_index: 0, line_type: "transport", label_it: "Trasporto", quantity: 1, unit_amount_cents: 10000, net_cents: 10000, vat_cents: 2200, gross_cents: 12200, carrier_share_group: "transport" }],
+      carrier_terms: [{ leg_index: 0, carrier_amount_cents: 7000, transport_carrier_cents: 7000 }],
+      ...patch,
+    });
+
+    const { data, error } = await service.rpc("create_order", { p: payload({ shipment_category: "gitterbox", stackable: true }) });
+    expect(error).toBeNull();
+    const order = data as { id: string };
+    createdOrders.push(order.id);
+    const own = await cliente.client.from("orders").select("shipment_category, stackable, pallets_count").eq("id", order.id).single();
+    expect(own.data).toEqual({ shipment_category: "gitterbox", stackable: true, pallets_count: 3 });
+
+    // no category (older clients of create_order) = null, not an error
+    const plain = await service.rpc("create_order", { p: payload({}) });
+    expect(plain.error).toBeNull();
+    createdOrders.push((plain.data as { id: string }).id);
+    const row = await service.from("orders").select("shipment_category, stackable").eq("id", (plain.data as { id: string }).id).single();
+    expect(row.data).toEqual({ shipment_category: null, stackable: null });
+
+    const bad = await service.rpc("create_order", { p: payload({ shipment_category: "container" }) });
+    expect(bad.error).not.toBeNull();
+
+    // browsers cannot change it
+    const upd = await cliente.client.from("orders").update({ shipment_category: "pallet" }).eq("id", order.id).select("id");
+    expect(upd.data ?? []).toEqual([]);
+  });
+
   it("a vehicle type used as a category minimum cannot be deleted", async () => {
     const { data: large } = await service.from("vehicle_types").select("id").eq("code", "van_large").single();
     expect((await service.from("vehicle_types").delete().eq("id", large!.id)).error).not.toBeNull();

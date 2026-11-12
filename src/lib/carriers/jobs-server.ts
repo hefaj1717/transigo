@@ -149,7 +149,7 @@ export async function loadAvailableJob(db: SupabaseClient, userId: string, order
 
 const MY_JOB_COLUMNS = [
   "id, order_number, service_type, status, assigned_at, picked_up_at, in_transit_at, delivered_at, completed_at, pickup_window_start",
-  "weight_kg, largest_item_length_cm, largest_item_width_cm, largest_item_height_cm, pallets_count, items_count, load_category",
+  "weight_kg, largest_item_length_cm, largest_item_width_cm, largest_item_height_cm, pallets_count, items_count, load_category, shipment_category, stackable",
   "packing_items_count, storage_type, storage_days, carrier_vehicle_id, vehicle_types(name_it)",
   // Facchinaggio (D164): the job and the carrier's amount (FK to order_porter_jobs — nested under it)
   "order_porter_jobs(city, province, job_date, window_start, window_end, persons, requested_hours, billed_hours, floor, has_elevator, is_urgent, order_porter_carrier_terms(carrier_amount_cents))",

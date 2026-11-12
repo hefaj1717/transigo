@@ -6,7 +6,6 @@ import { AccountStep } from "@/components/booking/account-step";
 import { BillingFields, EMPTY_BILLING, TermsCheckbox, type Billing } from "@/components/booking/billing-fields";
 import { AddressField } from "@/components/address-field";
 import { CHAIN_ROLE_LABEL } from "@/lib/orders/order-group";
-import { PORTER_PACKAGE_CODES } from "@/lib/pricing/types";
 import { isStorageOutOfArea, type PublicStorageQuote, type StorageError, type StorageStep } from "@/lib/booking/storage/messages";
 import type { StorageOptions } from "@/lib/booking/storage/server";
 import {
@@ -72,7 +71,6 @@ const fetchQuote = (state: StorageState) =>
 
 const floorLabel = (n: number) => (n === 0 ? "Piano terra" : `${n}° piano`);
 const dateIt = (iso: string | null) => (iso ? new Date(`${iso}T12:00:00Z`).toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" }) : "");
-const isPorterCode = (v: string | null): v is (typeof PORTER_PACKAGE_CODES)[number] => !!v && (PORTER_PACKAGE_CODES as readonly string[]).includes(v);
 
 export function StorageWizard({ options, session, initialStep, prefill }: { options: StorageOptions; session: WizardSession; initialStep: string | null; prefill: StoragePrefill }) {
   const [state, setState] = useState<StorageState>(EMPTY_STORAGE_STATE);
@@ -512,7 +510,7 @@ export function StorageWizard({ options, session, initialStep, prefill }: { opti
                   </div>
                   <fieldset>
                     <legend className={label}>Oggetto più grande (cm, facoltativo)</legend>
-                    <div className="mt-1 flex flex-wrap gap-2">
+                    <div className="mt-1 flex gap-2">
                       {(["lengthCm", "widthCm", "heightCm"] as const).map((k) => (
                         <input
                           key={k}
@@ -523,20 +521,11 @@ export function StorageWizard({ options, session, initialStep, prefill }: { opti
                           min={1}
                           value={state.goods.largestItem[k] ?? ""}
                           onChange={(e) => update({ goods: { ...state.goods, largestItem: { ...state.goods.largestItem, [k]: e.target.value ? Math.max(1, Math.floor(Number(e.target.value))) : null } } })}
-                          className="w-24 rounded-md border border-zinc-300 px-3 py-2"
+                          className="w-full min-w-0 flex-1 rounded-md border border-zinc-300 px-3 py-2 sm:w-24 sm:flex-none"
                         />
                       ))}
                     </div>
                   </fieldset>
-                  {options.porterPackages.length ? (
-                    <div>
-                      <label htmlFor="load-category" className={label}>Si tratta di un trasloco?</label>
-                      <select id="load-category" value={state.goods.loadCategory ?? ""} onChange={(e) => update({ goods: { ...state.goods, loadCategory: isPorterCode(e.target.value) ? e.target.value : null } })} className={`${input} w-72`}>
-                        <option value="">No</option>
-                        {options.porterPackages.map((p) => <option key={p.code} value={p.code}>{p.labelIt}</option>)}
-                      </select>
-                    </div>
-                  ) : null}
                 </>
               ) : null}
             </div>

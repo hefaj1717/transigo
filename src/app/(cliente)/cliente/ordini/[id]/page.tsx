@@ -1,4 +1,6 @@
 import { Suspense, type ReactNode } from "react";
+import { shipmentText } from "@/lib/orders/shipment";
+import type { ShipmentCategory } from "@/lib/booking/state";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Card, CustomerShell, StatusBadge } from "@/components/cliente/customer-shell";
@@ -76,7 +78,7 @@ type OrderRow = {
   delivered_without_pod: boolean;
   goods_description: string; items_count: number | null; weight_kg: number | null; goods_dimensions_note: string | null;
   largest_item_length_cm: number | null; largest_item_width_cm: number | null; largest_item_height_cm: number | null;
-  pallets_count: number | null; load_category: PorterPackageCode | null; packing_items_count: number;
+  pallets_count: number | null; load_category: PorterPackageCode | null; shipment_category: ShipmentCategory | null; stackable: boolean | null; packing_items_count: number;
   storage_type: "transshipment" | "short_term" | "long_term" | null; storage_days: number | null; storage_pallets: number | null;
   // transport: both contacts; porters: on-site contact in pickup_*; storage: none
   pickup_contact_name: string | null; pickup_contact_phone: string | null; delivery_contact_name: string | null; delivery_contact_phone: string | null;
@@ -97,7 +99,7 @@ type CarrierInfo = { first_name: string | null; company_name: string; vehicle_ty
 const SELECT = [
   "id, order_number, service_type, status, payment_due_at, paid_at, created_at, pickup_window_start, assigned_at, picked_up_at, in_transit_at, delivered_at, delivered_without_pod",
   "goods_description, items_count, weight_kg, goods_dimensions_note, largest_item_length_cm, largest_item_width_cm, largest_item_height_cm",
-  "pallets_count, load_category, packing_items_count, storage_type, storage_days, storage_pallets",
+  "pallets_count, load_category, shipment_category, stackable, packing_items_count, storage_type, storage_days, storage_pallets",
   "pickup_contact_name, pickup_contact_phone, delivery_contact_name, delivery_contact_phone, customer_notes",
   "vehicle_types(name_it)",
   "cancelled_at",
@@ -323,13 +325,14 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
           <H2>Merce e servizi</H2>
           <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
             <Row k="Merce" v={o.goods_description} />
+            {o.shipment_category ? <Row k="Spedizione" v={shipmentText(o.shipment_category, o.stackable) ?? ""} /> : null}
             {o.load_category ? <Row k="Tipo di trasporto" v={PORTER_PACKAGE_LABEL[o.load_category]} /> : null}
             {o.items_count ? <Row k="Colli" v={num.format(o.items_count)} /> : null}
             {o.weight_kg ? <Row k="Peso totale" v={`${num.format(o.weight_kg)} kg`} /> : null}
             {o.largest_item_length_cm && o.largest_item_width_cm && o.largest_item_height_cm ? (
               <Row k="Oggetto più grande" v={`${o.largest_item_length_cm} × ${o.largest_item_width_cm} × ${o.largest_item_height_cm} cm`} />
             ) : null}
-            {o.pallets_count ? <Row k="Pallet EUR" v={String(o.pallets_count)} /> : null}
+            {o.pallets_count ? <Row k={o.shipment_category === "gitterbox" ? "Gitterbox" : "Pallet EUR"} v={String(o.pallets_count)} /> : null}
             {o.vehicle_types ? <Row k="Veicolo" v={o.vehicle_types.name_it} /> : null}
             {legs.filter((l) => l.porters_count > 0).map((l) => (
               <Row

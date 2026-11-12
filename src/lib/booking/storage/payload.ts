@@ -61,6 +61,9 @@ function transportPayload(role: TransportRole, t: StoredChainTransport, a: Stora
       loadCategory: s.goods.loadCategory,
       largestItem: s.goods.largestItem,
       palletsCount: a.customerType === "business" ? s.pallets : null,
+      // D176: a company stores pallets; a private customer's box has no category
+      shipmentCategory: a.customerType === "business" ? "pallet" : null,
+      stackable: false,
     },
     packingItems: 0,
     storage: null,

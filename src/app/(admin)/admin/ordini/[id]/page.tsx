@@ -1,4 +1,6 @@
 import { Suspense, type ReactNode } from "react";
+import { palletsText, shipmentText } from "@/lib/orders/shipment";
+import type { ShipmentCategory } from "@/lib/booking/state";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { z } from "zod";
@@ -67,7 +69,7 @@ type OrderDetail = {
   id: string; order_number: string; service_type: string; status: string; created_at: string; payment_due_at: string; customer_id: string; paid_at: string | null;
   pickup_window_start: string; goods_description: string; items_count: number | null; weight_kg: number | null;
   largest_item_length_cm: number | null; largest_item_width_cm: number | null; largest_item_height_cm: number | null;
-  pallets_count: number | null; packing_items_count: number; storage_type: string | null; storage_days: number | null;
+  pallets_count: number | null; shipment_category: ShipmentCategory | null; stackable: boolean | null; packing_items_count: number; storage_type: string | null; storage_days: number | null;
   // transport: both contacts; porters: on-site contact in pickup_*; storage: none (orders_service_fields_check)
   pickup_contact_name: string | null; pickup_contact_phone: string | null; delivery_contact_name: string | null; delivery_contact_phone: string | null;
   customer_notes: string | null; carrier_id: string | null; assigned_at: string | null; picked_up_at: string | null;
@@ -93,7 +95,7 @@ type HistoryRow = { id: number; from_status: string | null; to_status: string; s
 const PAYMENT_COLUMNS = "id, status, amount_cents, amount_received_cents, review_reason, reviewed_at, review_outcome, paid_at, created_at";
 const SELECT = [
   "id, order_number, service_type, status, created_at, payment_due_at, customer_id, paid_at, pickup_window_start, goods_description, items_count, weight_kg",
-  "largest_item_length_cm, largest_item_width_cm, largest_item_height_cm, pallets_count, packing_items_count, storage_type, storage_days",
+  "largest_item_length_cm, largest_item_width_cm, largest_item_height_cm, pallets_count, shipment_category, stackable, packing_items_count, storage_type, storage_days",
   "pickup_contact_name, pickup_contact_phone, delivery_contact_name, delivery_contact_phone, customer_notes",
   "carrier_id, assigned_at, picked_up_at, in_transit_at, delivered_at, delivered_without_pod, handover_required_at, handover_leg_index",
   "vehicle_types(name_it), carriers(company_name, offers_porters, porters_team_size), carrier_vehicles(plate, vehicle_types(name_it))",
@@ -197,10 +199,11 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
   };
   const customer = o.customers?.profiles;
   const goods = [
+    shipmentText(o.shipment_category, o.stackable),
     o.weight_kg ? `${o.weight_kg} kg` : null,
     o.items_count ? `${o.items_count} colli` : null,
     o.largest_item_length_cm ? `oggetto più grande ${o.largest_item_length_cm}×${o.largest_item_width_cm ?? "?"}×${o.largest_item_height_cm ?? "?"} cm` : null,
-    o.pallets_count ? `${o.pallets_count} pallet` : null,
+    o.pallets_count ? palletsText(o.pallets_count, o.shipment_category) : null,
     o.packing_items_count ? `imballaggio ${o.packing_items_count} pezzi` : null,
     o.storage_type ? `deposito ${o.storage_days} giorni` : null,
   ].filter(Boolean).join(" · ");

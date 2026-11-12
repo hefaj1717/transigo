@@ -2,7 +2,7 @@
 // Pure: every amount comes from the engine's Quote, every place/route from the server (never the browser).
 import type { Quote, StorageBillingUnit } from "../pricing/types";
 import type { ResolvedLeg } from "./build";
-import type { WizardState } from "./state";
+import { isStackableCategory, type WizardState } from "./state";
 
 export type Contacts = {
   pickupName: string;
@@ -105,6 +105,8 @@ export function buildOrderPayload(a: OrderPayloadArgs) {
     largest_item_height_cm: state.goods.largestItem.heightCm,
     pallets_count: state.goods.palletsCount,
     load_category: state.goods.loadCategory,
+    shipment_category: state.goods.shipmentCategory,
+    stackable: isStackableCategory(state.goods.shipmentCategory) ? state.goods.stackable : null,
     packing_items_count: state.packingItems,
     pickup_contact_name: a.contacts.pickupName,
     pickup_contact_phone: a.contacts.pickupPhone,

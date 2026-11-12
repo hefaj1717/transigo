@@ -1,6 +1,8 @@
 // Carrier jobs screens — pure logic (D21, D116, D119–D121). Tested in jobs.test.ts.
 // Amounts stay in cents here; formatting to "1.234,56 €" happens only in the UI (formatCents).
 // Every time shown to the carrier is in Europe/Rome, whatever the server's time zone.
+import { palletsText, shipmentText } from "../orders/shipment";
+import type { ShipmentCategory } from "../booking/state";
 import type { PorterPackageCode, StorageType } from "../pricing/types";
 import { PORTER_PACKAGE_LABEL } from "../pricing/rule-meta";
 import { CARRIER_DOCUMENT_TYPES } from "./document-types";
@@ -102,6 +104,9 @@ export type AvailableJobRow = {
   largest_item_width_cm: number | null;
   largest_item_height_cm: number | null;
   pallets_count: number | null;
+  /** D176 — only on the carrier's own jobs ("Le mie corse"); list_available_jobs does not return them yet. */
+  shipment_category?: ShipmentCategory | null;
+  stackable?: boolean | null;
   items_count: number | null;
   load_category: PorterPackageCode | null;
   packing_items_count: number | null;
@@ -241,11 +246,13 @@ export function toJobCard(row: AvailableJobRow): JobCard {
   const first = legs[0];
 
   const load: string[] = [];
+  const shipment = shipmentText(row.shipment_category, row.stackable);
+  if (shipment) load.push(shipment);
   if (row.load_category) load.push(PORTER_PACKAGE_LABEL[row.load_category]);
   if (row.weight_kg) load.push(`${row.weight_kg.toLocaleString("it-IT")} kg`);
   const dims = [row.largest_item_length_cm, row.largest_item_width_cm, row.largest_item_height_cm];
   if (dims.every((d) => d)) load.push(`Oggetto più grande ${dims.join(" × ")} cm`);
-  if (row.pallets_count) load.push(row.pallets_count === 1 ? "1 pallet" : `${row.pallets_count} pallet`);
+  if (row.pallets_count) load.push(palletsText(row.pallets_count, row.shipment_category));
   if (row.items_count) load.push(row.items_count === 1 ? "1 collo" : `${row.items_count} colli`);
 
   const services: string[] = [];

@@ -7,7 +7,7 @@ import { bookingErrorMessage, bookingErrorStep, type BookingStep } from "./messa
 import { buildOrderPayload } from "./order-payload";
 import { toPublicQuote, type PublicQuote } from "./public-quote";
 import { loadBookingOptions, loadFleet, loadStoredQuote, rehydrateLegs, vehicleCheck, type quoteBooking, type ServerQuote } from "./server";
-import { priceRelevantKey, wizardStateSchema } from "./state";
+import { goodsForCategory, isStackableCategory, priceRelevantKey, wizardStateSchema } from "./state";
 
 // Saving the order (D70, D76, D77, D84). Stage 2b: the order is created as pending_payment; payment arrives
 // in Stage 3. Every amount comes from a server-side quote, never from the browser.
@@ -142,16 +142,19 @@ export async function placeOrder(deps: PlaceOrderDeps, customer: VerifiedCustome
       termsVersion: settings.terms_version,
       termsAcceptedAt: now,
     });
-    // Goods text is not price-relevant: take the latest one the customer confirmed.
-    payload.goods_description = state.goods.description.trim();
-    payload.items_count = state.goods.itemsCount;
-    payload.weight_kg = state.goods.weightKg;
-    payload.goods_dimensions_note = state.goods.dimensionsNote.trim() || null;
-    payload.largest_item_length_cm = state.goods.largestItem.lengthCm;
-    payload.largest_item_width_cm = state.goods.largestItem.widthCm;
-    payload.largest_item_height_cm = state.goods.largestItem.heightCm;
-    payload.pallets_count = state.goods.palletsCount;
-    payload.load_category = state.goods.loadCategory;
+    // Goods are not price-relevant: take the latest ones the customer confirmed, cleared for the category (D176).
+    const goods = state.goods.shipmentCategory ? goodsForCategory(state.goods) : state.goods;
+    payload.goods_description = goods.description.trim();
+    payload.items_count = goods.itemsCount;
+    payload.weight_kg = goods.weightKg;
+    payload.goods_dimensions_note = goods.dimensionsNote.trim() || null;
+    payload.largest_item_length_cm = goods.largestItem.lengthCm;
+    payload.largest_item_width_cm = goods.largestItem.widthCm;
+    payload.largest_item_height_cm = goods.largestItem.heightCm;
+    payload.pallets_count = goods.palletsCount;
+    payload.load_category = goods.loadCategory;
+    payload.shipment_category = goods.shipmentCategory;
+    payload.stackable = isStackableCategory(goods.shipmentCategory) ? goods.stackable : null;
 
     const { data, error } = await db.rpc("create_order", { p: payload });
     if (error) {
