@@ -149,7 +149,7 @@ Plan `docs/plany/tre-servizi.md`, decyzje D151–D160. Trasporto, Facchinaggio i
 - [ ] Krok 10 (opcjonalny dla demo): raty i „Prolunga”.
 - [ ] Krok 11: seed zgodny z lokalnym i staging — za zgodą właściciela.
   - [x] 11a (lokalnie, 2026-11-12): `seedWizardFeedback()` w `scripts/seed-demo.mjs` — cennik z facchinaggio od 1 osoby (`ensurePortersMinOne()`: klon → `porters_min_persons = 1` → publikacja, z auditem), magazyny Milano + Bologna z pojemnością, TG-35 pallet sovrapponibili, TG-36 colli (Ferri), TG-37 documenti, TG-38 veicolo intero (do zapłaty), TG-39 facchinaggio 1 osoba, TG-40 box S w Bolonii; `EXPECTED_ORDERS = 39`. Na stagingu ten sam przebieg dokłada tylko brakujące zlecenia (szukane po opisie towaru).
-  - [ ] 11b: seed na stagingu (zgoda), test ręczny `docs/testy-reczne/demo-a-z.md`.
+  - [x] 11b (2026-11-12, za zgodą właściciela): seed na stagingu — aktywny cennik **v15** (minimum 1 facchino, audit `price_list.clone/update/publish`), magazyny Milano + Bologna (box S 10 / M 8 / L 3, 40 palet), zlecenia TG-40…45 (numery na stagingu = lokalne + 5 od TG-35; 38/39 to `azienda@`). Zostaje: ustawienia właściciela (sekcja 0) i test ręczny `docs/testy-reczne/demo-a-z.md` na adresie Vercel.
 
 ## W toku: uwagi właściciela do kreatorów (2026-11-12, D174–D178)
 
