@@ -219,6 +219,13 @@ export async function resolveItalianPlace(placeId: string): Promise<{ endpoint: 
 
 const point = (e: Endpoint): RoutePoint => (e.placeId && !e.warehouseId ? { placeId: e.placeId } : { lat: e.lat, lng: e.lng });
 
+/** Route between two resolved endpoints (cached like the transport wizard) — single legs of the Deposito chain (D153). */
+export function routeBetween(from: Endpoint, to: Endpoint): Promise<RouteResult> {
+  const a = point(from);
+  const z = point(to);
+  return cached<RouteResult>(`route:${JSON.stringify([a, z])}`, () => getMapsProvider().computeRoute(a, z));
+}
+
 /**
  * Cities, provinces and route length for an "out of area" contact request (D125, spec 2a). Resolved on the
  * server from the place IDs (D76: never taken from the browser). Only cities and provinces leave this
@@ -415,7 +422,7 @@ export async function quoteBooking(
 export async function loadStoredQuote(db: SupabaseClient, id: string): Promise<(ServerQuote & { customerType: "private" | "business" }) | null> {
   const { data, error } = await db.from("quotes").select("id, customer_type, input, quote, valid_until").eq("id", id).maybeSingle();
   if (error) throw error;
-  if (!data || (data.input as { kind?: string })?.kind === "porters") return null; // another wizard's quote
+  if (!data || (data.input as { kind?: string })?.kind) return null; // another wizard's quote (porters, storage)
   return { quoteId: data.id, validUntil: new Date(data.valid_until), quote: data.quote as Quote, input: data.input as StoredQuoteInput, customerType: data.customer_type };
 }
 
