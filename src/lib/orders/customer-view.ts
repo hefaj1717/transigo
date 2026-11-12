@@ -161,7 +161,11 @@ export type ListEntry<T extends ListRow> = {
  * one per entry. A child whose root is not among the rows (should not happen — the customer reads their whole
  * group) is shown on its own rather than hidden.
  */
-export function customerListEntries<T extends ListRow>(rows: T[]): ListEntry<T>[] {
+export function customerListEntries<T extends ListRow>(
+  rows: T[],
+  /** Overrides "In corso" for a group, e.g. a storage booking whose order stays 'paid' during the whole period. */
+  isActive?: (members: GroupMember<T>[]) => boolean | null,
+): ListEntry<T>[] {
   const byRoot = new Map<string, T[]>();
   for (const r of rows) {
     const key = r.parent_order_id && rows.some((x) => x.id === r.parent_order_id) ? r.parent_order_id : r.id;
@@ -173,7 +177,7 @@ export function customerListEntries<T extends ListRow>(rows: T[]): ListEntry<T>[
     return {
       root,
       members,
-      tab: members.some((m) => orderGroup(m.status) === "active") ? "active" : "finished",
+      tab: (isActive?.(members) ?? members.some((m) => orderGroup(m.status) === "active")) ? "active" : "finished",
       totalCents: charges.every(Boolean) ? charges.reduce((s, c) => s + c!.total_cents, 0) : null,
       refundedCents: charges.reduce((s, c) => s + (c?.refunded_cents ?? 0), 0),
       startsAt: members.map((m) => m.pickup_window_start).sort()[0],

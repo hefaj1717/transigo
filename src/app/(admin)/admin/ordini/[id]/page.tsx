@@ -28,6 +28,8 @@ import { OrderGroupCard } from "@/components/orders/order-group-card";
 import { orderTitle } from "@/lib/orders/customer-view";
 import type { GroupMemberRow } from "@/lib/orders/order-group";
 import { loadOrderGroup } from "@/lib/orders/order-group-server";
+import { BookingPhaseBadge } from "@/components/orders/booking-phase-badge";
+import { bookingPhase, romeToday, type BookingPhase } from "@/lib/orders/booking-phase";
 import { Money, type MoneyPayment, type MoneyRefund } from "./money";
 import { ADMIN_DOC_COLUMNS, AdminInvoiceTable, type AdminDoc, type DocTech } from "@/components/admin/invoice-table";
 
@@ -266,7 +268,18 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
       {type === "porters" ? null : <Execution orderId={o.id} status={o.status} legs={legs} exec={exec} actorName={actorName} />}
 
       {o.order_porter_jobs ? <PorterJobSection job={o.order_porter_jobs} /> : null}
-      {o.warehouse_bookings ? <BookingSection b={o.warehouse_bookings} /> : null}
+      {o.warehouse_bookings ? (
+        <BookingSection
+          b={o.warehouse_bookings}
+          phase={bookingPhase({
+            orderStatus: o.status,
+            booking: o.warehouse_bookings,
+            intakeStatus: loadedGroup?.members.find((m) => m.role === "intake")?.status ?? null,
+            outboundStatus: loadedGroup?.members.find((m) => m.role === "outbound")?.status ?? null,
+            today: romeToday(new Date()),
+          })}
+        />
+      ) : null}
 
       {group ? (
         <OrderGroupCard
@@ -389,7 +402,7 @@ function PorterJobSection({ job }: { job: PorterJob }) {
   );
 }
 
-function BookingSection({ b }: { b: Booking }) {
+function BookingSection({ b, phase }: { b: Booking; phase: BookingPhase }) {
   return (
     <section className={section} aria-labelledby="storage">
       <h2 id="storage" className={h2}>Deposito</h2>
@@ -397,7 +410,12 @@ function BookingSection({ b }: { b: Booking }) {
         <Row label="Magazzino">{b.warehouses?.name ?? "—"}</Row>
         <Row label="Spazio">{bookingUnitLabel(b)}</Row>
         <Row label="Periodo">{formatDateOnly(b.start_date)} – {formatDateOnly(b.end_date)} ({bookingDays(b.start_date, b.end_date)} giorni)</Row>
-        <Row label="Stato">{STORAGE_BOOKING_STATUS_LABEL[b.status] ?? b.status}</Row>
+        <Row label="Stato">
+          <BookingPhaseBadge phase={phase} />
+          {/* Nothing records the arrival / exit yet: the phase comes from the dates and the chain's transports. */}
+          {b.status === "booked" && phase !== "booked" && phase !== "unpaid" ? <span className="ml-2 text-xs text-zinc-500">dalle date e dai trasporti (prenotazione: {STORAGE_BOOKING_STATUS_LABEL[b.status]})</span> : null}
+          {phase === "ended" ? <span className="mt-1 block text-xs text-amber-800">Periodo pagato terminato: verifica il ritiro o una proroga.</span> : null}
+        </Row>
         <Row label="Arrivo merce">{STORAGE_INTAKE_LABEL[b.intake] ?? b.intake}</Row>
         <Row label="Uscita merce">{STORAGE_OUTBOUND_LABEL[b.outbound] ?? b.outbound}</Row>
         <Row label="Pagamento">{b.payment_plan === "monthly" ? "Mensile" : "Tutto subito"}</Row>

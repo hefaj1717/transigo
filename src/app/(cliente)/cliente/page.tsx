@@ -3,8 +3,10 @@ import Link from "next/link";
 import { Card, CustomerShell, StatusBadge } from "@/components/cliente/customer-shell";
 import { Loading } from "@/components/panel-shell";
 import { requireArea } from "@/lib/auth/session";
-import { customerListEntries, orderTitle } from "@/lib/orders/customer-view";
 import { CHAIN_ROLE_LABEL } from "@/lib/orders/order-group";
+import { groupBookingPhase, isOpenBookingPhase, romeToday } from "@/lib/orders/booking-phase";
+import { BookingPhaseBadge } from "@/components/orders/booking-phase-badge";
+import { customerListEntries, orderGroup as statusGroup, orderTitle } from "@/lib/orders/customer-view";
 import { formatDateOnly, serviceTypeOf } from "@/lib/orders/service-type";
 import { PAYMENT_STATE_LABEL, paymentState } from "@/lib/orders/status";
 import { formatCents } from "@/lib/pricing/money";
@@ -38,7 +40,7 @@ type OrderRow = {
   order_legs: { leg_index: number; pickup_city: string; delivery_city: string; pickup_window_end: string }[];
   // Facchinaggio / Deposito (D151): no legs — the job or the booking instead
   order_porter_jobs: { city: string; window_end: string } | null;
-  warehouse_bookings: { unit: string; box_code: string | null; pallets: number | null; start_date: string; end_date: string } | null;
+  warehouse_bookings: { unit: string; box_code: string | null; pallets: number | null; start_date: string; end_date: string; intake: string; outbound: string; status: string } | null;
 };
 
 const TABS = [
@@ -54,13 +56,20 @@ async function Content({ searchParams }: Pick<PageProps<"/cliente">, "searchPara
   const supabase = await createClient();
   const { data: orders, error } = await supabase
     .from("orders")
-    .select("id, order_number, service_type, parent_order_id, status, pickup_window_start, created_at, payment_due_at, paid_at, order_charges(total_cents, refunded_cents), order_legs(leg_index, pickup_city, delivery_city, pickup_window_end), order_porter_jobs(city, window_end), warehouse_bookings(unit, box_code, pallets, start_date, end_date)")
+    .select("id, order_number, service_type, parent_order_id, status, pickup_window_start, created_at, payment_due_at, paid_at, order_charges(total_cents, refunded_cents), order_legs(leg_index, pickup_city, delivery_city, pickup_window_end), order_porter_jobs(city, window_end), warehouse_bookings(unit, box_code, pallets, start_date, end_date, intake, outbound, status)")
     .order("pickup_window_start", { ascending: false })
     .limit(200)
     .returns<OrderRow[]>();
 
   // A storage chain (D153) is one card: one booking, one payment on its first order.
-  const all = customerListEntries(orders ?? []).sort((a, b) => b.startsAt.localeCompare(a.startsAt));
+  const today = romeToday(new Date());
+  // A storage order stays 'paid' for the whole period: "In corso" follows where the goods are (booking-phase.ts),
+  // plus any transport of the chain that is still on its way.
+  const all = customerListEntries(orders ?? [], (members) => {
+    const phase = groupBookingPhase(members, today);
+    if (!phase) return null;
+    return isOpenBookingPhase(phase) || members.some((m) => m.service_type !== "storage" && statusGroup(m.status) === "active");
+  }).sort((a, b) => b.startsAt.localeCompare(a.startsAt));
   const counts = { active: all.filter((e) => e.tab === "active").length, finished: all.filter((e) => e.tab === "finished").length };
   // Default tab: "In corso", unless there is nothing in progress but there are finished orders.
   const tab = TABS.find((t) => t.key === sp.stato) ?? (counts.active === 0 && counts.finished > 0 ? TABS[1] : TABS[0]);
@@ -99,6 +108,7 @@ async function Content({ searchParams }: Pick<PageProps<"/cliente">, "searchPara
           const o = entry.root;
           const chain = entry.members.length > 1 ? entry.members : null;
           const storage = entry.members.find((m) => serviceTypeOf(m.service_type) === "storage");
+          const phase = groupBookingPhase(entry.members, today);
           const pay = paymentState({ ...o, refunded_cents: entry.refundedCents, total_cents: entry.totalCents }, now);
           const firstLeg = [...o.order_legs].sort((a, b) => a.leg_index - b.leg_index)[0];
           const type = serviceTypeOf(o.service_type);
@@ -126,7 +136,7 @@ async function Content({ searchParams }: Pick<PageProps<"/cliente">, "searchPara
                     <p className="mt-1 text-xs text-zinc-500">{chain ? `Ordini ${chain.map((m) => m.order_number).join(" → ")}` : `Ordine ${o.order_number}`}</p>
                   </div>
                   <div className="text-right">
-                    {chain ? null : <StatusBadge status={o.status} serviceType={o.service_type} />}
+                    {chain ? null : phase && phase !== "unpaid" ? <BookingPhaseBadge phase={phase} /> : <StatusBadge status={o.status} serviceType={o.service_type} />}
                     <p className="mt-2 font-semibold text-zinc-900">{entry.totalCents !== null ? formatCents(entry.totalCents) : "—"}</p>
                     {pay !== "paid" ? <p className="text-xs text-zinc-500">{PAYMENT_STATE_LABEL[pay]}</p> : null}
                   </div>
@@ -136,7 +146,7 @@ async function Content({ searchParams }: Pick<PageProps<"/cliente">, "searchPara
                     {chain.map((m) => (
                       <li key={m.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
                         <span className="text-zinc-700">{m.role ? CHAIN_ROLE_LABEL[m.role] : orderTitle(m)}</span>
-                        <StatusBadge status={m.status} serviceType={m.service_type} />
+                        {m.role === "storage" && phase && phase !== "unpaid" ? <BookingPhaseBadge phase={phase} /> : <StatusBadge status={m.status} serviceType={m.service_type} />}
                       </li>
                     ))}
                   </ul>

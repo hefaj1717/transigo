@@ -23,6 +23,8 @@ import { formatCents } from "@/lib/pricing/money";
 import { PORTER_PACKAGE_LABEL } from "@/lib/pricing/rule-meta";
 import type { PorterPackageCode } from "@/lib/pricing/types";
 import { createClient } from "@/lib/supabase/server";
+import { BookingPhaseBadge } from "@/components/orders/booking-phase-badge";
+import { bookingPhase, romeToday, type BookingPhase } from "@/lib/orders/booking-phase";
 import { createServiceClient } from "@/lib/supabase/service";
 import { CancelPaidOrder, CancelUnpaidButton, PaymentPending, PayNowButton } from "../order-actions";
 
@@ -56,7 +58,7 @@ type PorterJob = {
 };
 type Booking = {
   unit: string; box_code: string | null; pallets: number | null; start_date: string; end_date: string;
-  intake: string; outbound: string; // the warehouse is admin-only (RLS): its address via customer_order_warehouse() (D171)
+  intake: string; outbound: string; status: string; // the warehouse is admin-only (RLS): its address via customer_order_warehouse() (D171)
 };
 type WarehouseInfo = { name: string; address: string; city: string; lat: number; lng: number };
 /** A member of the order's group (D153), read with the customer's session. */
@@ -109,7 +111,7 @@ const SELECT = [
   "claims(id, status)",
   "order_legs(leg_index, pickup_address, delivery_address, pickup_city, delivery_city, pickup_window_start, pickup_window_end, pickup_floor, pickup_has_elevator, delivery_floor, delivery_has_elevator, distance_m, is_urgent, porter_package_code, porters_count, porters_included_hours, pickup_warehouse_id, delivery_warehouse_id)",
   "order_porter_jobs(address, city, window_start, window_end, floor, has_elevator, persons, requested_hours, billed_hours, is_urgent)",
-  "warehouse_bookings(unit, box_code, pallets, start_date, end_date, intake, outbound)",
+  "warehouse_bookings(unit, box_code, pallets, start_date, end_date, intake, outbound, status)",
   "order_status_history(id, to_status, created_at, note)",
 ].join(", ");
 
@@ -249,7 +251,17 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
         ) : null}
 
         {o.order_porter_jobs ? <PorterJobCard job={o.order_porter_jobs} contact={o.pickup_contact_name ? `${o.pickup_contact_name} · ${o.pickup_contact_phone}` : null} notes={o.customer_notes} /> : null}
-        {o.warehouse_bookings ? <BookingCard b={o.warehouse_bookings} warehouse={warehouse} /> : null}
+        {o.warehouse_bookings ? <BookingCard
+            b={o.warehouse_bookings}
+            warehouse={warehouse}
+            phase={bookingPhase({
+              orderStatus: o.status,
+              booking: o.warehouse_bookings,
+              intakeStatus: loadedGroup?.members.find((m) => m.role === "intake")?.status ?? null,
+              outboundStatus: loadedGroup?.members.find((m) => m.role === "outbound")?.status ?? null,
+              today: romeToday(now),
+            })}
+          /> : null}
 
         {group ? (
           <OrderGroupCard
@@ -525,10 +537,13 @@ function PorterJobCard({ job, contact, notes }: { job: PorterJob; contact: strin
   );
 }
 
-function BookingCard({ b, warehouse }: { b: Booking; warehouse: WarehouseInfo | null }) {
+function BookingCard({ b, warehouse, phase }: { b: Booking; warehouse: WarehouseInfo | null; phase: BookingPhase }) {
   return (
     <Card>
-      <H2>Deposito</H2>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <H2>Deposito</H2>
+        {phase !== "unpaid" ? <BookingPhaseBadge phase={phase} /> : null}
+      </div>
       <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
         <Row k="Spazio" v={bookingUnitLabel(b)} />
         <Row k="Periodo" v={`${formatDateOnly(b.start_date)} – ${formatDateOnly(b.end_date)} (${bookingDays(b.start_date, b.end_date)} giorni)`} />
