@@ -128,7 +128,7 @@ stronie głównej, każda usługa ma własną podstronę i własny kreator. Teks
      „porto io” podać inaczej (funkcja albo snapshot w rezerwacji). Anulowanie depozytu: tekst „24 ore prima del ritiro”
      liczy od północy pierwszego dnia — sprawdzić z D33.
 6. Kreator Facchini → płatność → admin przypisuje → „Consegnato”. ✔ (2026-11-12, D164–D168; migracja
-   `20261112100000_porters_dispatch.sql` **lokalnie — czeka na `db:push`**, kod 6e jej wymaga):
+   `20261112100000_porters_dispatch.sql` **na stagingu od 2026-11-12**, za zgodą właściciela; `db:list` — lokalne = zdalne):
    - **6a** — migracja: `list_available_porter_jobs` / `accept_porter_job` (sesja przewoźnika, bez pojazdu),
      `admin_porter_candidates` / `admin_assign_porter_job` / `admin_set_carrier_porters` (service role, audit
      `carrier.porters_updated`), `carrier_fits_porter_job`, `vehicle_fits_order()` tylko dla transportu,
