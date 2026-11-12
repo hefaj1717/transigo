@@ -45,9 +45,36 @@ export async function loadActiveWarehouse(db: SupabaseClient): Promise<Warehouse
     .from("warehouses")
     .select("id, address, place_id, lat, lng, city, postal_code, province")
     .eq("is_active", true)
+    .order("created_at")
+    .limit(1)
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
+  return toWarehousePoint(data);
+}
+
+type WarehouseRow = { id: string; address: string; place_id: string | null; lat: number; lng: number; city: string; postal_code: string | null; province: string };
+
+/** One active warehouse by id (D178: the one the customer picked), or null when unknown or inactive. */
+export async function loadWarehouse(db: SupabaseClient, id: string): Promise<WarehousePoint | null> {
+  const { data, error } = await db
+    .from("warehouses")
+    .select("id, address, place_id, lat, lng, city, postal_code, province")
+    .eq("id", id)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toWarehousePoint(data) : null;
+}
+
+/** Active warehouses for the Deposito wizard (D178): what the customer sees, nothing internal. */
+export async function loadActiveWarehouses(db: SupabaseClient): Promise<{ id: string; name: string; address: string; city: string; province: string }[]> {
+  const { data, error } = await db.from("warehouses").select("id, name, address, city, province").eq("is_active", true).order("city");
+  if (error) throw error;
+  return data ?? [];
+}
+
+function toWarehousePoint(data: WarehouseRow): WarehousePoint {
   return {
     id: data.id,
     address: data.address,

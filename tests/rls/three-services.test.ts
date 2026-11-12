@@ -117,9 +117,9 @@ const force = (s: string) => sql(`set session_replication_role = replica; ${s}`)
 const freeUnits = async (warehouse: string, unit: "box" | "pallet", box: string | null, start: string, end: string) =>
   (await check(service.rpc("warehouse_free_units", { p_warehouse_id: warehouse, p_unit: unit, p_box_code: box, p_start: start, p_end: end }))) as number;
 
-// One active warehouse at a time (warehouses_one_active_idx): a new one replaces the previous one.
-async function newWarehouse(boxes: Record<string, number>, pallets = 0): Promise<string> {
-  await run(service.from("warehouses").update({ is_active: false }).eq("is_active", true));
+// A fresh active warehouse per test; by default the others are switched off (D178 allows many active ones).
+async function newWarehouse(boxes: Record<string, number>, pallets = 0, keepOthers = false): Promise<string> {
+  if (!keepOthers) await run(service.from("warehouses").update({ is_active: false }).eq("is_active", true));
   const id = (await check(service.from("warehouses").insert({
     name: `Magazzino ${randomUUID().slice(0, 4)}`, address: "Via Magazzino 2, Firenze", city: "Firenze", province: "FI", lat: 43.8, lng: 11.2, is_active: true, pallet_capacity: pallets,
   }).select("id").single())).id as string;
@@ -297,6 +297,19 @@ describe("capacity (D156)", () => {
     await created(storagePayload({ unit: "pallet", pallets: 1, warehouse: w, start: romeDate(15), end: romeDate(30) }));
     expect(await freeUnits(w, "pallet", null, romeDate(10), romeDate(30))).toBe(0);
     expect(await freeUnits(w, "pallet", null, romeDate(21), romeDate(30))).toBe(3);
+  });
+
+  it("D178: two active warehouses at once — each has its own capacity; an inactive one is refused", async () => {
+    const a = await newWarehouse({ s: 1 });
+    const b = await newWarehouse({ s: 1 }, 0, true);
+    expect((await check(service.from("warehouses").select("id").in("id", [a, b]).eq("is_active", true))).length).toBe(2);
+    await created(storagePayload({ warehouse: a }));
+    await refused(storagePayload({ warehouse: a }), "23P01"); // a is full
+    expect(await freeUnits(b, "box", "s", romeDate(2), romeDate(31))).toBe(1); // b is not affected
+    const inB = await created(storagePayload({ warehouse: b }));
+    expect((await check(service.from("warehouse_bookings").select("warehouse_id").eq("order_id", inB.id).single())).warehouse_id).toBe(b);
+    await run(service.from("warehouses").update({ is_active: false }).eq("id", b));
+    expect((await create(storagePayload({ warehouse: b }))).error).not.toBeNull();
   });
 
   it("race for the last box: parallel calls → exactly one succeeds, the rest get 23P01", async () => {

@@ -8,7 +8,8 @@ import { calculateStoragePrice } from "../../pricing/storage-service";
 import type { PorterPackageCode, PricingConfig, Quote } from "../../pricing/types";
 import type { Endpoint, ResolvedLeg } from "../build";
 import { toPublicQuote } from "../public-quote";
-import { loadActiveWarehouse, loadFleet, quoteValidMinutes, resolveItalianPlace, routeBetween } from "../server";
+import { loadActiveWarehouses, loadFleet, loadWarehouse, quoteValidMinutes, resolveItalianPlace, routeBetween } from "../server";
+import type { PublicWarehouse } from "./warehouses";
 import { assessVehicles } from "../vehicle-fit";
 import { romeToday, windowRange } from "../windows";
 import { toPublicStorageQuote, type PublicStoragePart, type PublicStorageQuote, type StorageError, type TransportRole } from "./messages";
@@ -52,7 +53,8 @@ export type StorageOptions = {
   boxes: { code: string; labelIt: string; volumeM3: number; dayCents: number; monthCents: number }[];
   /** Pallets for businesses (D154, rule storage_pallet_day). */
   pallets: boolean;
-  warehouseCity: string | null;
+  /** Active warehouses the customer picks from (D178). */
+  warehouses: PublicWarehouse[];
   porterPackages: { code: PorterPackageCode; labelIt: string; persons: number; includedHours: number }[];
   minLeadHours: number;
   vatRateBp: number;
@@ -60,7 +62,7 @@ export type StorageOptions = {
 };
 
 const UNAVAILABLE: StorageOptions = {
-  available: false, boxes: [], pallets: false, warehouseCity: null, porterPackages: [], minLeadHours: 3, vatRateBp: 2200, quoteValidMinutes: 30,
+  available: false, boxes: [], pallets: false, warehouses: [], porterPackages: [], minLeadHours: 3, vatRateBp: 2200, quoteValidMinutes: 30,
 };
 
 const enabled = (config: PricingConfig, code: string) => config.rules.some((r) => r.code === code && r.isEnabled);
@@ -73,14 +75,14 @@ export async function loadStorageOptions(db: SupabaseClient): Promise<StorageOpt
     if (e instanceof PricingConfigError) return UNAVAILABLE;
     throw e;
   }
-  const [warehouse, validMinutes] = await Promise.all([loadActiveWarehouse(db), quoteValidMinutes(db)]);
+  const [warehouses, validMinutes] = await Promise.all([loadActiveWarehouses(db), quoteValidMinutes(db)]);
   const boxes = config.storageBoxes.filter((b) => b.isEnabled).map(({ code, labelIt, volumeM3, dayCents, monthCents }) => ({ code, labelIt, volumeM3, dayCents, monthCents }));
   const pallets = enabled(config, "storage_pallet_day");
   return {
-    available: !!warehouse && (boxes.length > 0 || pallets),
+    available: warehouses.length > 0 && (boxes.length > 0 || pallets),
     boxes,
     pallets,
-    warehouseCity: warehouse?.city ?? null,
+    warehouses,
     porterPackages: enabled(config, "porter_hour")
       ? config.porterPackages.filter((p) => p.isEnabled).map((p) => ({ code: p.code, labelIt: PORTER_PACKAGE_LABEL[p.code], persons: p.portersCount, includedHours: p.includedHours }))
       : [],
@@ -112,7 +114,7 @@ export function unitChoice(state: StorageState, customerType: "private" | "busin
   return state.pallets ? { unit: "pallet", pallets: state.pallets } : null;
 }
 
-/** Free units of the active warehouse over the period (warehouse_free_units, service role). */
+/** Free units of the picked warehouse over the period (warehouse_free_units, service role). */
 async function freeUnits(db: SupabaseClient, warehouseId: string, u: StorageUnitChoice, p: Period): Promise<number> {
   const { data, error } = await db.rpc("warehouse_free_units", {
     p_warehouse_id: warehouseId, p_unit: u.unit, p_box_code: u.unit === "box" ? u.boxCode : null, p_start: p.start, p_end: p.end,
@@ -131,8 +133,8 @@ export async function storageAvailability(db: SupabaseClient, state: StorageStat
   if ("code" in period) return { ok: false, error: period };
   const u = unitChoice(state, customerType);
   if (!u) return { ok: false, error: { code: "incomplete" } };
-  const warehouse = await loadActiveWarehouse(db);
-  if (!warehouse) return { ok: false, error: { code: "storage_unavailable" } };
+  const warehouse = state.warehouseId ? await loadWarehouse(db, state.warehouseId) : null;
+  if (!warehouse) return { ok: false, error: { code: "no_warehouse" } };
   return { ok: true, available: (await freeUnits(db, warehouse.id, u, period)) >= needed(u) };
 }
 
@@ -161,8 +163,8 @@ export async function quoteStorage(
     if (e instanceof PricingConfigError) return fail({ code: "pricing_unavailable" });
     throw e;
   }
-  const warehouse = await loadActiveWarehouse(db);
-  if (!warehouse) return fail({ code: "storage_unavailable" });
+  const warehouse = state.warehouseId ? await loadWarehouse(db, state.warehouseId) : null;
+  if (!warehouse) return fail({ code: "no_warehouse" });
 
   const storage = calculateStoragePrice({ customerType, days: period.days, ...u }, config);
   if (!storage.ok) return fail(storage.error.code === "service_unavailable" ? { code: "storage_unavailable" } : { code: "invalid_period" });

@@ -45,6 +45,7 @@ const state = (patch: Partial<StorageState> = {}): StorageState => {
   const start = weekday(10);
   return {
     ...EMPTY_STORAGE_STATE,
+    warehouseId: warehouse?.id ?? null, // D178: the picked warehouse (set in beforeAll)
     boxCode: "m",
     startDate: start,
     endDate: weekday(45),
@@ -326,6 +327,14 @@ describe("quoteStorage on the active price list (no transport: no Google call)",
     expect(await fail(state({ boxCode: null, pallets: 2, startDate: addDaysIso(romeToday(NOW), -1) }))).toBe("invalid_period");
     expect(await fail(state({ boxCode: null, pallets: 2, startDate: weekday(20), endDate: weekday(10) }))).toBe("invalid_period");
     expect(await fail(state({ boxCode: null, pallets: 21 }))).toBe("no_space");
+  });
+
+  it("D178: without a picked warehouse, or with an unknown one → no_warehouse, before any price", async () => {
+    for (const warehouseId of [null, "00000000-0000-4000-8000-000000000000"]) {
+      const { outcome, server } = await quoteStorage(service, state({ customerTypeView: "business", boxCode: null, pallets: 2, warehouseId }), "business", NOW, null);
+      expect(outcome).toEqual({ ok: false, error: { code: "no_warehouse" } });
+      expect(server).toBeNull();
+    }
   });
 
   it("a transport with an unknown place → its own error, before any price", async () => {

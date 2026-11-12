@@ -20,6 +20,7 @@ import {
   type StoragePrefill,
   type StorageState,
 } from "@/lib/booking/storage/state";
+import { searchWarehouses } from "@/lib/booking/storage/warehouses";
 import { accountStepError, initialWizardStep, wizardSteps, type WizardSession } from "@/lib/booking/session";
 import { romeToday, TIME_WINDOW_LABEL, TIME_WINDOWS, type TimeWindow } from "@/lib/booking/windows";
 import { formatCents } from "@/lib/pricing/money";
@@ -35,6 +36,7 @@ const input = "mt-1 block w-full rounded-md border border-zinc-300 px-3 py-2 tex
 const label = "block text-sm font-medium text-zinc-800";
 
 const ALL_STEPS: { id: StorageStep; label: string }[] = [
+  { id: "magazzino", label: "Magazzino" },
   { id: "unita", label: "Cosa depositi" },
   { id: "periodo", label: "Periodo" },
   { id: "arrivo", label: "Arrivo della merce" },
@@ -75,7 +77,7 @@ const dateIt = (iso: string | null) => (iso ? new Date(`${iso}T12:00:00Z`).toLoc
 export function StorageWizard({ options, session, initialStep, prefill }: { options: StorageOptions; session: WizardSession; initialStep: string | null; prefill: StoragePrefill }) {
   const [state, setState] = useState<StorageState>(EMPTY_STORAGE_STATE);
   const [loaded, setLoaded] = useState(false);
-  const [step, setStep] = useState<StorageStep>("unita");
+  const [step, setStep] = useState<StorageStep>("magazzino");
   const [maxStep, setMaxStep] = useState(0);
   const [contacts, setContacts] = useState<Contacts>(EMPTY_CONTACTS);
   const [billing, setBilling] = useState<Billing>(EMPTY_BILLING);
@@ -93,6 +95,8 @@ export function StorageWizard({ options, session, initialStep, prefill }: { opti
   const quoteSeq = useRef(0);
   const availSeq = useRef(0);
   const prefillDays = useRef(prefill.days);
+  const [warehouseQuery, setWarehouseQuery] = useState("");
+  const warehouse = options.warehouses.find((w) => w.id === state.warehouseId) ?? null;
 
   const customerType = session.kind === "customer" ? session.customerType : state.customerTypeView;
   const isPrivate = customerType === "private";
@@ -115,6 +119,8 @@ export function StorageWizard({ options, session, initialStep, prefill }: { opti
     if (prefill.boxCode) base = { ...base, customerTypeView: "private", boxCode: prefill.boxCode };
     else if (prefill.pallets) base = { ...base, customerTypeView: "business", pallets: prefill.pallets };
     if (prefill.days && base.startDate) base = { ...base, endDate: endDateFor(base.startDate, prefill.days) };
+    // D178: a warehouse that is no longer offered is dropped; with only one, it is picked for the customer.
+    if (!options.warehouses.some((w) => w.id === base.warehouseId)) base = { ...base, warehouseId: options.warehouses.length === 1 ? options.warehouses[0].id : null };
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time restore from localStorage after hydration
     setState(base);
     const start = initialWizardStep(initialStep, session, "contatti");
@@ -158,7 +164,7 @@ export function StorageWizard({ options, session, initialStep, prefill }: { opti
   }, []);
 
   // Live availability while the customer picks the unit and the dates (D156): yes / no only.
-  const periodReady = !!(state.startDate && state.endDate && (isPrivate ? state.boxCode : state.pallets));
+  const periodReady = !!(state.warehouseId && state.startDate && state.endDate && (isPrivate ? state.boxCode : state.pallets));
   useEffect(() => {
     if (!loaded || !periodReady || created) return;
     const seq = ++availSeq.current;
@@ -170,7 +176,7 @@ export function StorageWizard({ options, session, initialStep, prefill }: { opti
       setAvailability(r.ok ? { state: "result", available: r.available } : { state: "error", message: r.message });
     }, 400);
     return () => clearTimeout(t);
-  }, [state.startDate, state.endDate, state.boxCode, state.pallets, state.customerTypeView, periodReady, loaded, created]); // eslint-disable-line react-hooks/exhaustive-deps -- only unit and period matter
+  }, [state.warehouseId, state.startDate, state.endDate, state.boxCode, state.pallets, state.customerTypeView, periodReady, loaded, created]); // eslint-disable-line react-hooks/exhaustive-deps -- only warehouse, unit and period matter
 
   useEffect(() => {
     if (!loaded || !periodReady || stepIndex(step) < stepIndex("merce") || created) return;
@@ -213,6 +219,9 @@ export function StorageWizard({ options, session, initialStep, prefill }: { opti
     setStepError(null);
     let error: string | null = null;
     switch (step) {
+      case "magazzino":
+        error = state.warehouseId ? null : "Scegli il magazzino.";
+        break;
       case "unita":
         error = isPrivate ? (state.boxCode ? null : "Scegli la misura del box.") : state.pallets ? null : "Indica il numero di pallet.";
         break;
@@ -376,6 +385,45 @@ export function StorageWizard({ options, session, initialStep, prefill }: { opti
         <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
           <h2 className="mb-4 text-lg font-semibold text-zinc-900">{ALL_STEPS.find((s) => s.id === step)?.label}</h2>
 
+          {step === "magazzino" ? (
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="warehouse-search" className={label}>In quale città ti serve il deposito?</label>
+                <input id="warehouse-search" type="search" autoComplete="off" value={warehouseQuery} onChange={(e) => setWarehouseQuery(e.target.value)} placeholder="Es. Milano, Bologna" className={`${input} sm:w-80`} />
+              </div>
+              {(() => {
+                const found = searchWarehouses(options.warehouses, warehouseQuery);
+                if (!found.length) {
+                  return (
+                    <p className="rounded-md bg-zinc-50 p-3 text-sm text-zinc-700">
+                      Nessun magazzino a «{warehouseQuery.trim()}». Magazzini disponibili: {[...new Set(options.warehouses.map((w) => w.city))].join(", ")}.{" "}
+                      <Link className="text-blue-700 underline" href="/contatti?servizio=deposito">Scrivici</Link> per altre città.
+                    </p>
+                  );
+                }
+                return (
+                  <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Magazzini">
+                    {found.map((w) => {
+                      const chosen = state.warehouseId === w.id;
+                      return (
+                        <div key={w.id} className={`rounded-lg border p-4 ${chosen ? "border-blue-600 bg-blue-50 ring-2 ring-blue-600" : "border-zinc-300 hover:border-blue-400"}`}>
+                          <button type="button" role="radio" aria-checked={chosen} onClick={() => update({ warehouseId: w.id })} className="block w-full text-left">
+                            <span className="block font-semibold text-zinc-900">{w.city} ({w.province})</span>
+                            <span className="mt-0.5 block text-sm text-zinc-700">{w.name}</span>
+                            <span className="mt-1 block text-xs text-zinc-600">{w.address}</span>
+                          </button>
+                          <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(w.address)}`} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-xs text-blue-700 underline">
+                            Vedi sulla mappa
+                          </a>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+          ) : null}
+
           {step === "unita" ? (
             <div className="space-y-4">
               {session.kind === "customer" ? (
@@ -457,7 +505,7 @@ export function StorageWizard({ options, session, initialStep, prefill }: { opti
               <div className="mt-2 space-y-2">
                 <label className="flex items-start gap-2 text-sm">
                   <input type="radio" name="intake" className="mt-1" checked={state.intake === "self"} onChange={() => update({ intake: "self" })} />
-                  <span>La porto io{options.warehouseCity ? ` al magazzino di ${options.warehouseCity}` : ""} il {dateIt(state.startDate)}<span className="block text-xs text-zinc-500">L&apos;indirizzo esatto ti arriva con la conferma del pagamento.</span></span>
+                  <span>La porto io{warehouse ? ` al magazzino di ${warehouse.city}` : ""} il {dateIt(state.startDate)}{warehouse ? <span className="block text-xs text-zinc-500">{warehouse.address}</span> : null}</span>
                 </label>
                 <label className="flex items-start gap-2 text-sm">
                   <input type="radio" name="intake" className="mt-1" checked={state.intake === "transigo"} onChange={() => update({ intake: "transigo" })} />
@@ -598,6 +646,8 @@ export function StorageWizard({ options, session, initialStep, prefill }: { opti
           {step === "riepilogo" ? (
             <div className="space-y-6">
               <dl className="grid gap-2 text-sm sm:grid-cols-[11rem_1fr]">
+                <dt className="text-zinc-500">Magazzino</dt>
+                <dd>{warehouse ? `${warehouse.name}, ${warehouse.address}` : ""}</dd>
                 <dt className="text-zinc-500">Deposito</dt>
                 <dd>{unitText}</dd>
                 <dt className="text-zinc-500">Periodo</dt>

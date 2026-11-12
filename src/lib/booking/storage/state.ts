@@ -32,6 +32,8 @@ export const storageStateSchema = z.object({
   version: z.literal(1),
   /** Only used before sign-in (D3); afterwards the account's type wins. Boxes for private, pallets for business (D154). */
   customerTypeView: z.enum(["private", "business"]),
+  /** The warehouse the customer picked (D178); null = not yet. */
+  warehouseId: z.uuid().nullable().default(null),
   boxCode: z.string().regex(/^[a-z0-9_]{1,20}$/).nullable(),
   pallets: z.number().int().min(1).max(STORAGE_MAX_PALLETS).nullable(),
   /** Inclusive period (D154): days = end − start + 1, as warehouse_bookings. */
@@ -61,6 +63,7 @@ const EMPTY_TRANSPORT: ChainTransportState = { place: null, window: null, porter
 export const EMPTY_STORAGE_STATE: StorageState = {
   version: 1,
   customerTypeView: "private",
+  warehouseId: null,
   boxCode: null,
   pallets: null,
   startDate: null,
@@ -106,6 +109,7 @@ export function storagePriceKey(s: StorageState, customerType: "private" | "busi
   return JSON.stringify([
     "storage",
     customerType,
+    s.warehouseId,
     customerType === "private" ? s.boxCode : s.pallets,
     s.startDate,
     s.endDate,

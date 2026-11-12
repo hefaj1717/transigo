@@ -420,8 +420,9 @@ async function loadBooking() {
   const { buildOrderPayload } = await jiti.import("@/lib/booking/order-payload");
   const { EMPTY_WIZARD_STATE } = await jiti.import("@/lib/booking/state");
 
-  await ok(service.from("service_area_provinces").update({ is_active: true }).in("province_code", ["MI", "MB", "BG", "BS", "CO", "VA", "TO", "NO"]));
-  let warehouse = (await ok(service.from("warehouses").select("id, address, city, province, lat, lng").eq("is_active", true).limit(1)))[0];
+  await ok(service.from("service_area_provinces").update({ is_active: true }).in("province_code", ["MI", "MB", "BG", "BS", "CO", "VA", "TO", "NO", "BO"]));
+  // The demo orders use the first warehouse (Milano); D178 allows more active ones (Bologna: ensureWarehouseCapacity).
+  let warehouse = (await ok(service.from("warehouses").select("id, address, city, province, lat, lng").eq("is_active", true).order("created_at").limit(1)))[0];
   if (!warehouse) {
     warehouse = await ok(service.from("warehouses").insert({ name: "Magazzino Transigo Milano", address: "Via Toffetti 20, 20139 Milano MI", city: "Milano", province: "MI", lat: 45.4398, lng: 9.2237, is_active: true }).select("id, address, city, province, lat, lng").single());
   }
@@ -546,11 +547,19 @@ export async function businessCustomer({ email, firstName, lastName, phone, comp
 export async function ensureWarehouseCapacity(admin, { boxes = { s: 10, m: 8, l: 3 }, pallets = 40 } = {}) {
   const b = await loadBooking();
   const codes = b.config.storageBoxes.filter((x) => x.isEnabled).map((x) => x.code);
-  const existing = await ok(service.from("warehouse_box_capacity").select("box_code").eq("warehouse_id", b.warehouse.id));
-  const missing = codes.filter((c) => !existing.some((e) => e.box_code === c)).map((c) => ({ warehouse_id: b.warehouse.id, box_code: c, quantity: boxes[c] ?? 5 }));
-  if (missing.length) await ok(admin.client.from("warehouse_box_capacity").insert(missing));
-  const w = await ok(service.from("warehouses").select("pallet_capacity").eq("id", b.warehouse.id).single());
-  if (!w.pallet_capacity) await ok(admin.client.from("warehouses").update({ pallet_capacity: pallets }).eq("id", b.warehouse.id));
+  // D178: a second, example warehouse in Bologna (the customer picks one in the Deposito wizard). Added once.
+  const BOLOGNA = "Via del Lavoro 15, 40127 Bologna BO";
+  let bologna = (await ok(service.from("warehouses").select("id").eq("address", BOLOGNA).limit(1)))[0];
+  if (!bologna) {
+    bologna = await ok(admin.client.from("warehouses").insert({ name: "Magazzino Transigo Bologna", address: BOLOGNA, street: "Via del Lavoro 15", city: "Bologna", postal_code: "40127", province: "BO", lat: 44.5126, lng: 11.3633, is_active: true }).select("id").single());
+  }
+  for (const id of [b.warehouse.id, bologna.id]) {
+    const existing = await ok(service.from("warehouse_box_capacity").select("box_code").eq("warehouse_id", id));
+    const missing = codes.filter((c) => !existing.some((e) => e.box_code === c)).map((c) => ({ warehouse_id: id, box_code: c, quantity: boxes[c] ?? 5 }));
+    if (missing.length) await ok(admin.client.from("warehouse_box_capacity").insert(missing));
+    const w = await ok(service.from("warehouses").select("pallet_capacity").eq("id", id).single());
+    if (!w.pallet_capacity) await ok(admin.client.from("warehouses").update({ pallet_capacity: pallets }).eq("id", id));
+  }
 }
 
 let storage;
@@ -583,7 +592,7 @@ export async function storageOrder(customer, { customerType = "private", box = n
   const outboundTransigo = outbound && typeof outbound === "object";
   const state = {
     ...s.EMPTY_STORAGE_STATE,
-    customerTypeView: customerType, boxCode: box, pallets, startDate: start, endDate: end,
+    customerTypeView: customerType, warehouseId: b.warehouse.id, boxCode: box, pallets, startDate: start, endDate: end,
     intake: intake ? "transigo" : "self", outbound: outboundTransigo ? "transigo" : outbound,
     intakeTransport: intake ? T(intake) : s.EMPTY_STORAGE_STATE.intakeTransport,
     outboundTransport: outboundTransigo ? T(outbound) : s.EMPTY_STORAGE_STATE.outboundTransport,

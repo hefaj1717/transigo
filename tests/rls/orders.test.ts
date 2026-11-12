@@ -548,9 +548,12 @@ describe("warehouses (D72) — admin only", () => {
     expect(data).toEqual([{ name: "Magazzino Milano" }]);
   });
 
-  it("at most one active warehouse in the MVP", async () => {
-    const { error } = await admin.client.from("warehouses").insert({ name: "Secondo", address: "Via 2", city: "Milano", province: "MI", lat: 1, lng: 1, is_active: true });
-    expect(error).not.toBeNull();
+  it("D178: more than one active warehouse (the customer picks one)", async () => {
+    const { data, error } = await admin.client.from("warehouses").insert({ name: "Secondo", address: "Via 2", city: "Bologna", province: "BO", lat: 1, lng: 1, is_active: true }).select("id").single();
+    expect(error).toBeNull();
+    const active = await admin.client.from("warehouses").select("id").eq("is_active", true);
+    expect((active.data ?? []).length).toBeGreaterThanOrEqual(2);
+    await admin.client.from("warehouses").update({ is_active: false }).eq("id", data!.id);
   });
 
   it("a warehouse used by an order cannot be deleted", async () => {

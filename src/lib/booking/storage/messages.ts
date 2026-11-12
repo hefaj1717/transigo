@@ -4,13 +4,14 @@ import { headlineCents, type PublicQuote } from "../public-quote";
 import type { ChainRole } from "../../orders/order-group";
 
 export type StorageStep =
-  | "tipo" | "unita" | "periodo" | "arrivo" | "uscita" | "merce" | "facchini" | "preventivo" | "account" | "contatti" | "riepilogo";
+  | "magazzino" | "tipo" | "unita" | "periodo" | "arrivo" | "uscita" | "merce" | "facchini" | "preventivo" | "account" | "contatti" | "riepilogo";
 
 /** A transport of the chain the error belongs to (intake = "ritiro", outbound = "consegna"). */
 export type TransportRole = Exclude<ChainRole, "storage">;
 
 export type StorageError =
   | { code: "incomplete" }
+  | { code: "no_warehouse" } // none picked, or the picked one is no longer active (D178)
   | { code: "invalid_period" } // end before start, start in the past, too long
   | { code: "storage_unavailable" } // no active warehouse, unit not offered by the price list
   | { code: "no_space" } // no free box / pallet places for the period (D156)
@@ -32,6 +33,8 @@ export function storageErrorMessage(e: StorageError, ctx: StorageErrorContext): 
   switch (e.code) {
     case "incomplete":
       return "Scegli il deposito e le date di inizio e fine.";
+    case "no_warehouse":
+      return "Scegli il magazzino.";
     case "invalid_period":
       return "Controlla le date: la fine non può essere prima dell'inizio e l'inizio non può essere nel passato.";
     case "storage_unavailable":
@@ -73,6 +76,8 @@ export function storageErrorMessage(e: StorageError, ctx: StorageErrorContext): 
 export function storageErrorStep(e: StorageError): StorageStep {
   const transportStep = (role: TransportRole): StorageStep => (role === "intake" ? "arrivo" : "uscita");
   switch (e.code) {
+    case "no_warehouse":
+      return "magazzino";
     case "incomplete":
     case "invalid_period":
     case "no_space":
