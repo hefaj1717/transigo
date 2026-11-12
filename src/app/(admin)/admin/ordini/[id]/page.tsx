@@ -184,7 +184,9 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
         ) : null}
         <span className="text-sm text-zinc-600">Pagamento: {PAYMENT_STATE_LABEL[pay]}{o.paid_at ? ` (${rome(o.paid_at)})` : ""}</span>
         {o.delivered_without_pod ? (
-          <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-900">Consegnato senza firma e foto — nessun pagamento automatico al padroncino</span>
+          <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-900">
+            {type === "porters" ? "Concluso senza firma del cliente" : "Consegnato senza firma e foto"} — nessun pagamento automatico al padroncino
+          </span>
         ) : null}
       </div>
 
@@ -223,7 +225,8 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
         )}
       </section>
 
-      <Execution orderId={o.id} status={o.status} legs={legs} exec={exec} actorName={actorName} />
+      {/* Facchinaggio has no execution steps in the app yet (D165): the admin records the statuses. */}
+      {type === "porters" ? null : <Execution orderId={o.id} status={o.status} legs={legs} exec={exec} actorName={actorName} />}
 
       {o.order_porter_jobs ? <PorterJobSection job={o.order_porter_jobs} /> : null}
       {o.warehouse_bookings ? <BookingSection b={o.warehouse_bookings} /> : null}

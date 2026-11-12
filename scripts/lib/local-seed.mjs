@@ -479,6 +479,49 @@ export async function order(customer, { from, to, daysAhead, window = "10-12", v
   return { id: created.id, number: created.order_number, total: result.quote.totalCents };
 }
 
+let porters;
+async function loadPorters() {
+  if (porters) return porters;
+  await loadBooking(); // service area, settings
+  const { createJiti } = require("jiti");
+  const jiti = createJiti(import.meta.url, { alias: { "@": `${root}src`, "server-only": `${root}tests/stubs/server-only.ts` } });
+  const { calculatePortersPrice } = await jiti.import("@/lib/pricing/porters-service");
+  const { buildPortersOrderPayload } = await jiti.import("@/lib/booking/porters/payload");
+  const { EMPTY_PORTERS_STATE } = await jiti.import("@/lib/booking/porters/state");
+  const { windowRange } = await jiti.import("@/lib/booking/windows");
+  porters = { calculatePortersPrice, buildPortersOrderPayload, EMPTY_PORTERS_STATE, windowRange };
+  return porters;
+}
+
+/**
+ * Creates a Facchinaggio order (pending payment, D151) priced like the wizard /prenota/facchini: the same engine
+ * (calculatePortersPrice) and payload builder (buildPortersOrderPayload) as the app, through create_service_order.
+ */
+export async function portersOrder(customer, { place, daysAhead, window = "10-12", persons = 2, hours = 2, floor = 0, elevator = false, description, contact, notes = "" }) {
+  const b = await loadBooking();
+  const p = await loadPorters();
+  if (!b.config.portersService) throw new Error("the active price list has no Facchinaggio service (publish a new version)");
+  const P = { ...PLACES[place], warehouseId: null };
+  const date = romeDate(daysAhead);
+  const range = p.windowRange(date, window);
+  const state = { ...p.EMPTY_PORTERS_STATE, place: { placeId: P.placeId, label: P.address, floor, hasElevator: elevator }, date, window, persons, hours, description };
+  const r = p.calculatePortersPrice({ customerType: "private", now: new Date(), startAt: range.start, province: P.province, persons, hours, floor, hasElevator: elevator }, b.config);
+  if (!r.ok) throw new Error(`porters price (${description}): ${JSON.stringify(r.error)}`);
+  const at = new Date();
+  const person = await ok(service.from("profiles").select("first_name, last_name, email").eq("id", customer.id).single());
+  const payload = p.buildPortersOrderPayload({
+    customerId: customer.id, state, place: P, window: { date, start: range.start, end: range.end }, quote: r.quote, job: r.job, quotedAt: at,
+    contacts: { siteName: contact, sitePhone: "+393331234567", notes }, description,
+    billingDetails: {
+      customer_type: "private", first_name: person.first_name, last_name: person.last_name, email: person.email,
+      fiscal_code: "CNTGLI85M41F205X", street: "Via Dante 12", city: "Milano", postal_code: "20121", province: "MI", country: "IT",
+    },
+    termsVersion: b.settings.terms_version, termsAcceptedAt: at,
+  });
+  const created = await ok(service.rpc("create_service_order", { p: payload }));
+  return { id: created.id, number: created.order_number, total: r.quote.totalCents };
+}
+
 let stripe;
 /**
  * Locally: fake Stripe ids (no network). On staging: a real Stripe TEST PaymentIntent paid with the test card
@@ -515,11 +558,11 @@ export async function pay(o, { receivedDelta = 0 } = {}) {
 /** Orders of the customer for the end-of-run summary (number, status, goods, carrier). */
 export async function printOrders(customerId) {
   const rows = await ok(service.from("orders")
-    .select("order_number, status, goods_description, pickup_window_start, assigned_at, carriers:carrier_id(company_name), vehicle_types(name_it)")
+    .select("order_number, status, service_type, goods_description, pickup_window_start, assigned_at, carriers:carrier_id(company_name), vehicle_types(name_it)")
     .eq("customer_id", customerId).order("order_number"));
   for (const r of rows) {
     const pickup = new Date(r.pickup_window_start).toLocaleString("it-IT", { timeZone: "Europe/Rome", dateStyle: "short", timeStyle: "short" });
-    console.log(`  ${r.order_number}  ${r.status.padEnd(15)} ${pickup.padEnd(17)} ${r.vehicle_types?.name_it?.padEnd(28) ?? ""} ${r.goods_description}${r.carriers ? `  → ${r.carriers.company_name}` : ""}`);
+    console.log(`  ${r.order_number}  ${r.status.padEnd(15)} ${pickup.padEnd(17)} ${(r.vehicle_types?.name_it ?? (r.service_type === "porters" ? "Facchinaggio" : "")).padEnd(28)} ${r.goods_description}${r.carriers ? `  → ${r.carriers.company_name}` : ""}`);
   }
 }
 

@@ -10,7 +10,8 @@
 // on the accounts again). For fresh dates (e.g. "Rinuncia bloccata" depends on the clock) reset and seed again.
 // Guards, password and helpers: scripts/lib/local-seed.mjs. Manual tests: docs/testy-reczne/corse-padroncino.md.
 //
-// Creates: the admin, a private customer, two active carriers (Ferri: furgone medio; Galli: camion) and orders in
+// Creates: the admin, a private customer, two active carriers (Ferri: furgone medio, facchinaggio with 2 persons;
+// Galli: camion, facchinaggio with 4 persons) and orders in
 // every status, priced by the real engine and built like the wizard; then
 //   * paid jobs nobody has taken, of different sizes — some too big for a furgone medio (only Galli sees them);
 //   * a job accepted by Ferri over 15 minutes ago with pickup within 48 h ("Rinuncia" blocked);
@@ -33,11 +34,11 @@
 import { randomUUID } from "node:crypto";
 import {
   ADMIN_EMAIL, TARGET, approveCarrier, carrierAccount, companyDocs, completeDelivery, ensurePorterPackages, existingUserId, legsToTodaySql, localSql, ok, order,
-  orderPhoto, pay, printOrders, printPasswordHint, privateCustomer, recordStep, seedAdmin, service, sqlUuid, stepTimesSql, user, vehicle,
+  orderPhoto, pay, portersOrder, printOrders, printPasswordHint, privateCustomer, recordStep, seedAdmin, service, sqlUuid, stepTimesSql, user, vehicle,
 } from "./lib/local-seed.mjs";
 
 const EMAILS = { customer: "cliente@example.com", ferri: "padroncino@example.com", galli: "padroncino2@example.com" };
-const EXPECTED_ORDERS = 25;
+const EXPECTED_ORDERS = 29; // 25 + 4 Facchinaggio (step 6). The staging seed of 2026-11-11 has 25: see docs/plany/tre-servizi.md (step 11).
 // Orders 18–21 by their goods (unique in the seed), for the guide printed at the end and for tests/e2e.
 const EXECUTION_DEMO = {
   "Cucina componibile smontata": "admin: «Annulla ultimo passo» (solo «Sono arrivato al ritiro»)",
@@ -116,6 +117,10 @@ const galli = await carrierAccount({ email: EMAILS.galli, firstName: "Luca", las
 await companyDocs(galli);
 await vehicle(galli, "GL456CD", { type: "truck_tail_lift", payloadKg: 3000 });
 await approveCarrier(galli, admin);
+// Facchinaggio (D152, D167): Ferri with a team of 2, Galli with a team of 4 — set like the admin panel does.
+for (const [c, team] of [[ferri, 2], [galli, 4]]) {
+  await ok(service.rpc("admin_set_carrier_porters", { p_carrier_id: c.id, p_admin_id: admin.id, p_offers: true, p_team_size: team }).single());
+}
 
 // ---------------------------------------------------------------------------
 // Orders of the customer demo
@@ -292,6 +297,21 @@ ${shiftDays(o5.id, 1)}
 ${shiftDays(o6.id, 1)}
 ${shiftDays(o7.id, 11)}
 ${shiftDays(o8.id, 26)}`);
+
+// ---------------------------------------------------------------------------
+// Facchinaggio (step 6 of docs/plany/tre-servizi.md; docs/testy-reczne/tre-servizi.md B)
+// ---------------------------------------------------------------------------
+// P1. Paid, 2 facchini — on the list of Ferri (team 2) and Galli (team 4); "Assegna facchini" in the admin.
+const p1 = await pay(await portersOrder(customer, { place: "milanoCentro", daysAhead: 3, window: "10-12", persons: 2, hours: 3, floor: 4, elevator: false, description: "Salita di un divano e di un armadio al 4° piano", contact: "Giulia Conti", notes: "Citofono Conti" }));
+// P2. Paid, 3 facchini — only Galli sees it (Ferri's team is too small).
+await pay(await portersOrder(customer, { place: "monza", daysAhead: 4, window: "08-10", persons: 3, hours: 4, floor: 0, elevator: false, description: "Scarico di un camion: 40 scatoloni e mobili da ufficio", contact: "Studio Conti" }));
+// P3. Assigned to Ferri by the admin, work started → "Segna lavoro concluso" in the admin.
+const p3 = await pay(await portersOrder(customer, { place: "milanoNavigli", daysAhead: 2, window: "14-16", persons: 2, hours: 2, floor: 2, elevator: true, description: "Spostamento mobili tra due stanze", contact: "Giulia Conti" }));
+await ok(service.rpc("admin_assign_porter_job", { p_order_id: p3.id, p_carrier_id: ferri.id, p_admin_id: admin.id }));
+await advance(p3, "picked_up");
+// P4. Pending payment (the customer can pay it from "I miei ordini").
+await portersOrder(customer, { place: "milanoCentro", daysAhead: 6, window: "16-18", persons: 2, hours: 2, description: "Montaggio e salita di una libreria", contact: "Giulia Conti" });
+console.log(`\nFacchinaggio: ${p1.number} da assegnare (Ferri e Galli), ${p3.number} in corso (Ferri) — /admin/ordini?servizio=facchinaggio`);
 
 // ---------------------------------------------------------------------------
 console.log("\nOrdini demo:");
