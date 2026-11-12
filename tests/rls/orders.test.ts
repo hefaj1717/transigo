@@ -367,10 +367,9 @@ describe("padroncino", () => {
 
 describe("admin", () => {
   it("reads every order table", async () => {
+    // Per order: a whole-table read stops at max_rows (1000) once other test files have created many orders.
     for (const table of ORDER_TABLES) {
-      const visible = await rows(admin.client, table);
-      const ids = new Set(visible.map((r) => (table === "orders" ? r.id : r.order_id)));
-      for (const o of [orderA, orderA2, orderB, orderBlocked]) expect(ids.has(o.id)).toBe(true);
+      for (const o of [orderA, orderA2, orderB, orderBlocked]) expect((await rows(admin.client, table, o.id)).length, `${table} ${o.id}`).toBeGreaterThan(0);
     }
   });
 

@@ -269,9 +269,9 @@ describe("storage (Deposito)", () => {
     await refused(storagePayload({ start: romeDate(5), end: romeDate(4) }));
   });
 
-  it("not yet available: intake or outbound by Transigo (step 7), monthly plan (step 10)", async () => {
-    await refused(storagePayload({ intake: "transigo" }), "22023", /not available yet/);
-    await refused(storagePayload({ outbound: "transigo" }), "22023", /not available yet/);
+  it("intake or outbound by Transigo need their transport (chain: storage-chain.test.ts); monthly plan not yet (step 10)", async () => {
+    await refused(storagePayload({ intake: "transigo" }), "22023", /need their transport/);
+    await refused(storagePayload({ outbound: "transigo" }), "22023", /need their transport/);
     await refused(storagePayload({ plan: "monthly", end: romeDate(120) }), "22023", /not available yet/);
   });
 
