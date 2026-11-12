@@ -37,6 +37,11 @@ export type MoneyData = {
   refunds: MoneyRefund[];
   decision: { refund_cents: number; carrier_cents: number; decided_at: string } | null;
   settings: { freeHours: number; feeBp: number };
+  /**
+   * A storage chain (D153): `payments` are the group's (on its first order) and this is what is still refundable on
+   * THIS order — min(payment remainder over the whole group, order total − its refunds), as order_refundable_cents().
+   */
+  group?: { rootNumber: string; refundableCents: number };
 };
 
 const REFUNDABLE_STATUSES = ["paid", "assigned", "picked_up", "in_transit", "delivered", "completed", "cancelled"];
@@ -53,7 +58,7 @@ function mainPayment(payments: MoneyPayment[]) {
 export function Money({ d }: { d: MoneyData }) {
   const succeeded = d.payments.filter((p) => p.status === "succeeded");
   const main = mainPayment(d.payments);
-  const refundable = main ? (main.amount_received_cents ?? main.amount_cents) - activeRefundCents(d.refunds.filter((r) => r.payment_id === main.id)) : 0;
+  const refundable = d.group ? d.group.refundableCents : main ? (main.amount_received_cents ?? main.amount_cents) - activeRefundCents(d.refunds.filter((r) => r.payment_id === main.id)) : 0;
   const pickupPassed = new Date(d.pickupWindowStart) <= new Date();
   const refunds = [...d.refunds].sort((a, b) => a.created_at.localeCompare(b.created_at));
 
@@ -75,6 +80,7 @@ export function Money({ d }: { d: MoneyData }) {
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="text-sm">
           <p className="mb-1 font-medium text-zinc-900">Pagamenti Stripe</p>
+          {d.group ? <p className="mb-2 text-xs text-zinc-600">Pagamento unico della prenotazione, registrato sull&apos;ordine {d.group.rootNumber}.</p> : null}
           {succeeded.length ? (
             <ul className="space-y-2">
               {succeeded.map((p) => (

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cancellationPreview, freeCancellationUntil, lateCancellationFeeCents, refundStatusFromStripe, type CancellationInput } from "./cancellation";
+import { cancellationPreview, freeCancellationUntil, groupCancellationPreview, lateCancellationFeeCents, refundStatusFromStripe, type CancellationInput } from "./cancellation";
 
 const H = 3_600_000;
 const lines = [
@@ -43,7 +43,7 @@ describe("lateCancellationFeeCents (D38)", () => {
 
 describe("cancellationPreview (D33)", () => {
   it("free before the deadline: full refund", () => {
-    expect(cancellationPreview(base)).toEqual({ kind: "free", feeCents: 0, refundCents: 19_520, freeUntil: new Date(pickup.getTime() - 24 * H) });
+    expect(cancellationPreview(base)).toEqual({ kind: "free", feeCents: 0, refundCents: 19_520, freeUntil: new Date(pickup.getTime() - 24 * H), basis: "pickup" });
   });
 
   it("the deadline itself is already late (same comparison as the database)", () => {
@@ -67,6 +67,32 @@ describe("cancellationPreview (D33)", () => {
     for (const status of ["pending_payment", "picked_up", "in_transit", "delivered", "cancelled", "cancellation_review", "expired"]) {
       expect(cancellationPreview({ ...base, status })).toEqual({ kind: "not_allowed" });
     }
+  });
+});
+
+describe("storage (D170) and storage chains (D169)", () => {
+  const start = new Date("2026-12-01T23:00:00Z"); // 00:00 Europe/Rome of 2 December
+  const storage: CancellationInput = { ...base, serviceType: "storage", pickupWindowStart: start, totalCents: 7_320, lines: [{ line_type: "storage", gross_cents: 7_320 }] };
+
+  it("storage: free with a full refund until it starts, whatever freeHours; from the start no cancellation", () => {
+    expect(cancellationPreview({ ...storage, now: new Date(start.getTime() - H) })).toEqual({ kind: "free", feeCents: 0, refundCents: 7_320, freeUntil: start, basis: "storage" });
+    expect(cancellationPreview({ ...storage, now: start })).toEqual({ kind: "not_allowed" });
+  });
+
+  it("chain: sums per order; the D33 fee only on the late transport; the earliest free deadline is shown", () => {
+    const now = new Date(pickup.getTime() - 12 * H); // intake late; storage starts later; outbound far away
+    const intake = { ...base, now };
+    const st = { ...storage, now, pickupWindowStart: new Date(pickup.getTime() + 14 * H) };
+    const outbound = { ...base, now, pickupWindowStart: new Date(pickup.getTime() + 40 * 24 * H) };
+    expect(groupCancellationPreview([intake, st, outbound])).toEqual({
+      kind: "late", feeCents: 9_760, refundCents: 9_760 + 7_320 + 19_520, freeUntil: st.pickupWindowStart, basis: "storage",
+    });
+  });
+
+  it("chain: a carrier on any order or the storage started → no cancellation from the app", () => {
+    expect(groupCancellationPreview([base, { ...base, status: "assigned" }])).toEqual({ kind: "not_allowed" });
+    expect(groupCancellationPreview([base, { ...storage, now: start }])).toEqual({ kind: "not_allowed" });
+    expect(groupCancellationPreview([base])).toEqual(cancellationPreview(base));
   });
 });
 

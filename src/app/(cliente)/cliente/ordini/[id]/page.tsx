@@ -11,7 +11,10 @@ import { bookingDays, bookingUnitLabel, CUSTOMER_STORAGE_INTAKE_LABEL, CUSTOMER_
 import { loadCustomerExecution, type CustomerExecutionView } from "@/lib/orders/execution-read";
 import { groupPhotos, PHOTO_KIND_LABEL } from "@/lib/orders/execution-view";
 import { canOpenClaim, claimDeadline } from "@/lib/claims/claims";
-import { cancellationPreview, type CancellationPreview } from "@/lib/orders/cancellation";
+import { groupCancellationPreview, type CancellationInput, type CancellationPreview } from "@/lib/orders/cancellation";
+import { OrderGroupCard } from "@/components/orders/order-group-card";
+import { type GroupMemberRow } from "@/lib/orders/order-group";
+import { loadOrderGroup } from "@/lib/orders/order-group-server";
 import { loadCancellationSettings } from "@/lib/orders/cancellation-server";
 import { paymentState } from "@/lib/orders/status";
 import { formatCents } from "@/lib/pricing/money";
@@ -51,8 +54,22 @@ type PorterJob = {
 };
 type Booking = {
   unit: string; box_code: string | null; pallets: number | null; start_date: string; end_date: string;
-  intake: string; outbound: string; // the warehouse is admin-only (RLS): its address for the customer comes with step 7
+  intake: string; outbound: string; // the warehouse is admin-only (RLS): its address via customer_order_warehouse() (D171)
 };
+type WarehouseInfo = { name: string; address: string; city: string; lat: number; lng: number };
+/** A member of the order's group (D153), read with the customer's session. */
+type GroupRow = GroupMemberRow & {
+  status: string; pickup_window_start: string;
+  order_charges: { total_cents: number } | null;
+  order_lines: { line_type: string; gross_cents: number }[];
+  refunds: { amount_cents: number; status: string }[];
+  order_legs: { leg_index: number; pickup_city: string; delivery_city: string }[];
+  order_porter_jobs: { city: string } | null;
+  warehouse_bookings: { unit: string; box_code: string | null; pallets: number | null } | null;
+};
+const GROUP_SELECT =
+  "status, pickup_window_start, order_charges(total_cents), order_lines(line_type, gross_cents), refunds(amount_cents, status), " +
+  "order_legs(leg_index, pickup_city, delivery_city), order_porter_jobs(city), warehouse_bookings(unit, box_code, pallets)";
 type OrderRow = {
   id: string; order_number: string; service_type: string; status: string; payment_due_at: string; paid_at: string | null; created_at: string; pickup_window_start: string;
   assigned_at: string | null; picked_up_at: string | null; in_transit_at: string | null; delivered_at: string | null;
@@ -115,6 +132,14 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
   const invoiceGroups = groupDocuments(docsRes.data ?? []);
   const carrier = ((carrierRes.data ?? []) as CarrierInfo[])[0] ?? null;
   const exec = await loadCustomerExecution(supabase, o);
+  // A storage chain (D153): the linked orders, one payment and one invoice on the first order.
+  const loadedGroup = await loadOrderGroup<GroupRow>(supabase, id, GROUP_SELECT);
+  const group = loadedGroup && loadedGroup.members.length > 1 ? loadedGroup : null;
+  // D171: where to bring / collect the goods ("porto io" / "ritiro io").
+  const booking = o.warehouse_bookings;
+  const warehouse = booking && (booking.intake === "self" || booking.outbound !== "transigo")
+    ? (((await supabase.rpc("customer_order_warehouse", { p_order_id: id })).data ?? []) as WarehouseInfo[])[0] ?? null
+    : null;
 
   const now = new Date();
   const type = serviceTypeOf(o.service_type);
@@ -128,16 +153,19 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
   const progress = type === "storage" ? null : progressSteps(o, type);
   const returnedFromCheckout = sp.pagamento === "ok";
   const cancelledCheckout = sp.pagamento === "annullato";
-  const paidAndOpen = ["paid", "assigned"].includes(o.status);
+  const paidAndOpen = group ? group.members.every((m) => m.status === "paid") : ["paid", "assigned"].includes(o.status);
   // D137 preview — the database recomputes the amounts on click. settings is admin-only: two numbers via service role.
   let cancel: { preview: CancellationPreview; freeHours: number; feeBp: number } | null = null;
   if (paidAndOpen && charges) {
     const s = await loadCancellationSettings(createServiceClient());
-    const refundedCents = o.refunds.filter((r) => r.status !== "failed").reduce((sum, r) => sum + r.amount_cents, 0);
-    const preview = cancellationPreview({
-      status: o.status, pickupWindowStart: new Date(o.pickup_window_start), now, freeHours: s.freeHours, feeBp: s.feeBp,
-      totalCents: charges.total_cents, refundedCents, lines: o.order_lines,
+    const input = (m: Pick<GroupRow, "status" | "pickup_window_start" | "refunds" | "order_lines" | "service_type">, totalCents: number): CancellationInput => ({
+      status: m.status, pickupWindowStart: new Date(m.pickup_window_start), now, freeHours: s.freeHours, feeBp: s.feeBp, totalCents,
+      refundedCents: m.refunds.filter((r) => r.status !== "failed").reduce((sum, r) => sum + r.amount_cents, 0), lines: m.order_lines, serviceType: m.service_type,
     });
+    // A chain is cancelled only as a whole (D169): the preview sums every order, as customer_cancel_order().
+    const preview = group
+      ? groupCancellationPreview(group.members.map((m) => input(m, m.order_charges?.total_cents ?? 0)))
+      : groupCancellationPreview([input(o, charges.total_cents)]);
     cancel = { preview, ...s };
   }
   const refundTotal = o.refunds.filter((r) => r.status !== "failed").reduce((sum, r) => sum + r.amount_cents, 0);
@@ -219,7 +247,19 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
         ) : null}
 
         {o.order_porter_jobs ? <PorterJobCard job={o.order_porter_jobs} contact={o.pickup_contact_name ? `${o.pickup_contact_name} · ${o.pickup_contact_phone}` : null} notes={o.customer_notes} /> : null}
-        {o.warehouse_bookings ? <BookingCard b={o.warehouse_bookings} /> : null}
+        {o.warehouse_bookings ? <BookingCard b={o.warehouse_bookings} warehouse={warehouse} /> : null}
+
+        {group ? (
+          <OrderGroupCard
+            members={group.members.map((m) => ({
+              id: m.id, orderNumber: m.order_number, role: m.role, title: orderTitle(m),
+              statusLabel: customerStatusLabel(m.status, m.service_type), totalCents: m.order_charges?.total_cents ?? null,
+            }))}
+            currentId={o.id}
+            hrefOf={(x) => `/cliente/ordini/${x}`}
+            note={<>Un solo pagamento per tutta la prenotazione. La fattura è nell&apos;ordine {group.root.order_number}{group.root.id === o.id ? " (questo)" : ""}.</>}
+          />
+        ) : null}
 
         <Execution exec={exec} multiLeg={o.order_legs.length > 1} />
 
@@ -362,7 +402,7 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
         {paidAndOpen ? (
           <Card>
             <H2>Annullare o modificare l&apos;ordine</H2>
-            {cancel ? <div className="mt-3"><CancelPaidOrder orderId={o.id} preview={serializePreview(cancel.preview)} freeHours={cancel.freeHours} feeBp={cancel.feeBp} /></div> : null}
+            {cancel ? <div className="mt-3"><CancelPaidOrder orderId={o.id} preview={serializePreview(cancel.preview)} freeHours={cancel.freeHours} feeBp={cancel.feeBp} group={!!group} /></div> : null}
             <p className="mt-3 text-xs text-zinc-500">
               Per modificare l&apos;ordine <Link href="/contatti" className="underline">contattaci</Link> indicando il numero {o.order_number}.
             </p>
@@ -482,7 +522,7 @@ function PorterJobCard({ job, contact, notes }: { job: PorterJob; contact: strin
   );
 }
 
-function BookingCard({ b }: { b: Booking }) {
+function BookingCard({ b, warehouse }: { b: Booking; warehouse: WarehouseInfo | null }) {
   return (
     <Card>
       <H2>Deposito</H2>
@@ -491,6 +531,15 @@ function BookingCard({ b }: { b: Booking }) {
         <Row k="Periodo" v={`${formatDateOnly(b.start_date)} – ${formatDateOnly(b.end_date)} (${bookingDays(b.start_date, b.end_date)} giorni)`} />
         <Row k="Arrivo della merce" v={CUSTOMER_STORAGE_INTAKE_LABEL[b.intake] ?? b.intake} />
         <Row k="Uscita della merce" v={CUSTOMER_STORAGE_OUTBOUND_LABEL[b.outbound] ?? b.outbound} />
+        {warehouse ? (
+          <div className="sm:col-span-2">
+            <dt className="text-zinc-500">Magazzino</dt>
+            <dd className="text-zinc-900">{warehouse.name}, {warehouse.address}</dd>
+            <dd className="text-xs">
+              <a className="text-brand-700 underline" href={`https://www.google.com/maps/search/?api=1&query=${warehouse.lat},${warehouse.lng}`} target="_blank" rel="noopener noreferrer">Apri in Google Maps</a>
+            </dd>
+          </div>
+        ) : null}
       </dl>
     </Card>
   );
@@ -546,5 +595,5 @@ function Progress({ steps }: { steps: ProgressStep[] }) {
 /** Dates as ISO strings for the client component. */
 function serializePreview(p: CancellationPreview) {
   if (p.kind === "review" || p.kind === "not_allowed") return { kind: p.kind };
-  return { kind: p.kind, feeCents: p.feeCents, refundCents: p.refundCents, freeUntil: p.freeUntil.toISOString() };
+  return { kind: p.kind, feeCents: p.feeCents, refundCents: p.refundCents, freeUntil: p.freeUntil.toISOString(), basis: p.basis };
 }

@@ -73,7 +73,7 @@ export function PaymentPending() {
 }
 
 type PaidPreview =
-  | { kind: "free" | "late"; feeCents: number; refundCents: number; freeUntil: string }
+  | { kind: "free" | "late"; feeCents: number; refundCents: number; freeUntil: string; basis: "pickup" | "storage" }
   | { kind: "review" }
   | { kind: "not_allowed" };
 
@@ -84,7 +84,7 @@ const romeDateTime = (iso: string) =>
  * D33, D137: "Annulla ordine" for a paid order (free / late with the fee) or "Richiedi l'annullamento" when a
  * carrier has the job. The numbers are the preview; the database computes them again on confirmation.
  */
-export function CancelPaidOrder({ orderId, preview, freeHours, feeBp }: { orderId: string; preview: PaidPreview; freeHours: number; feeBp: number }) {
+export function CancelPaidOrder({ orderId, preview, freeHours, feeBp, group = false }: { orderId: string; preview: PaidPreview; freeHours: number; feeBp: number; group?: boolean }) {
   const [state, action, pending] = useActionState(cancelPaid, initial);
   const [confirming, setConfirming] = useState(false);
   if (preview.kind === "not_allowed") return null;
@@ -93,9 +93,16 @@ export function CancelPaidOrder({ orderId, preview, freeHours, feeBp }: { orderI
 
   const summary =
     preview.kind === "free" ? (
-      <p>Puoi annullare gratuitamente fino a <strong>{romeDateTime(preview.freeUntil)}</strong> ({freeHours} ore prima del ritiro).</p>
+      <p>
+        Puoi annullare gratuitamente fino a <strong>{romeDateTime(preview.freeUntil)}</strong>{" "}
+        {preview.basis === "storage" ? "(inizio del deposito; poi contattaci)" : `(${freeHours} ore prima del ritiro)`}.
+        {group ? " L'annullamento riguarda tutta la prenotazione: deposito e trasporti collegati." : ""}
+      </p>
     ) : preview.kind === "late" ? (
-      <p>Mancano meno di {freeHours} ore al ritiro: l&apos;annullamento costa il {percent} di trasporto, facchinaggio e imballaggio. Il deposito viene rimborsato per intero.</p>
+      <p>
+        Mancano meno di {freeHours} ore al ritiro: l&apos;annullamento costa il {percent} di trasporto, facchinaggio e imballaggio. Il deposito viene rimborsato per intero.
+        {group ? " L'annullamento riguarda tutta la prenotazione: deposito e trasporti collegati." : ""}
+      </p>
     ) : (
       <p>Il trasporto è già stato assegnato a un trasportatore: puoi chiedere l&apos;annullamento e il nostro team ti contatterà per il rimborso.</p>
     );

@@ -22,6 +22,10 @@ import { formatCents } from "@/lib/pricing/money";
 import { createClient } from "@/lib/supabase/server";
 import { advanceOrderAction, assignHandoverAction, assignJobAction, assignPortersJobAction, unassignJobAction } from "../actions";
 import { Execution } from "./execution";
+import { OrderGroupCard } from "@/components/orders/order-group-card";
+import { orderTitle } from "@/lib/orders/customer-view";
+import type { GroupMemberRow } from "@/lib/orders/order-group";
+import { loadOrderGroup } from "@/lib/orders/order-group-server";
 import { Money, type MoneyPayment, type MoneyRefund } from "./money";
 import { ADMIN_DOC_COLUMNS, AdminInvoiceTable, type AdminDoc, type DocTech } from "@/components/admin/invoice-table";
 
@@ -86,6 +90,7 @@ type OrderDetail = {
 };
 type HistoryRow = { id: number; from_status: string | null; to_status: string; source: string; changed_by: string | null; created_at: string };
 
+const PAYMENT_COLUMNS = "id, status, amount_cents, amount_received_cents, review_reason, reviewed_at, review_outcome, paid_at, created_at";
 const SELECT = [
   "id, order_number, service_type, status, created_at, payment_due_at, customer_id, paid_at, pickup_window_start, goods_description, items_count, weight_kg",
   "largest_item_length_cm, largest_item_width_cm, largest_item_height_cm, pallets_count, packing_items_count, storage_type, storage_days",
@@ -99,7 +104,7 @@ const SELECT = [
   "order_charges(total_cents, subtotal_cents, vat_cents, refunded_cents, cancellation_fee_cents)",
   "order_lines(sort_order, label_it, line_type, gross_cents)",
   "cancellation_requested_at, cancellation_reason",
-  "payments(id, status, amount_cents, amount_received_cents, review_reason, reviewed_at, review_outcome, paid_at, created_at)",
+  `payments(${PAYMENT_COLUMNS})`,
   "refunds(id, payment_id, kind, amount_cents, reason, status, stripe_refund_id, retry_of, created_at)",
   "order_cancellation_decisions(refund_cents, carrier_cents, decided_at)",
   "claims(id, status, category, created_at)",
@@ -131,6 +136,34 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
   if (!o) notFound();
 
   const type = serviceTypeOf(o.service_type);
+  // A storage chain (D153): linked orders; the payment, the invoice and the refunds hang off the first order.
+  type GroupRow = GroupMemberRow & {
+    status: string; order_charges: { total_cents: number } | null;
+    order_legs: { leg_index: number; pickup_city: string; delivery_city: string }[];
+    order_porter_jobs: { city: string } | null;
+    warehouse_bookings: { unit: string; box_code: string | null; pallets: number | null } | null;
+  };
+  const loadedGroup = await loadOrderGroup<GroupRow>(db, o.id,
+    "status, order_charges(total_cents), order_legs(leg_index, pickup_city, delivery_city), order_porter_jobs(city), warehouse_bookings(unit, box_code, pallets)");
+  const group = loadedGroup && loadedGroup.members.length > 1 ? loadedGroup : null;
+  let groupMoney: { payments: MoneyPayment[]; group: { rootNumber: string; refundableCents: number } } | null = null;
+  if (group) {
+    const payments = group.root.id === o.id
+      ? o.payments
+      : ((await db.from("payments").select(PAYMENT_COLUMNS).eq("order_id", group.root.id)).data ?? []) as MoneyPayment[];
+    const main = payments
+      .filter((p) => p.status === "succeeded" && (!p.review_reason || p.review_outcome === "accepted"))
+      .sort((a, b) => (a.paid_at ?? "").localeCompare(b.paid_at ?? ""))[0];
+    let refundableCents = 0;
+    if (main) {
+      const { data: paymentRefunds } = await db.from("refunds").select("amount_cents, status").eq("payment_id", main.id);
+      const active = (rs: { amount_cents: number; status: string }[]) => rs.filter((r) => r.status !== "failed").reduce((s, r) => s + r.amount_cents, 0);
+      const paymentLeft = (main.amount_received_cents ?? main.amount_cents) - active(paymentRefunds ?? []);
+      const orderLeft = (o.order_charges?.total_cents ?? 0) - active(o.refunds);
+      refundableCents = Math.max(0, Math.min(paymentLeft, orderLeft));
+    }
+    groupMoney = { payments, group: { rootNumber: group.root.order_number, refundableCents } };
+  }
   const legs = [...o.order_legs].sort((a, b) => a.leg_index - b.leg_index);
   const lines = [...o.order_lines].sort((a, b) => a.sort_order - b.sort_order);
   // The history with changed_by only through admin_order_status_history (D128: no session reads that column).
@@ -210,7 +243,8 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
       <Money d={{
         orderId: o.id, status: o.status, pickupWindowStart: o.pickup_window_start, totalCents: o.order_charges?.total_cents ?? 0,
         cancellationFeeCents: o.order_charges?.cancellation_fee_cents ?? null, cancellationRequestedAt: o.cancellation_requested_at,
-        cancellationReason: o.cancellation_reason, carrierAmountCents: carrierAmount, lines: o.order_lines, payments: o.payments,
+        cancellationReason: o.cancellation_reason, carrierAmountCents: carrierAmount, lines: o.order_lines, payments: groupMoney?.payments ?? o.payments,
+        group: groupMoney?.group,
         refunds: o.refunds, decision: o.order_cancellation_decisions,
         settings: { freeHours: settingsRes.data.free_cancellation_hours, feeBp: settingsRes.data.late_cancellation_fee_bp },
       }} />
@@ -230,6 +264,24 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
 
       {o.order_porter_jobs ? <PorterJobSection job={o.order_porter_jobs} /> : null}
       {o.warehouse_bookings ? <BookingSection b={o.warehouse_bookings} /> : null}
+
+      {group ? (
+        <OrderGroupCard
+          heading="Ordini collegati (deposito)"
+          members={group.members.map((m) => ({
+            id: m.id, orderNumber: m.order_number, role: m.role, title: orderTitle(m),
+            statusLabel: orderStatusLabel(m.status, m.service_type), totalCents: m.order_charges?.total_cents ?? null,
+          }))}
+          currentId={o.id}
+          hrefOf={ADMIN_ORDER_PATHS.detail}
+          note={
+            <>
+              Pagamento unico e fattura sull&apos;ordine {group.root.order_number}. I rimborsi si fanno sul singolo ordine (fino al suo importo);
+              il cliente annulla solo l&apos;intera prenotazione, finché nessun trasporto è assegnato e il deposito non è iniziato.
+            </>
+          }
+        />
+      ) : null}
 
       {legs.length || type === "transport" ? (
         <section className={section} aria-labelledby="route">
