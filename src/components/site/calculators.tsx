@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { installmentPlan } from "@/lib/pricing/installments";
 import { formatCents } from "@/lib/pricing/money";
 import type { CustomerType } from "@/lib/pricing/types";
 import { portersEstimate, STORAGE_MAX_DAYS, PALLETS_MAX, storageEstimate, type Estimate, type PublicRates } from "@/lib/public/rates";
@@ -176,17 +175,6 @@ export function StorageCalculator({ rates }: { rates: PublicRates }) {
           : ({ unit: "pallet", pallets, days } as const);
   const estimate = input ? storageEstimate(rates, input, customerType) : null;
 
-  // D155: over 2 months the customer may pay monthly — show the instalment as a hint.
-  let note: string | null = null;
-  if (estimate && typeof days === "number") {
-    const plan = installmentPlan({ netCents: estimate.netCents, vatRateBp: rates.vatRateBp, days, startDate: "2030-01-01" });
-    if (plan.ok) {
-      const first = plan.installments[0];
-      const amount = customerType === "private" ? `${formatCents(first.grossCents)}` : `${formatCents(first.netCents)} + IVA`;
-      note = `Oppure ${plan.installments.length} rate mensili da circa ${amount}.`;
-    }
-  }
-
   return (
     <div className="space-y-4">
       <CustomerToggle value={customerType} onChange={setCustomerType} idPrefix="storage" />
@@ -225,7 +213,7 @@ export function StorageCalculator({ rates }: { rates: PublicRates }) {
               ))}
             </div>
           </div>
-          <PriceBox estimate={estimate} customerType={customerType} note={note} excluded="Trasporto da e per il magazzino escluso." />
+          <PriceBox estimate={estimate} customerType={customerType} excluded="Trasporto da e per il magazzino escluso." />
           <RequestButton href={input ? storageRequestHref(input) : "#"} enabled={!!estimate && !!input} online />
         </>
       )}

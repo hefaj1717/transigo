@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { BookingServiceTabs } from "@/components/site/booking-service-tabs";
 import { Loading } from "@/components/panel-shell";
 import { getAccountContext } from "@/lib/auth/session";
 import { loadStorageOptions } from "@/lib/booking/storage/server";
@@ -15,6 +16,7 @@ export const metadata = { title: "Prenota il deposito – Transigo" };
 export default function Page({ searchParams }: PageProps<"/prenota/deposito">) {
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">
+      <BookingServiceTabs active="deposito" />
       <h1 className="text-2xl font-semibold text-zinc-900">Prenota il deposito</h1>
       <Suspense fallback={<Loading />}>
         <Content searchParams={searchParams} />

@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { BookingServiceTabs } from "@/components/site/booking-service-tabs";
 import { Loading } from "@/components/panel-shell";
 import { getAccountContext } from "@/lib/auth/session";
 import { loadBookingOptions } from "@/lib/booking/server";
@@ -13,6 +14,7 @@ export const metadata = { title: "Prenota un trasporto – Transigo" };
 export default function Page({ searchParams }: PageProps<"/prenota">) {
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">
+      <BookingServiceTabs active="trasporto" />
       <h1 className="text-2xl font-semibold text-zinc-900">Prenota un trasporto</h1>
       <Suspense fallback={<Loading />}>
         <Content searchParams={searchParams} />

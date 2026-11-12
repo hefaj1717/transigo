@@ -49,7 +49,7 @@ export const AUDIENCES = [
     points: [
       "Trasloco completo: trasporto, facchini e deposito nella stessa prenotazione",
       "Facchini a ore anche senza trasporto, per scale e mobili pesanti",
-      "Box in magazzino per giorni o mesi, con pagamento mensile oltre i 2 mesi",
+      "Box in magazzino per giorni o mesi, con un unico pagamento alla prenotazione",
       "Prezzi IVA inclusa, fattura elettronica anche ai privati",
     ],
   },
@@ -287,9 +287,9 @@ export const SERVICE_PAGES: Record<ServiceCode, ServicePageText> = {
       { title: "Transbordo", text: "Una sosta in magazzino tra ritiro e consegna, anche in giornata." },
     ],
     includes: [
-      "Periodo fisso con data di inizio e di fine, prolungabile se c'è posto",
+      "Periodo fisso con data di inizio e di fine; per prolungarlo basta scriverci",
       "Porti tu la merce o la ritiriamo noi; alla fine la ritiri tu o la consegniamo noi",
-      "Fino a 2 mesi paghi tutto alla prenotazione; oltre, anche a rate mensili",
+      "Paghi tutto alla prenotazione, con carta, e ricevi la fattura elettronica",
     ],
     pricing: [
       "Privati: dimensione del box e durata (mesi interi più i giorni restanti)",
@@ -298,9 +298,9 @@ export const SERVICE_PAGES: Record<ServiceCode, ServicePageText> = {
     ],
     faqs: [
       { q: "Che box mi serve?", a: "Per ogni box indichiamo il volume in metri cubi. Se non sei sicuro, scegli quello più grande o scrivici: ti aiutiamo a valutare." },
-      { q: "Posso prolungare il deposito?", a: "Sì, dall'area clienti, se il box o i posti pallet sono liberi anche nel nuovo periodo. Paghi solo la differenza." },
-      { q: "Come si paga un deposito lungo?", a: "Fino a 2 mesi paghi tutto alla prenotazione. Per periodi più lunghi scegli se pagare tutto subito o una rata al mese, ognuna con la sua fattura." },
-      { q: "Posso decidere dopo dove consegnare la merce?", a: "Sì: prenoti il deposito e chiedi la consegna più avanti dall'area clienti, con un trasporto pagato a parte." },
+      { q: "Posso prolungare il deposito?", a: "Sì, se il box o i posti pallet sono liberi anche nel nuovo periodo. Scrivici prima della data di fine indicando il numero dell'ordine: paghi solo i giorni in più." },
+      { q: "Come si paga il deposito?", a: "Paghi l'intero periodo alla prenotazione, con carta. Ricevi la fattura elettronica subito dopo il pagamento." },
+      { q: "Posso decidere dopo dove consegnare la merce?", a: "Sì: prenoti il deposito e quando sai dove consegnare la merce scrivici: organizziamo il trasporto, pagato a parte." },
     ],
   },
 };
