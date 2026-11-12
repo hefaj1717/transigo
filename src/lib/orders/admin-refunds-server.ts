@@ -100,7 +100,11 @@ export async function decideCancellation(deps: AdminDeps, input: Record<string, 
 // ---------------------------------------------------------------------------
 // D141 — payment_review
 // ---------------------------------------------------------------------------
-type ReviewRow = { result: "paid" | "refunded" | "already_resolved"; refund_id: string | null; refund_cents: number | null; payment_intent_id: string | null; order_id: string; order_number: string };
+type ReviewRow = {
+  result: "paid" | "refunded" | "already_resolved"; refund_id: string | null; refund_cents: number | null; payment_intent_id: string | null; order_id: string; order_number: string;
+  /** A storage chain (D153): the payment is split into one refund row per order. */
+  refund_ids?: string[] | null;
+};
 
 export async function resolvePaymentReview(deps: AdminDeps, input: Record<string, string>, io: RefundIo = stripeRefundIo(deps.serviceDb)): Promise<RefundResult> {
   const parsed = resolvePaymentReviewSchema.safeParse(input);
@@ -120,7 +124,20 @@ export async function resolvePaymentReview(deps: AdminDeps, input: Record<string
   }
 
   let status: RefundStatus = "succeeded";
-  if (data.refund_id && data.refund_cents) {
+  if (data.refund_ids && data.refund_ids.length > 1) {
+    // Amounts of every row as the database wrote them (never split here).
+    const { data: rows, error: rowsError } = await deps.serviceDb.from("refunds").select("id, order_id, amount_cents").in("id", data.refund_ids);
+    if (rowsError || !rows) {
+      log("refund rows", { paymentId, code: rowsError?.code });
+      return { ok: true, message: REFUND_MSG.reviewRefunded + stripeNote("pending") };
+    }
+    for (const id of data.refund_ids) {
+      const r = rows.find((x) => x.id === id);
+      if (!r) continue;
+      const s = await executeRefund(io, { refundId: r.id, orderId: r.order_id, paymentIntentId: data.payment_intent_id, amountCents: r.amount_cents });
+      if (s === "failed" || (s === "pending" && status !== "failed")) status = s;
+    }
+  } else if (data.refund_id && data.refund_cents) {
     status = await executeRefund(io, { refundId: data.refund_id, orderId: data.order_id, paymentIntentId: data.payment_intent_id, amountCents: data.refund_cents });
   }
   return { ok: true, message: REFUND_MSG.reviewRefunded + stripeNote(status) };

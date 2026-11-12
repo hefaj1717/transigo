@@ -27,6 +27,22 @@ describe("sessionExpiresAt", () => {
 describe("buildCheckoutSessionParams", () => {
   const p = buildCheckoutSessionParams(order, "https://app.example", now);
 
+  it("a storage chain (D153): one line for the group total, the orders in the description", () => {
+    const transport = (from: string, to: string) => ({ service: "transport" as const, pickupCity: from, deliveryCity: to, window: { start: now, end: now } });
+    const storage = { service: "storage" as const, startDate: "2026-11-20", endDate: "2026-12-31", unitLabel: "Box M" };
+    const chain = buildCheckoutSessionParams({
+      ...order, totalCents: 31_720, summary: transport("Firenze", "Prato"),
+      chain: [{ role: "intake", summary: transport("Firenze", "Prato") }, { role: "storage", summary: storage }, { role: "outbound", summary: transport("Prato", "Pisa") }],
+    }, "https://app.example", now);
+    expect(chain.line_items).toEqual([{ quantity: 1, price_data: { currency: "eur", unit_amount: 31_720, product_data: {
+      name: "Ordine TG-2026-000042 – Deposito e trasporti",
+      description: "Ritiro e trasporto al deposito: Firenze → Prato · Deposito: Deposito Box M dal 20/11/2026 al 31/12/2026 · Consegna dal deposito: Prato → Pisa",
+    } } }]);
+    // a single order is not a chain
+    const single = buildCheckoutSessionParams({ ...order, chain: [{ role: "storage", summary: storage }] }, "https://app.example", now);
+    expect(single.line_items?.[0].price_data?.product_data?.name).toBe("Ordine TG-2026-000042 – Trasporto e servizi");
+  });
+
   it("charges the order total in EUR, one line, gross", () => {
     expect(p.mode).toBe("payment");
     expect(p.line_items).toEqual([

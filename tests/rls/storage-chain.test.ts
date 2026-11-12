@@ -538,3 +538,86 @@ describe("capacity with a chain (D156)", () => {
     expect(after - before).toBe(3);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Server flow of the group (step 7b): invoice of the whole group, one order_paid e-mail, chain cancellation with
+// one Stripe refund per row and credit notes on the shared invoice. Stripe is replaced; the database is real.
+// ---------------------------------------------------------------------------
+describe("server flow of the group (7b)", () => {
+  const APP = "https://transigo.example";
+  const saved = process.env.NEXT_PUBLIC_APP_URL;
+  beforeAll(() => { process.env.NEXT_PUBLIC_APP_URL = APP; });
+  afterAll(() => {
+    if (saved === undefined) delete process.env.NEXT_PUBLIC_APP_URL;
+    else process.env.NEXT_PUBLIC_APP_URL = saved;
+  });
+
+  const einvoice = async () => {
+    const { createDemoProvider } = await import("@/lib/einvoice/demo");
+    const { einvoiceDeps } = await import("@/lib/einvoice/server");
+    const reserve = async (id: string) => (await check(service.rpc("reserve_demo_invoice_number", { p_invoice_id: id }))) as string;
+    return einvoiceDeps(service, createDemoProvider({ reserveNumber: reserve, env: {} }), APP);
+  };
+
+  it("invoice after payment: one DEMO invoice on the root, lines of every order labelled per order", async () => {
+    const { invoiceAfterPaid } = await import("@/lib/einvoice/server");
+    const { chain } = await paidChain();
+    const deps = await einvoice();
+    await invoiceAfterPaid(service, chain.id, undefined, deps);
+    const invs = await check(service.from("invoices").select("id, kind, status, order_id, total_cents").in("order_id", groupIds(chain)));
+    expect(invs).toEqual([expect.objectContaining({ kind: "invoice", status: "issued", order_id: chain.id, total_cents: groupTotal(chain) })]);
+    const snap = await deps.invoiceSnapshot(await deps.loadRow(invs[0].id));
+    expect(snap.charges.total_cents).toBe(groupTotal(chain));
+    expect(snap.lines.map((l) => l.label_it)).toEqual(["Ritiro e trasporto al deposito – Voce 0", "Deposito – Voce 0", "Consegna dal deposito – Voce 0"]);
+  });
+
+  it("order_paid: one e-mail on the root with every order and the group total; porto io shows the warehouse", async () => {
+    const { sendOrderPaidEmail } = await import("@/lib/payments/server");
+    const { chain } = await paidChain();
+    await sendOrderPaidEmail(service, roleId(chain, "outbound"));
+    await sendOrderPaidEmail(service, chain.id); // the same e-mail: nothing new
+    const mails = await check(service.from("email_outbox").select("order_id, text_body").in("order_id", groupIds(chain)).eq("template_code", "order_paid"));
+    expect(mails.map((m) => m.order_id)).toEqual([chain.id]);
+    expect(mails[0].text_body).toContain("Ritiro e trasporto al deposito: Firenze → Firenze");
+    expect(mails[0].text_body).toContain("Consegna dal deposito");
+    expect(mails[0].text_body).toContain("Totale pagato: 317,20");
+
+    const { chain: self } = await paidChain({ intake: false, outbound: false });
+    await sendOrderPaidEmail(service, self.id);
+    const [mail] = await check(service.from("email_outbox").select("text_body").eq("order_id", self.id).eq("template_code", "order_paid"));
+    expect(mail.text_body).toContain(`Magazzino: Magazzino Catena, ${WAREHOUSE_POINT.address}`);
+  });
+
+  it("customer cancellation of a chain: one Stripe refund per row, credit notes on the shared invoice, one e-mail", async () => {
+    const { cancelOrderForCustomer, cancellationDeps } = await import("@/lib/orders/cancellation-server");
+    const { invoiceAfterPaid } = await import("@/lib/einvoice/server");
+    const { chain } = await paidChain();
+    await invoiceAfterPaid(service, chain.id, undefined, await einvoice());
+
+    const tasks: (() => Promise<void>)[] = [];
+    const stripeCalls: { orderId: string; amountCents: number; refundId: string }[] = [];
+    const real = cancellationDeps(service, { appUrl: APP, adminEmail: null, defer: (f) => { tasks.push(f as () => Promise<void>); } });
+    const r = await cancelOrderForCustomer({
+      ...real,
+      createStripeRefund: async (a) => {
+        stripeCalls.push({ orderId: a.orderId, amountCents: a.amountCents, refundId: a.refundId });
+        return { id: `re_${randomUUID()}`, status: "succeeded" };
+      },
+    }, customer.id, roleId(chain, "storage"), null);
+    expect(r).toEqual({ ok: true, kind: "cancelled", feeCents: 0, refundCents: groupTotal(chain), refund: "succeeded" });
+    expect(stripeCalls.map((c) => [c.orderId, c.amountCents]).sort()).toEqual([
+      [roleId(chain, "intake"), TRANSPORT_TOTAL], [roleId(chain, "outbound"), TRANSPORT_TOTAL], [roleId(chain, "storage"), STORAGE_TOTAL],
+    ].sort());
+    for (const t of tasks) await t();
+
+    const notes = await check(service.from("invoices").select("kind, order_id, total_cents").eq("order_id", chain.id).eq("kind", "credit_note"));
+    expect(notes.length).toBe(3);
+    expect(notes.reduce((s, n) => s + n.total_cents, 0)).toBe(groupTotal(chain));
+    const charges = await check(service.from("order_charges").select("order_id, refunded_cents, total_cents").in("order_id", groupIds(chain)));
+    expect(charges.every((c) => c.refunded_cents === c.total_cents)).toBe(true);
+    const mails = await check(service.from("email_outbox").select("order_id, text_body").in("order_id", groupIds(chain)).eq("template_code", "order_cancelled"));
+    expect(mails.map((m) => m.order_id)).toEqual([chain.id]);
+    expect(mails[0].text_body).toContain("insieme a tutti i servizi collegati");
+    expect(mails[0].text_body).toContain("Rimborso: 317,20");
+  });
+});

@@ -1,4 +1,5 @@
 import { summaryRows, type OrderSummary } from "../../orders/order-summary";
+import { chainRows, type ChainPart } from "../../orders/order-group";
 import { formatCents } from "../../pricing/money";
 import { escapeHtml, type RenderedEmail } from "./common";
 
@@ -9,6 +10,10 @@ export type OrderPaidData = {
   firstName: string | null;
   orderNumber: string;
   summary: OrderSummary;
+  /** A storage chain (D153): every order of the group; totalCents is the group total. */
+  chain?: ChainPart[];
+  /** Deposito with "porto io" (D171): where to bring the goods. */
+  warehouse?: { name: string; address: string } | null;
   totalCents: number;
   customerType: "private" | "business";
   orderUrl: string;
@@ -24,8 +29,17 @@ export function renderOrderPaidEmail(d: OrderPaidData): RenderedEmail {
   const greeting = d.firstName ? `Ciao ${d.firstName},` : "Ciao,";
   const total = `${formatCents(d.totalCents)}${d.customerType === "business" ? " (IVA inclusa)" : ""}`;
   const subject = `Pagamento confermato – ordine ${d.orderNumber}`;
-  const rows: [string, string][] = [...summaryRows(d.summary), ["Totale pagato", total]];
-  const next = `${NEXT_STEP[d.summary.service]} La fattura elettronica ti arriverà tramite il Sistema di Interscambio (SDI).`;
+  const rows: [string, string][] = [
+    ...(d.chain ? chainRows(d.chain) : summaryRows(d.summary)),
+    ...(d.warehouse ? ([["Magazzino", `${d.warehouse.name}, ${d.warehouse.address}`]] as [string, string][]) : []),
+    ["Totale pagato", total],
+  ];
+  const step = d.chain?.[0]?.role === "intake"
+    ? "Ti avviseremo quando un trasportatore avrà preso in carico il ritiro della merce."
+    : d.warehouse
+      ? "Puoi portare la merce in magazzino dal primo giorno del deposito, all'indirizzo indicato sopra."
+      : NEXT_STEP[d.summary.service];
+  const next = `${step} La fattura elettronica ti arriverà tramite il Sistema di Interscambio (SDI).`;
 
   const text = [
     greeting,

@@ -1,5 +1,6 @@
 import type Stripe from "stripe";
 import { checkoutProductName, summaryLine, type OrderSummary } from "../orders/order-summary";
+import { CHAIN_ROLE_LABEL, type ChainPart } from "../orders/order-group";
 
 // Stripe Checkout session parameters (pure, tested). The amount always comes from order_charges.total_cents
 // read on the server (D89) — never from the browser.
@@ -23,9 +24,22 @@ export type CheckoutOrder = {
   orderNumber: string;
   totalCents: number;
   summary: OrderSummary; // what the order is (D151): name and description of the line
+  /** A storage chain (D153): every order of the group, root first. totalCents is then the sum of the group. */
+  chain?: ChainPart[];
   customerEmail: string;
   paymentDueAt: Date;
 };
+
+/** One Checkout line; a chain lists its orders in the description ("Ritiro e trasporto al deposito: Firenze → …"). */
+function productData(order: CheckoutOrder): { name: string; description: string } {
+  if (!order.chain || order.chain.length < 2) {
+    return { name: checkoutProductName(order.orderNumber, order.summary), description: summaryLine(order.summary) };
+  }
+  return {
+    name: `Ordine ${order.orderNumber} – Deposito e trasporti`,
+    description: order.chain.map((p) => `${CHAIN_ROLE_LABEL[p.role]}: ${summaryLine(p.summary)}`).join(" · "),
+  };
+}
 
 export function buildCheckoutSessionParams(order: CheckoutOrder, appUrl: string, now: Date): Stripe.Checkout.SessionCreateParams {
   if (!Number.isInteger(order.totalCents) || order.totalCents <= 0) throw new Error("Order total must be a positive integer (cents)");
@@ -47,10 +61,7 @@ export function buildCheckoutSessionParams(order: CheckoutOrder, appUrl: string,
         price_data: {
           currency: "eur",
           unit_amount: order.totalCents, // gross (VAT included); the e-invoice comes from SDI (Stage 6)
-          product_data: {
-            name: checkoutProductName(order.orderNumber, order.summary),
-            description: summaryLine(order.summary),
-          },
+          product_data: productData(order),
         },
       },
     ],

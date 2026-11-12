@@ -1,5 +1,6 @@
 import { formatCents } from "@/lib/pricing/money";
 import { startLabel, summaryLine, summaryRows, summaryWindow, type OrderSummary } from "@/lib/orders/order-summary";
+import { chainRows, type ChainPart } from "@/lib/orders/order-group";
 import { escapeHtml, type RenderedEmail } from "./common";
 
 // E-mails of the customer cancellation (D33, D137; plan docs/plany/panel-klienta-2.md, part A):
@@ -45,6 +46,8 @@ export type OrderCancelledData = {
   firstName: string | null;
   orderNumber: string;
   summary: OrderSummary;
+  /** A storage chain (D153, D169): cancelled as a whole; fee and refund are the sums of the group. */
+  chain?: ChainPart[];
   feeCents: number;
   refundCents: number;
   orderUrl: string;
@@ -52,13 +55,16 @@ export type OrderCancelledData = {
 
 export function renderOrderCancelledEmail(d: OrderCancelledData): RenderedEmail {
   const paragraphs = [
-    `il tuo ordine ${d.orderNumber} (${summaryLine(d.summary)}) è stato annullato.`,
+    d.chain
+      ? `il tuo ordine ${d.orderNumber} è stato annullato, insieme a tutti i servizi collegati:`
+      : `il tuo ordine ${d.orderNumber} (${summaryLine(d.summary)}) è stato annullato.`,
     d.refundCents > 0
       ? "Il rimborso viene inviato sulla carta usata per il pagamento: di solito arriva in 5–10 giorni lavorativi, a seconda della banca."
       : "Non è previsto alcun rimborso per questo ordine.",
   ];
   const rows: [string, string][] = [
     ["Ordine", d.orderNumber],
+    ...(d.chain ? chainRows(d.chain) : []),
     ...(d.feeCents > 0 ? ([["Costo di annullamento", formatCents(d.feeCents)]] as [string, string][]) : []),
     ["Rimborso", formatCents(d.refundCents)],
   ];

@@ -25,6 +25,7 @@ function deps(row: Row, error: { code?: string; details?: string } | null = null
     recordRefund: vi.fn(async (id, stripeId, status) => {
       events.push(`record:${id}:${stripeId}:${status}`);
     }),
+    loadRefunds: vi.fn(async (ids: string[]) => ids.map((id, i) => ({ id, order_id: `order-${i}`, amount_cents: 1_000 * (i + 1) }))),
     notify: vi.fn((kind) => {
       events.push(`notify:${kind}`);
     }),
@@ -98,6 +99,27 @@ describe("cancelOrderForCustomer", () => {
       const { d, events } = deps(null, error);
       expect(await cancelOrderForCustomer(d, CUSTOMER, ORDER, null)).toEqual({ ok: false, message });
       expect(events).toEqual([]);
+    }
+  });
+
+  it("a storage chain (D169): one Stripe refund per row with the database amounts; the worst outcome is shown", async () => {
+    const row = { ...cancelledRow(0, 3_000, "r1")!, refund_ids: ["r1", "r2"] };
+    const { d, events } = deps(row, null, {
+      createStripeRefund: vi.fn(async (a) => {
+        events.push(`stripe:${a.orderId}:${a.amountCents}:${a.refundId}`);
+        return { id: `re_${a.refundId}`, status: a.refundId === "r2" ? "pending" : "succeeded" };
+      }),
+    });
+    const r = await cancelOrderForCustomer(d, CUSTOMER, ORDER, null);
+    expect(r).toEqual({ ok: true, kind: "cancelled", feeCents: 0, refundCents: 3_000, refund: "pending" });
+    expect(d.loadRefunds).toHaveBeenCalledWith(["r1", "r2"]);
+    expect(events).toEqual(["stripe:order-0:1000:r1", "record:r1:re_r1:succeeded", "stripe:order-1:2000:r2", "record:r2:re_r2:pending", "notify:cancelled"]);
+  });
+
+  it("chain refusals: a carrier on a transport, storage already started", async () => {
+    for (const [details, message] of [["group_in_progress", CANCEL_MSG.groupInProgress], ["storage_started", CANCEL_MSG.storageStarted]] as const) {
+      const { d } = deps(null, { code: "55000", details });
+      expect(await cancelOrderForCustomer(d, CUSTOMER, ORDER, null)).toEqual({ ok: false, message });
     }
   });
 });

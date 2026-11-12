@@ -105,6 +105,21 @@ describe("resolvePaymentReview", () => {
     expect(events[0]).toContain(`"p_admin_id":"${ADMIN}"`);
   });
 
+  it("a storage chain (D153): one Stripe refund per row the database wrote, with its amount and order", async () => {
+    const { deps, io, events } = setup({ result: "refunded", refund_id: "r1", refund_cents: 19_520, payment_intent_id: "pi_3", order_id: ORDER, order_number: "TG-1", refund_ids: ["r1", "r2"] });
+    const rows = [{ id: "r2", order_id: "o2", amount_cents: 7_320 }, { id: "r1", order_id: "o1", amount_cents: 12_200 }];
+    const inFn = vi.fn(async () => ({ data: rows, error: null }));
+    (deps.serviceDb as unknown as { from: unknown }).from = vi.fn(() => ({ select: () => ({ in: inFn }) }));
+    expect(await resolvePaymentReview(deps, { paymentId: PAYMENT, action: "refund" }, io)).toEqual({ ok: true, message: REFUND_MSG.reviewRefunded });
+    expect(events.slice(1)).toEqual(["stripe:r1:pi_3:12200", "record:r1:re_1:succeeded", "stripe:r2:pi_3:7320", "record:r2:re_1:succeeded"]);
+  });
+
+  it("overpaid chain → a clear message, nothing sent to Stripe", async () => {
+    const { deps, io } = setup(null, { code: "55000", details: "overpaid_chain" });
+    expect(await resolvePaymentReview(deps, { paymentId: PAYMENT, action: "refund" }, io)).toEqual({ ok: false, error: REFUND_MSG.overpaidChain });
+    expect(io.createStripeRefund).not.toHaveBeenCalled();
+  });
+
   it("an unknown action never reaches the database", async () => {
     const { deps, io, events } = setup(null);
     expect((await resolvePaymentReview(deps, { paymentId: PAYMENT, action: "accept" }, io)).ok).toBe(false);

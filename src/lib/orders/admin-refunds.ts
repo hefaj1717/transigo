@@ -58,6 +58,7 @@ export const REFUND_MSG = {
   noPayment: "L'ordine non ha un pagamento valido.",
   inProgress: "Corsa in corso: per il rimborso totale rimuovi prima il padroncino (oppure fai un rimborso parziale).",
   alreadySucceeded: "Il rimborso è già riuscito.",
+  overpaidChain: "Il pagamento supera il totale del deposito e dei trasporti collegati: rimborsa la differenza direttamente in Stripe.",
   notFound: "Elemento non trovato.",
   generic: "Operazione non riuscita. Riprova.",
 } as const;
@@ -88,6 +89,8 @@ export function refundDbError(e: DbError): string {
       return REFUND_MSG.inProgress;
     case "already_succeeded":
       return REFUND_MSG.alreadySucceeded;
+    case "overpaid_chain":
+      return REFUND_MSG.overpaidChain;
     case "order":
     case "refund":
       return REFUND_MSG.notFound;

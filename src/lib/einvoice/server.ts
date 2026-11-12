@@ -21,6 +21,8 @@ import {
   type InvoiceRow,
 } from "./flow";
 import type { EInvoiceProvider } from "./provider";
+import { mergeGroupForInvoice, type GroupMemberRow } from "../orders/order-group";
+import { loadOrderGroup } from "../orders/order-group-server";
 
 // Real dependencies of the document flow (./flow.ts). `db` is the service-role client — called only by the Stripe
 // webhook, by server code after an admin / customer action checked in the session, and by the cron.
@@ -42,6 +44,18 @@ export function einvoiceDeps(db: SupabaseClient, provider: EInvoiceProvider = ge
     if (b.first_name || b.last_name) return o.order_charges;
     const { data: profile } = await db.from("profiles").select("first_name, last_name").eq("id", o.customer_id).maybeSingle();
     return { ...o.order_charges, billing_details: withProfileName(b, profile) };
+  };
+  /**
+   * The invoice is on the root of a storage chain (D153): charges = sum of the group, lines of every order (the same
+   * sums as queue_invoice()). A single order is its own group.
+   */
+  const groupSnapshot = async (orderId: string, withLines: boolean): Promise<OrderSnapshotRow> => {
+    const lines = withLines ? ", order_lines(sort_order, label_it, quantity, net_cents, vat_cents, gross_cents)" : "";
+    const group = await loadOrderGroup<GroupMemberRow & Omit<OrderSnapshotRow, "order_number">>(
+      db, orderId, `customer_id, order_charges(customer_type, vat_rate_bp, subtotal_cents, vat_cents, total_cents, billing_details)${lines}`);
+    if (!group) throw new Error("order: not found");
+    const merged = mergeGroupForInvoice(group.members);
+    return { order_number: group.root.order_number, customer_id: group.root.customer_id, order_charges: merged.charges, order_lines: merged.lines };
   };
   return {
     provider,
@@ -74,13 +88,12 @@ export function einvoiceDeps(db: SupabaseClient, provider: EInvoiceProvider = ge
     },
     loadRow: (invoiceId) => must(db.from("invoices").select(ROW_COLUMNS).eq("id", invoiceId).single<InvoiceRow>(), "invoice"),
     invoiceSnapshot: async (row) => {
-      const o = await must(db.from("orders").select("order_number, customer_id, order_charges(customer_type, vat_rate_bp, subtotal_cents, vat_cents, total_cents, billing_details), order_lines(sort_order, label_it, quantity, net_cents, vat_cents, gross_cents)").eq("id", row.order_id).single(), "order");
+      const order = await groupSnapshot(row.order_id, true);
       const pay = await must(db.from("payments").select("paid_at").eq("id", row.payment_id).single(), "payment");
-      const order = o as unknown as OrderSnapshotRow;
       return { invoiceId: row.id, orderNumber: order.order_number, charges: await chargesWithName(order), lines: order.order_lines, paidAt: new Date(pay.paid_at as string) };
     },
     creditNoteSnapshot: async (row) => {
-      const o = (await must(db.from("orders").select("order_number, customer_id, order_charges(customer_type, vat_rate_bp, subtotal_cents, vat_cents, total_cents, billing_details)").eq("id", row.order_id).single(), "order")) as unknown as OrderSnapshotRow;
+      const o = await groupSnapshot(row.order_id, false);
       const inv = await must(db.from("invoices").select("number, issued_at, total_cents, status").eq("id", row.invoice_id!).single(), "invoice of the note");
       const refund = await must(db.from("refunds").select("updated_at").eq("id", row.refund_id!).single(), "refund");
       return {

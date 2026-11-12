@@ -8,30 +8,29 @@ import { getAppUrl } from "@/lib/supabase/env";
 import { invoiceAfterPaid } from "@/lib/einvoice/server";
 import { recordRefundResult } from "@/lib/orders/refund-record";
 import { ORDER_SUMMARY_SELECT, toOrderSummary, type OrderSummaryRow } from "@/lib/orders/order-summary";
+import { chainParts, groupTotalCents, type GroupMemberRow } from "@/lib/orders/order-group";
+import { loadOrderGroup, type LoadedGroup } from "@/lib/orders/order-group-server";
 import { buildCheckoutSessionParams } from "./checkout-params";
 import { handlePaidSession, type ConfirmResult, type WebhookDeps } from "./webhook";
 
 // Server side of the customer payment (Stage 3). `db` is always the service-role client; every function that
 // acts for a customer takes the customer id from the verified session (Server Action) and checks ownership.
 
-type OrderForPayment = OrderSummaryRow & {
-  id: string;
-  order_number: string;
+type OrderForPayment = OrderSummaryRow & GroupMemberRow & {
   customer_id: string;
   status: string;
   payment_due_at: string;
   order_charges: { total_cents: number } | null;
 };
 
-async function loadOrder(db: SupabaseClient, orderId: string): Promise<OrderForPayment | null> {
-  const { data, error } = await db
-    .from("orders")
-    .select(`id, order_number, customer_id, status, payment_due_at, order_charges(total_cents), ${ORDER_SUMMARY_SELECT}`)
-    .eq("id", orderId)
-    .maybeSingle<OrderForPayment>();
-  if (error) throw new Error(`load order: ${error.message}`);
-  return data;
+/**
+ * The order to pay and its group (D153): a storage chain is paid once, on its first order (the root), for the sum
+ * of the group. Any order of the group leads to the root.
+ */
+async function loadPayableGroup(db: SupabaseClient, orderId: string): Promise<LoadedGroup<OrderForPayment> | null> {
+  return loadOrderGroup<OrderForPayment>(db, orderId, `customer_id, status, payment_due_at, order_charges(total_cents), ${ORDER_SUMMARY_SELECT}`);
 }
+
 
 async function openPayment(db: SupabaseClient, orderId: string) {
   const { data, error } = await db.from("payments").select("id, stripe_checkout_session_id").eq("order_id", orderId).eq("status", "pending").maybeSingle();
@@ -53,8 +52,10 @@ const GENERIC = "Non è stato possibile avviare il pagamento. Riprova tra qualch
  */
 export async function startCheckout(db: SupabaseClient, customer: { id: string; email: string }, orderId: string, now = new Date()): Promise<CheckoutStart> {
   const stripe = getStripe();
-  const order = await loadOrder(db, orderId);
-  if (!order || order.customer_id !== customer.id) return { kind: "not_payable", message: NOT_YOURS };
+  const group = await loadPayableGroup(db, orderId);
+  if (!group || group.root.customer_id !== customer.id) return { kind: "not_payable", message: NOT_YOURS };
+  const order = group.root;
+  orderId = order.id;
   if (order.status !== "pending_payment") return { kind: "not_payable", message: "Questo ordine non è in attesa di pagamento." };
   if (now >= new Date(order.payment_due_at)) return { kind: "not_payable", message: "Il tempo per il pagamento è scaduto. Prenota di nuovo per ricevere un nuovo preventivo." };
   if (!order.order_charges) throw new Error("order without charges");
@@ -71,8 +72,9 @@ export async function startCheckout(db: SupabaseClient, customer: { id: string; 
     {
       id: order.id,
       orderNumber: order.order_number,
-      totalCents: order.order_charges.total_cents,
+      totalCents: groupTotalCents(group.members),
       summary: toOrderSummary(order),
+      chain: chainParts(group.members),
       customerEmail: customer.email,
       paymentDueAt: new Date(order.payment_due_at),
     },
@@ -85,7 +87,7 @@ export async function startCheckout(db: SupabaseClient, customer: { id: string; 
   const { error } = await db.rpc("start_order_payment", {
     p_order_id: orderId,
     p_session_id: session.id,
-    p_amount_cents: order.order_charges.total_cents,
+    p_amount_cents: groupTotalCents(group.members),
     p_expires_at: new Date((session.expires_at ?? 0) * 1000).toISOString(),
   });
   if (error) {
@@ -104,8 +106,10 @@ export type CancelResult = { ok: true } | { ok: false; message: string };
 
 /** D92: the customer cancels an unpaid order. The open session is closed in Stripe first, so it cannot be paid. */
 export async function cancelUnpaidOrder(db: SupabaseClient, customerId: string, orderId: string): Promise<CancelResult> {
-  const order = await loadOrder(db, orderId);
-  if (!order || order.customer_id !== customerId) return { ok: false, message: NOT_YOURS };
+  const group = await loadPayableGroup(db, orderId);
+  if (!group || group.root.customer_id !== customerId) return { ok: false, message: NOT_YOURS };
+  const order = group.root; // the session and the expiry belong to the root (the whole group expires, D153)
+  orderId = order.id;
   if (order.status !== "pending_payment") return { ok: false, message: "Questo ordine non può più essere annullato qui." };
 
   const open = await openPayment(db, orderId);
@@ -193,24 +197,39 @@ export function webhookDeps(db: SupabaseClient, defer?: Defer): WebhookDeps {
   };
 }
 
-/** Confirmation e-mail after payment (D93). Idempotent: one e-mail per order (email_outbox unique key). */
+type PaidEmailRow = OrderSummaryRow & GroupMemberRow & {
+  customer_id: string;
+  order_charges: { total_cents: number; customer_type: "private" | "business" } | null;
+};
+
+/**
+ * Confirmation e-mail after payment (D93). Idempotent: one e-mail per order (email_outbox unique key). A storage
+ * chain gets ONE e-mail on its root: every order of the group and the group total (D153). "Porto io": the warehouse
+ * address (D171; read with the service role — the customer reads it through customer_order_warehouse()).
+ */
 export async function sendOrderPaidEmail(db: SupabaseClient, orderId: string, opts: SendOptions = {}): Promise<void> {
-  const { data: o, error } = await db
-    .from("orders")
-    .select(`id, order_number, customer_id, order_charges(total_cents, customer_type), ${ORDER_SUMMARY_SELECT}`)
-    .eq("id", orderId)
-    .single();
-  if (error || !o) throw new Error(`order for e-mail: ${error?.message ?? "not found"}`);
+  const group = await loadOrderGroup<PaidEmailRow>(db, orderId, `customer_id, order_charges(total_cents, customer_type), ${ORDER_SUMMARY_SELECT}`);
+  if (!group) throw new Error("order for e-mail: not found");
+  const o = group.root;
   const { data: profile } = await db.from("profiles").select("email, first_name").eq("id", o.customer_id).single();
   if (!profile?.email) throw new Error("customer e-mail not found");
 
-  const charges = o.order_charges as unknown as { total_cents: number; customer_type: "private" | "business" };
+  const storage = group.members.find((m) => m.service_type === "storage");
+  let warehouse: { name: string; address: string } | null = null;
+  if (storage) {
+    const { data: b } = await db.from("warehouse_bookings").select("intake, warehouses(name, address)").eq("order_id", storage.id).maybeSingle();
+    const w = (b as unknown as { intake: string; warehouses: { name: string; address: string } | null } | null);
+    if (w?.intake === "self" && w.warehouses) warehouse = w.warehouses;
+  }
+
   const rendered = renderOrderPaidEmail({
     firstName: profile.first_name,
     orderNumber: o.order_number,
-    summary: toOrderSummary(o as OrderSummaryRow),
-    totalCents: charges.total_cents,
-    customerType: charges.customer_type,
+    summary: toOrderSummary(o),
+    chain: chainParts(group.members),
+    warehouse,
+    totalCents: groupTotalCents(group.members),
+    customerType: o.order_charges!.customer_type,
     orderUrl: `${getAppUrl()}/cliente/ordini/${o.id}`,
   });
   await sendEmail(db, { ...rendered, templateCode: "order_paid", to: profile.email, recipientId: o.customer_id, orderId: o.id }, opts);
