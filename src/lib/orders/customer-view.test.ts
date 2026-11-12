@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CUSTOMER_STATUS_LABEL, orderGroup, orderTitle, progressSteps, routeSummary, statusTone } from "./customer-view";
+import { CUSTOMER_STATUS_LABEL, customerListEntries, orderGroup, orderTitle, progressSteps, routeSummary, statusTone } from "./customer-view";
 import { ORDER_STATUS_LABEL } from "./status";
 
 const base = { paid_at: "2026-11-09T08:00:00Z", assigned_at: null, picked_up_at: null, in_transit_at: null, delivered_at: null };
@@ -72,5 +72,42 @@ describe("orderTitle (D151)", () => {
   it("never crashes without the job or the booking", () => {
     expect(orderTitle({ service_type: "porters", order_legs: [], order_porter_jobs: null })).toBe("Facchinaggio");
     expect(orderTitle({ service_type: "storage", order_legs: [] })).toBe("Deposito");
+  });
+});
+
+describe("customerListEntries", () => {
+  const row = (id: string, o: Partial<import("./customer-view").ListRow> = {}) => ({
+    id, order_number: `TG-${id}`, service_type: "transport", parent_order_id: null, status: "paid",
+    created_at: "2026-11-12T10:00:00Z", pickup_window_start: "2026-11-20T09:00:00Z",
+    order_charges: { total_cents: 1000, refunded_cents: 0 }, ...o,
+  });
+
+  it("a chain is one entry: root first, storage, then the delivery; totals summed", () => {
+    const rows = [
+      row("out", { parent_order_id: "in", pickup_window_start: "2026-12-30T09:00:00Z", order_charges: { total_cents: 300, refunded_cents: 0 } }),
+      row("st", { parent_order_id: "in", service_type: "storage", order_charges: { total_cents: 200, refunded_cents: 50 } }),
+      row("in", { pickup_window_start: "2026-11-15T09:00:00Z" }),
+      row("solo"),
+    ];
+    const entries = customerListEntries(rows);
+    expect(entries).toHaveLength(2);
+    const chain = entries.find((e) => e.root.id === "in")!;
+    expect(chain.members.map((m) => [m.id, m.role])).toEqual([["in", "intake"], ["st", "storage"], ["out", "outbound"]]);
+    expect(chain.totalCents).toBe(1500);
+    expect(chain.refundedCents).toBe(50);
+    expect(chain.startsAt).toBe("2026-11-15T09:00:00Z");
+    expect(entries.find((e) => e.root.id === "solo")!.members.map((m) => m.role)).toEqual([null]);
+  });
+
+  it("the group stays 'In corso' until every order is finished", () => {
+    const rows = [row("in", { status: "delivered" }), row("st", { parent_order_id: "in", service_type: "storage" })];
+    expect(customerListEntries(rows)[0].tab).toBe("active");
+    expect(customerListEntries(rows.map((r) => ({ ...r, status: "delivered" })))[0].tab).toBe("finished");
+  });
+
+  it("a child without its root among the rows is shown on its own; missing charges → no total", () => {
+    const [e] = customerListEntries([row("x", { parent_order_id: "missing", order_charges: null })]);
+    expect(e.root.id).toBe("x");
+    expect(e.totalCents).toBeNull();
   });
 });

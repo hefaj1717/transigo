@@ -1,4 +1,5 @@
 // How the customer panel presents an order (spec 7). Pure — tested in customer-view.test.ts.
+import { orderGroup as groupMembers, type GroupMember } from "./order-group";
 import { bookingUnitLabel, SERVICE_TYPE_LABEL, serviceTypeOf } from "./service-type";
 import { ORDER_STATUS_LABEL, orderStatusLabel } from "./status";
 
@@ -124,4 +125,58 @@ export function orderTitle(o: {
   if (type === "porters") return o.order_porter_jobs ? `${SERVICE_TYPE_LABEL.porters} · ${o.order_porter_jobs.city}` : SERVICE_TYPE_LABEL.porters;
   if (type === "storage") return o.warehouse_bookings ? `${SERVICE_TYPE_LABEL.storage} · ${bookingUnitLabel(o.warehouse_bookings)}` : SERVICE_TYPE_LABEL.storage;
   return routeSummary(o.order_legs);
+}
+
+// ---------------------------------------------------------------------------
+// "I miei ordini" (step 9 of docs/plany/tre-servizi.md): a storage chain (D153) is one card
+// ---------------------------------------------------------------------------
+
+export type ListRow = {
+  id: string;
+  order_number: string;
+  service_type?: string | null;
+  parent_order_id: string | null;
+  status: string;
+  created_at: string;
+  pickup_window_start: string;
+  order_charges: { total_cents: number; refunded_cents: number } | null;
+};
+
+export type ListEntry<T extends ListRow> = {
+  /** The order that carries the payment (the chain root, or the order itself). */
+  root: GroupMember<T>;
+  /** Chain order; one element for an order that is not part of a chain. */
+  members: GroupMember<T>[];
+  /** "In corso" while any order of the group still has something to happen (D169: the group is one booking). */
+  tab: "active" | "finished";
+  /** Sum of the group (one payment on the root). */
+  totalCents: number | null;
+  refundedCents: number;
+  /** Earliest pickup of the group — the list order. */
+  startsAt: string;
+};
+
+/**
+ * Groups the customer's orders: every chain becomes one entry with its members in chain order; other orders stay
+ * one per entry. A child whose root is not among the rows (should not happen — the customer reads their whole
+ * group) is shown on its own rather than hidden.
+ */
+export function customerListEntries<T extends ListRow>(rows: T[]): ListEntry<T>[] {
+  const byRoot = new Map<string, T[]>();
+  for (const r of rows) {
+    const key = r.parent_order_id && rows.some((x) => x.id === r.parent_order_id) ? r.parent_order_id : r.id;
+    byRoot.set(key, [...(byRoot.get(key) ?? []), r]);
+  }
+  return [...byRoot.values()].map((group) => {
+    const { root, members } = groupMembers(group.map((r) => (r.parent_order_id && group.length === 1 ? { ...r, parent_order_id: null } : r)));
+    const charges = members.map((m) => m.order_charges);
+    return {
+      root,
+      members,
+      tab: members.some((m) => orderGroup(m.status) === "active") ? "active" : "finished",
+      totalCents: charges.every(Boolean) ? charges.reduce((s, c) => s + c!.total_cents, 0) : null,
+      refundedCents: charges.reduce((s, c) => s + (c?.refunded_cents ?? 0), 0),
+      startsAt: members.map((m) => m.pickup_window_start).sort()[0],
+    };
+  });
 }

@@ -3,7 +3,8 @@ import Link from "next/link";
 import { Card, CustomerShell, StatusBadge } from "@/components/cliente/customer-shell";
 import { Loading } from "@/components/panel-shell";
 import { requireArea } from "@/lib/auth/session";
-import { orderGroup, orderTitle } from "@/lib/orders/customer-view";
+import { customerListEntries, orderTitle } from "@/lib/orders/customer-view";
+import { CHAIN_ROLE_LABEL } from "@/lib/orders/order-group";
 import { formatDateOnly, serviceTypeOf } from "@/lib/orders/service-type";
 import { PAYMENT_STATE_LABEL, paymentState } from "@/lib/orders/status";
 import { formatCents } from "@/lib/pricing/money";
@@ -27,6 +28,7 @@ type OrderRow = {
   id: string;
   order_number: string;
   service_type: string;
+  parent_order_id: string | null;
   status: string;
   pickup_window_start: string;
   created_at: string;
@@ -52,16 +54,17 @@ async function Content({ searchParams }: Pick<PageProps<"/cliente">, "searchPara
   const supabase = await createClient();
   const { data: orders, error } = await supabase
     .from("orders")
-    .select("id, order_number, service_type, status, pickup_window_start, created_at, payment_due_at, paid_at, order_charges(total_cents, refunded_cents), order_legs(leg_index, pickup_city, delivery_city, pickup_window_end), order_porter_jobs(city, window_end), warehouse_bookings(unit, box_code, pallets, start_date, end_date)")
+    .select("id, order_number, service_type, parent_order_id, status, pickup_window_start, created_at, payment_due_at, paid_at, order_charges(total_cents, refunded_cents), order_legs(leg_index, pickup_city, delivery_city, pickup_window_end), order_porter_jobs(city, window_end), warehouse_bookings(unit, box_code, pallets, start_date, end_date)")
     .order("pickup_window_start", { ascending: false })
     .limit(200)
     .returns<OrderRow[]>();
 
-  const all = orders ?? [];
-  const counts = { active: all.filter((o) => orderGroup(o.status) === "active").length, finished: all.filter((o) => orderGroup(o.status) === "finished").length };
+  // A storage chain (D153) is one card: one booking, one payment on its first order.
+  const all = customerListEntries(orders ?? []).sort((a, b) => b.startsAt.localeCompare(a.startsAt));
+  const counts = { active: all.filter((e) => e.tab === "active").length, finished: all.filter((e) => e.tab === "finished").length };
   // Default tab: "In corso", unless there is nothing in progress but there are finished orders.
   const tab = TABS.find((t) => t.key === sp.stato) ?? (counts.active === 0 && counts.finished > 0 ? TABS[1] : TABS[0]);
-  const shown = all.filter((o) => orderGroup(o.status) === tab.group);
+  const shown = all.filter((e) => e.tab === tab.group);
   // In progress: soonest pickup first.
   if (tab.group === "active") shown.reverse();
   const now = new Date();
@@ -92,8 +95,11 @@ async function Content({ searchParams }: Pick<PageProps<"/cliente">, "searchPara
       ) : null}
 
       <ul className="space-y-3">
-        {shown.map((o) => {
-          const pay = paymentState({ ...o, refunded_cents: o.order_charges?.refunded_cents, total_cents: o.order_charges?.total_cents }, now);
+        {shown.map((entry) => {
+          const o = entry.root;
+          const chain = entry.members.length > 1 ? entry.members : null;
+          const storage = entry.members.find((m) => serviceTypeOf(m.service_type) === "storage");
+          const pay = paymentState({ ...o, refunded_cents: entry.refundedCents, total_cents: entry.totalCents }, now);
           const firstLeg = [...o.order_legs].sort((a, b) => a.leg_index - b.leg_index)[0];
           const type = serviceTypeOf(o.service_type);
           const windowEnd = firstLeg?.pickup_window_end ?? o.order_porter_jobs?.window_end;
@@ -103,10 +109,12 @@ async function Content({ searchParams }: Pick<PageProps<"/cliente">, "searchPara
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <Link href={`/cliente/ordini/${o.id}`} className="text-lg font-semibold text-brand-900 hover:underline">
-                      {orderTitle(o)}
+                      {chain && storage ? `${orderTitle(storage)} con trasporto` : orderTitle(o)}
                     </Link>
                     <p className="mt-1 text-sm text-zinc-600">
-                      {type === "storage" && o.warehouse_bookings ? (
+                      {chain && storage?.warehouse_bookings ? (
+                        <>Dal {formatDateOnly(storage.warehouse_bookings.start_date)} al {formatDateOnly(storage.warehouse_bookings.end_date)}</>
+                      ) : type === "storage" && o.warehouse_bookings ? (
                         <>Dal {formatDateOnly(o.warehouse_bookings.start_date)} al {formatDateOnly(o.warehouse_bookings.end_date)}</>
                       ) : (
                         <>
@@ -115,14 +123,24 @@ async function Content({ searchParams }: Pick<PageProps<"/cliente">, "searchPara
                         </>
                       )}
                     </p>
-                    <p className="mt-1 text-xs text-zinc-500">Ordine {o.order_number}</p>
+                    <p className="mt-1 text-xs text-zinc-500">{chain ? `Ordini ${chain.map((m) => m.order_number).join(" → ")}` : `Ordine ${o.order_number}`}</p>
                   </div>
                   <div className="text-right">
-                    <StatusBadge status={o.status} serviceType={o.service_type} />
-                    <p className="mt-2 font-semibold text-zinc-900">{o.order_charges ? formatCents(o.order_charges.total_cents) : "—"}</p>
+                    {chain ? null : <StatusBadge status={o.status} serviceType={o.service_type} />}
+                    <p className="mt-2 font-semibold text-zinc-900">{entry.totalCents !== null ? formatCents(entry.totalCents) : "—"}</p>
                     {pay !== "paid" ? <p className="text-xs text-zinc-500">{PAYMENT_STATE_LABEL[pay]}</p> : null}
                   </div>
                 </div>
+                {chain ? (
+                  <ul className="mt-3 divide-y divide-zinc-100 rounded-md border border-zinc-100 text-sm">
+                    {chain.map((m) => (
+                      <li key={m.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                        <span className="text-zinc-700">{m.role ? CHAIN_ROLE_LABEL[m.role] : orderTitle(m)}</span>
+                        <StatusBadge status={m.status} serviceType={m.service_type} />
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
                 <div className="mt-4 flex flex-wrap items-center gap-3">
                   <Link href={`/cliente/ordini/${o.id}`} className="text-sm font-medium text-brand-700 hover:text-brand-900">Dettagli →</Link>
                   {pay === "to_pay" ? <PayNowButton orderId={o.id} compact /> : null}
