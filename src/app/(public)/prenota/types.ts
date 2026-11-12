@@ -23,9 +23,8 @@ export type QuoteResponse =
 export const STEPS: { id: BookingStep; label: string }[] = [
   { id: "percorso", label: "Percorso" },
   { id: "data", label: "Data e ora" },
-  { id: "merce", label: "Merce e facchinaggio" },
+  { id: "merce", label: "Merce" },
   { id: "veicolo", label: "Veicolo" },
-  { id: "servizi", label: "Servizi extra" },
   { id: "preventivo", label: "Preventivo" },
   { id: "account", label: "Account" },
   { id: "contatti", label: "Contatti" },

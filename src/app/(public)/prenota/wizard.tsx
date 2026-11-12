@@ -1,21 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { formatCents } from "@/lib/pricing/money";
 import { isOutOfArea, type BookingStep } from "@/lib/booking/messages";
 import type { BookingOptions } from "@/lib/booking/server";
-import { EMPTY_WIZARD_STATE, parseStoredState, WIZARD_STORAGE_KEY, type PlaceChoice, type WizardState } from "@/lib/booking/state";
-import { addDaysIso, romeToday, TIME_WINDOW_LABEL, TIME_WINDOWS, type TimeWindow } from "@/lib/booking/windows";
+import { EMPTY_WIZARD_STATE, LOADING_HELP_PACKAGE, parseStoredState, transportOnly, WIZARD_STORAGE_KEY, type PlaceChoice, type WizardState } from "@/lib/booking/state";
+import { romeToday, TIME_WINDOW_LABEL, TIME_WINDOWS, type TimeWindow } from "@/lib/booking/windows";
 import { loadCheckoutDefaults, submitBooking } from "./actions";
 import { AccountStep } from "@/components/booking/account-step";
 import { BillingFields, EMPTY_BILLING, TermsCheckbox, type Billing } from "@/components/booking/billing-fields";
-import { accountStepError } from "@/lib/booking/session";
+import { accountStepError, initialWizardStep, wizardSteps } from "@/lib/booking/session";
 import { AddressField } from "@/components/address-field";
 import { ContactForm } from "@/components/contact-form";
 import { sendOutOfAreaAction } from "./out-of-area-actions";
-import { Headline, PorterPicker, QuoteBreakdown } from "./quote-view";
-import { STEPS, stepIndex, type QuoteResponse, type WizardSession } from "./types";
+import { Headline, QuoteBreakdown } from "./quote-view";
+import { STEPS, type QuoteResponse, type WizardSession } from "./types";
 
 const input = "mt-1 block w-full rounded-md border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:ring-2 focus:ring-blue-500";
 const label = "block text-sm font-medium text-zinc-800";
@@ -23,7 +23,6 @@ const label = "block text-sm font-medium text-zinc-800";
 type Contacts = { pickupName: string; pickupPhone: string; deliveryName: string; deliveryPhone: string; notes: string };
 const EMPTY_CONTACTS: Contacts = { pickupName: "", pickupPhone: "", deliveryName: "", deliveryPhone: "", notes: "" };
 
-const isStep = (s: string | null): s is BookingStep => !!s && STEPS.some((x) => x.id === s);
 const intOrNull = (v: string) => (v.trim() === "" ? null : Math.max(0, Math.trunc(Number(v))) || null);
 
 async function fetchQuote(state: WizardState, probe = false): Promise<QuoteResponse> {
@@ -63,6 +62,8 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
   const [created, setCreated] = useState<{ id: string; number: string; paymentError: string | null } | null>(null);
   const [submitting, startSubmit] = useTransition();
   const quoteSeq = useRef(0);
+  const steps = useMemo(() => wizardSteps(STEPS, session), [session]);
+  const stepIndex = useCallback((id: BookingStep) => steps.findIndex((s) => s.id === id), [steps]);
 
   // Restore after mount (localStorage is not available during server rendering).
   useEffect(() => {
@@ -72,13 +73,15 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
     } catch {
       /* storage blocked: start empty */
     }
+    const start = initialWizardStep(initialStep, session, "contatti");
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time restore from localStorage after hydration
-    if (restored) setState(restored);
-    if (restored && isStep(initialStep)) {
-      setStep(initialStep);
-      setMaxStep(stepIndex(initialStep));
+    if (restored) setState(transportOnly(restored));
+    if (restored && start && stepIndex(start as BookingStep) >= 0) {
+      setStep(start as BookingStep);
+      setMaxStep(stepIndex(start as BookingStep));
     }
     setLoaded(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restore once; the session does not change on this page
   }, [initialStep]);
 
   useEffect(() => {
@@ -111,7 +114,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
     if (!loaded || !canQuote(state) || stepIndex(step) < stepIndex("data") || created) return;
     const t = setTimeout(() => void runQuote(state), 500);
     return () => clearTimeout(t);
-  }, [state, step, loaded, runQuote, created]);
+  }, [state, step, loaded, runQuote, created, stepIndex]);
 
   // Prefill billing data from the account (D36) when reaching "Riepilogo".
   useEffect(() => {
@@ -124,7 +127,6 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
 
   const display = quote?.ok ? (quote.selected?.quote.display ?? (quote.customerType === "business" ? "net_plus_vat" : "gross")) : session.kind === "customer" ? (session.customerType === "business" ? "net_plus_vat" : "gross") : state.customerTypeView === "business" ? "net_plus_vat" : "gross";
   const selected = quote?.ok ? quote.selected : null;
-  const portersTerms = (leg: number) => (quote?.ok ? (quote.porters.find((p) => p.legIndex === leg) ?? quote.porters[0]) : undefined);
 
   // --- navigation ------------------------------------------------------------------------------------------
   const go = (to: BookingStep) => {
@@ -148,7 +150,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
   async function next() {
     setStepError(null);
     const i = stepIndex(step);
-    const nextStep = STEPS[i + 1]?.id;
+    const nextStep = steps[i + 1]?.id;
     let error: string | null = null;
     switch (step) {
       case "percorso":
@@ -171,10 +173,6 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
         else if (!r.selected) error = "Il veicolo scelto non è disponibile. Scegline un altro.";
         break;
       }
-      case "servizi":
-        if (state.storage && options.storage.billingUnit === "pallet_day" && !state.storage.pallets) error = "Indica il numero di pallet.";
-        else error = await blockingError(false);
-        break;
       case "preventivo":
         if (!selected) error = "Il preventivo non è ancora pronto.";
         break;
@@ -262,7 +260,8 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
     );
   }
 
-  const storageOn = !!state.storage;
+  const helpPackage = options.porterPackages.find((p) => p.code === LOADING_HELP_PACKAGE) ?? null;
+  const helpPersons = state.portersPickup ? (state.portersPickup.count ?? helpPackage?.persons ?? 1) : 0;
   const minDate = romeToday();
   const fe = (k: string) => fieldErrors[k];
 
@@ -270,7 +269,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
     <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_18rem]">
       <div>
         <ol className="mb-6 flex flex-wrap gap-2 text-xs" aria-label="Passaggi">
-          {STEPS.map((s, i) => (
+          {steps.map((s, i) => (
             <li key={s.id}>
               <button
                 type="button"
@@ -286,7 +285,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
         </ol>
 
         <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-4 text-lg font-semibold text-zinc-900">{STEPS[stepIndex(step)].label}</h2>
+          <h2 className="mb-4 text-lg font-semibold text-zinc-900">{steps[stepIndex(step)]?.label}</h2>
 
           {step === "percorso" ? (
             <div className="space-y-6">
@@ -316,6 +315,27 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
                   </div>
                 );
               })}
+              {helpPackage ? (
+                <fieldset className="rounded-md border border-zinc-200 p-4">
+                  <legend className="px-1 text-sm font-medium text-zinc-800">Aiuto per carico e scarico</legend>
+                  <div className="flex flex-wrap gap-2">
+                    {[0, ...Array.from({ length: 4 - helpPackage.persons + 1 }, (_, i) => helpPackage.persons + i)].map((n) => (
+                      <label key={n} className={`flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm ${helpPersons === n ? "border-blue-600 bg-blue-50" : "border-zinc-300"}`}>
+                        <input
+                          type="radio"
+                          name="loading-help"
+                          checked={helpPersons === n}
+                          onChange={() => update({ portersPickup: n === 0 ? null : { packageCode: helpPackage.code, count: n === helpPackage.persons ? undefined : n } })}
+                        />
+                        {n === 0 ? "Nessun aiuto" : `${n} ${n === 1 ? "persona" : "persone"}`}
+                      </label>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-xs text-zinc-500">
+                    Le persone aiutano a caricare al ritiro e a scaricare alla consegna. Nel prezzo {helpPackage.includedHours} h di lavoro; il tempo di viaggio non conta.
+                  </p>
+                </fieldset>
+              ) : null}
               <p className="text-xs text-zinc-500">Il ritiro deve essere in una provincia servita; la consegna può essere ovunque in Italia entro {options.maxDistanceKm} km di percorso.</p>
             </div>
           ) : null}
@@ -337,12 +357,8 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
                   </select>
                 </div>
               </div>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={state.urgent} onChange={(e) => update({ urgent: e.target.checked })} />
-                Urgente
-              </label>
               <p className="text-xs text-zinc-500">
-                Prenota almeno {options.minLeadHours} ore prima del ritiro. I supplementi per ritiro urgente (entro 24 ore), nel fine settimana o nei giorni festivi vengono calcolati automaticamente.
+                Prenota almeno {options.minLeadHours} ore prima del ritiro. Se il ritiro è entro 24 ore, nel fine settimana o in un giorno festivo, il supplemento si applica automaticamente.
               </p>
             </div>
           ) : null}
@@ -360,9 +376,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
                   value={state.goods.loadCategory ?? ""}
                   onChange={(e) => {
                     const cat = (e.target.value || null) as WizardState["goods"]["loadCategory"];
-                    // D83: the category suggests the porter category on the legs that already have porters.
-                    const follow = (p: WizardState["portersPickup"]) => (p && cat && options.porterPackages.some((x) => x.code === cat) ? { packageCode: cat } : p);
-                    update({ goods: { ...state.goods, loadCategory: cat }, portersPickup: follow(state.portersPickup), portersDelivery: follow(state.portersDelivery) });
+                    update({ goods: { ...state.goods, loadCategory: cat } });
                   }}
                   className={`${input} sm:w-80`}
                 >
@@ -389,9 +403,9 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
               </div>
               <fieldset>
                 <legend className={label}>Oggetto più grande (cm)</legend>
-                <div className="mt-1 flex flex-wrap items-center gap-2">
+                <div className="mt-1 flex items-center gap-2">
                   {(["lengthCm", "widthCm", "heightCm"] as const).map((k, i) => (
-                    <span key={k} className="flex items-center gap-2">
+                    <span key={k} className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
                       {i > 0 ? <span className="text-zinc-400">×</span> : null}
                       <input
                         id={`item-${k}`}
@@ -400,7 +414,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
                         inputMode="numeric"
                         value={state.goods.largestItem[k] ?? ""}
                         onChange={(e) => update({ goods: { ...state.goods, largestItem: { ...state.goods.largestItem, [k]: Math.min(2000, intOrNull(e.target.value) ?? 0) || null } } })}
-                        className={`${input} mt-0 w-24`}
+                        className={`${input} mt-0 w-full min-w-0 sm:w-24`}
                       />
                     </span>
                   ))}
@@ -411,32 +425,6 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
                 <label htmlFor="goods-dims" className={label}>Altre note sulla merce</label>
                 <input id="goods-dims" maxLength={500} value={state.goods.dimensionsNote} onChange={(e) => update({ goods: { ...state.goods, dimensionsNote: e.target.value } })} className={input} placeholder="Es. lavatrice, oggetti fragili" />
               </div>
-              {options.porterPackages.length ? (
-                <div className="space-y-3">
-                  <PorterPicker
-                    id="porters-pickup"
-                    title={storageOn ? "Facchinaggio al ritiro (tratta 1: ritiro → deposito)" : "Facchinaggio"}
-                    value={state.portersPickup}
-                    onChange={(v) => update({ portersPickup: v })}
-                    options={options.porterPackages}
-                    terms={portersTerms(0)}
-                    display={display}
-                  />
-                  {storageOn ? (
-                    <PorterPicker
-                      id="porters-delivery"
-                      title="Facchinaggio alla consegna (tratta 2: deposito → consegna)"
-                      value={state.portersDelivery}
-                      onChange={(v) => update({ portersDelivery: v })}
-                      options={options.porterPackages}
-                      terms={portersTerms(1)}
-                      display={display}
-                    />
-                  ) : null}
-                </div>
-              ) : (
-                <p className="text-sm text-zinc-500">Il servizio di facchinaggio non è disponibile al momento.</p>
-              )}
             </div>
           ) : null}
 
@@ -489,73 +477,6 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
             </div>
           ) : null}
 
-          {step === "servizi" ? (
-            <div className="space-y-6">
-              {options.packingAvailable ? (
-                <div>
-                  <label htmlFor="packing" className={label}>Imballaggio: numero di colli da imballare</label>
-                  <input id="packing" inputMode="numeric" value={state.packingItems || ""} placeholder="0 = senza imballaggio" onChange={(e) => update({ packingItems: Math.min(500, intOrNull(e.target.value) ?? 0) })} className={`${input} w-48`} />
-                </div>
-              ) : null}
-
-              {options.storage.available ? (
-                <fieldset className="rounded-md border border-zinc-200 p-4">
-                  <legend className="px-1 text-sm font-medium text-zinc-800">Deposito merci{options.storage.warehouseCity ? ` (magazzino di ${options.storage.warehouseCity})` : ""}</legend>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={storageOn}
-                      onChange={(e) =>
-                        update({ storage: e.target.checked ? { returnDate: state.pickupDate ?? minDate, returnWindow: "14-16", pallets: options.storage.billingUnit === "pallet_day" ? (state.goods.palletsCount ?? 1) : null } : null })
-                      }
-                    />
-                    Porta la merce nel nostro deposito e consegnala più tardi
-                  </label>
-                  {state.storage ? (
-                    <div className="mt-4 space-y-4">
-                      <p className="text-xs text-zinc-500">L&apos;ordine avrà due tratte: ritiro → deposito e deposito → consegna. Stesso giorno = trasbordo. Deposito fino a {options.storage.maxDays} giorni.</p>
-                      <div className="flex flex-wrap gap-4">
-                        <div>
-                          <label htmlFor="return-date" className={label}>Ritiro dal deposito il</label>
-                          <input id="return-date" type="date" min={state.pickupDate ?? minDate} max={addDaysIso(state.pickupDate ?? minDate, options.storage.maxDays)} value={state.storage.returnDate} onChange={(e) => update({ storage: { ...state.storage!, returnDate: e.target.value || state.storage!.returnDate } })} className={`${input} w-48`} />
-                        </div>
-                        <div>
-                          <label htmlFor="return-window" className={label}>Fascia oraria</label>
-                          <select id="return-window" value={state.storage.returnWindow} onChange={(e) => update({ storage: { ...state.storage!, returnWindow: e.target.value as TimeWindow } })} className={`${input} w-48`}>
-                            {TIME_WINDOWS.map((w) => (
-                              <option key={w} value={w}>{TIME_WINDOW_LABEL[w]}</option>
-                            ))}
-                          </select>
-                        </div>
-                        {options.storage.billingUnit === "pallet_day" ? (
-                          <div>
-                            <label htmlFor="pallets" className={label}>Numero di pallet</label>
-                            <input id="pallets" inputMode="numeric" value={state.storage.pallets ?? ""} onChange={(e) => update({ storage: { ...state.storage!, pallets: Math.min(100, intOrNull(e.target.value) ?? 0) || null } })} className={`${input} w-32`} />
-                          </div>
-                        ) : null}
-                      </div>
-                      {options.porterPackages.length ? (
-                        <>
-                          <p className="text-sm text-zinc-700">Facchini al ritiro: scegli nel passaggio «Merce e facchinaggio».</p>
-                          <PorterPicker
-                            id="porters-delivery-services"
-                            title="Facchinaggio alla consegna (tratta 2: deposito → consegna)"
-                            value={state.portersDelivery}
-                            onChange={(v) => update({ portersDelivery: v })}
-                            options={options.porterPackages}
-                            terms={portersTerms(1)}
-                            display={display}
-                          />
-                        </>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </fieldset>
-              ) : null}
-              {!options.packingAvailable && !options.storage.available ? <p className="text-sm text-zinc-500">Nessun servizio aggiuntivo disponibile al momento.</p> : null}
-            </div>
-          ) : null}
-
           {step === "preventivo" ? (
             <div className="space-y-4">
               {session.kind === "customer" ? null : (
@@ -578,7 +499,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
                     const rate = p.overtimeRateNetCents == null ? null : selected.quote.display === "gross" ? formatCents(p.overtimeRateGrossCents ?? 0) : `${formatCents(p.overtimeRateNetCents)} + IVA`;
                     return (
                       <p key={p.legIndex} className="text-sm text-zinc-700">
-                        {selected.quote.porters.length > 1 || storageOn ? `Tratta ${p.legIndex + 1}: ` : ""}Facchinaggio — nel prezzo {p.includedHours} h di lavoro
+                        Aiuto per carico e scarico — nel prezzo {p.includedHours} h di lavoro
                         {rate ? `; ogni ora successiva iniziata ${rate} a persona.` : "."}
                       </p>
                     );
@@ -622,12 +543,6 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
               <dl className="grid gap-2 text-sm sm:grid-cols-[10rem_1fr]">
                 <dt className="text-zinc-500">Ritiro</dt>
                 <dd>{state.pickup?.label} · {state.pickupDate} {state.pickupWindow ? TIME_WINDOW_LABEL[state.pickupWindow] : ""}</dd>
-                {state.storage ? (
-                  <>
-                    <dt className="text-zinc-500">Deposito</dt>
-                    <dd>fino al {state.storage.returnDate}, ritiro dal deposito {TIME_WINDOW_LABEL[state.storage.returnWindow]}</dd>
-                  </>
-                ) : null}
                 <dt className="text-zinc-500">Consegna</dt>
                 <dd>{state.delivery?.label}</dd>
                 <dt className="text-zinc-500">Merce</dt>
@@ -661,7 +576,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
           ) : null}
 
           <div className="mt-6 flex justify-between gap-3">
-            <button type="button" disabled={step === "percorso"} onClick={() => go(STEPS[stepIndex(step) - 1].id)} className="rounded-md border border-zinc-300 px-4 py-2 text-sm hover:bg-zinc-50 disabled:invisible">
+            <button type="button" disabled={step === "percorso"} onClick={() => go(steps[stepIndex(step) - 1].id)} className="rounded-md border border-zinc-300 px-4 py-2 text-sm hover:bg-zinc-50 disabled:invisible">
               Indietro
             </button>
             {step === "riepilogo" ? (

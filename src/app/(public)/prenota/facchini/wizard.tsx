@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { AccountStep } from "@/components/booking/account-step";
 import { BillingFields, EMPTY_BILLING, TermsCheckbox, type Billing } from "@/components/booking/billing-fields";
 import { AddressField } from "@/components/address-field";
@@ -16,7 +16,7 @@ import {
   type PortersState,
 } from "@/lib/booking/porters/state";
 import type { PublicQuote } from "@/lib/booking/public-quote";
-import { accountStepError, type WizardSession } from "@/lib/booking/session";
+import { accountStepError, initialWizardStep, wizardSteps, type WizardSession } from "@/lib/booking/session";
 import { romeToday, TIME_WINDOW_LABEL, TIME_WINDOWS, type TimeWindow } from "@/lib/booking/windows";
 import { formatCents } from "@/lib/pricing/money";
 import { PORTERS_MAX_HOURS, PORTERS_MAX_PERSONS } from "@/lib/pricing/porters-service";
@@ -43,8 +43,6 @@ const STEPS: { id: PortersStep; label: string }[] = [
   { id: "contatti", label: "Contatti" },
   { id: "riepilogo", label: "Riepilogo" },
 ];
-const stepIndex = (id: PortersStep) => STEPS.findIndex((s) => s.id === id);
-const isStep = (s: string | null): s is PortersStep => !!s && STEPS.some((x) => x.id === s);
 
 type QuoteResponse =
   | { ok: true; customerType: "private" | "business"; quoteId: string; validUntil: string; quote: PublicQuote; job: PublicPortersJob; city: string }
@@ -84,6 +82,8 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
   const [submitting, startSubmit] = useTransition();
   const quoteSeq = useRef(0);
   const prefillPlace = useRef({ floor: prefill.floor, hasElevator: prefill.hasElevator });
+  const steps = useMemo(() => wizardSteps(STEPS, session), [session]);
+  const stepIndex = useCallback((id: PortersStep) => steps.findIndex((s) => s.id === id), [steps]);
 
   // Restore after mount; values from the calculator link win over the stored team and hours (D162).
   useEffect(() => {
@@ -97,11 +97,13 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
     const persons = Math.max(prefill.persons ?? base.persons, options.minPersons);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time restore from localStorage after hydration
     setState({ ...base, persons, hours: prefill.hours ?? base.hours });
-    if (restored && isStep(initialStep)) {
-      setStep(initialStep);
-      setMaxStep(stepIndex(initialStep));
+    const start = initialWizardStep(initialStep, session, "contatti") as PortersStep | null;
+    if (restored && start && stepIndex(start) >= 0) {
+      setStep(start);
+      setMaxStep(stepIndex(start));
     }
     setLoaded(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restore once; the session does not change on this page
   }, [initialStep, prefill.persons, prefill.hours, options.minPersons]);
 
   useEffect(() => {
@@ -133,7 +135,7 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
     if (!loaded || !canQuote(state) || stepIndex(step) < stepIndex("data") || created) return;
     const t = setTimeout(() => void runQuote(state), 500);
     return () => clearTimeout(t);
-  }, [state, step, loaded, runQuote, created]);
+  }, [state, step, loaded, runQuote, created, stepIndex]);
 
   useEffect(() => {
     if (step !== "riepilogo" || billingLoaded || session.kind !== "customer") return;
@@ -195,7 +197,7 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
       setStepError(error);
       return;
     }
-    const nextStep = STEPS[stepIndex(step) + 1]?.id;
+    const nextStep = steps[stepIndex(step) + 1]?.id;
     if (nextStep) go(nextStep);
   }
 
@@ -264,7 +266,7 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
     <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_18rem]">
       <div>
         <ol className="mb-6 flex flex-wrap gap-2 text-xs" aria-label="Passaggi">
-          {STEPS.map((s, i) => (
+          {steps.map((s, i) => (
             <li key={s.id}>
               <button
                 type="button"
@@ -280,7 +282,7 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
         </ol>
 
         <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-4 text-lg font-semibold text-zinc-900">{STEPS[stepIndex(step)].label}</h2>
+          <h2 className="mb-4 text-lg font-semibold text-zinc-900">{steps[stepIndex(step)]?.label}</h2>
 
           {step === "indirizzo" ? (
             <div className="space-y-3">
@@ -466,7 +468,7 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
           ) : null}
 
           <div className="mt-6 flex justify-between gap-3">
-            <button type="button" disabled={step === "indirizzo"} onClick={() => go(STEPS[stepIndex(step) - 1].id)} className="rounded-md border border-zinc-300 px-4 py-2 text-sm hover:bg-zinc-50 disabled:invisible">
+            <button type="button" disabled={step === "indirizzo"} onClick={() => go(steps[stepIndex(step) - 1].id)} className="rounded-md border border-zinc-300 px-4 py-2 text-sm hover:bg-zinc-50 disabled:invisible">
               Indietro
             </button>
             {step === "riepilogo" ? (

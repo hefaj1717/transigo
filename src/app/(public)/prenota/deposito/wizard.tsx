@@ -21,7 +21,7 @@ import {
   type StoragePrefill,
   type StorageState,
 } from "@/lib/booking/storage/state";
-import { accountStepError, type WizardSession } from "@/lib/booking/session";
+import { accountStepError, initialWizardStep, wizardSteps, type WizardSession } from "@/lib/booking/session";
 import { romeToday, TIME_WINDOW_LABEL, TIME_WINDOWS, type TimeWindow } from "@/lib/booking/windows";
 import { formatCents } from "@/lib/pricing/money";
 import { loadCheckoutDefaults } from "../actions";
@@ -99,7 +99,7 @@ export function StorageWizard({ options, session, initialStep, prefill }: { opti
   const customerType = session.kind === "customer" ? session.customerType : state.customerTypeView;
   const isPrivate = customerType === "private";
   const withTransport = state.intake === "transigo" || state.outbound === "transigo";
-  const steps = useMemo(() => ALL_STEPS.filter((s) => s.id !== "facchini" || (withTransport && options.porterPackages.length > 0)), [withTransport, options.porterPackages.length]);
+  const steps = useMemo(() => wizardSteps(ALL_STEPS, session).filter((s) => s.id !== "facchini" || (withTransport && options.porterPackages.length > 0)), [withTransport, options.porterPackages.length, session]);
   const stepIndex = useCallback((id: StorageStep) => {
     const i = steps.findIndex((s) => s.id === id);
     return i >= 0 ? i : ALL_STEPS.findIndex((s) => s.id === id);
@@ -119,11 +119,13 @@ export function StorageWizard({ options, session, initialStep, prefill }: { opti
     if (prefill.days && base.startDate) base = { ...base, endDate: endDateFor(base.startDate, prefill.days) };
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time restore from localStorage after hydration
     setState(base);
-    if (restored && initialStep && ALL_STEPS.some((s) => s.id === initialStep)) {
-      setStep(initialStep as StorageStep);
-      setMaxStep(ALL_STEPS.findIndex((s) => s.id === initialStep));
+    const start = initialWizardStep(initialStep, session, "contatti");
+    if (restored && start && ALL_STEPS.some((s) => s.id === start)) {
+      setStep(start as StorageStep);
+      setMaxStep(ALL_STEPS.findIndex((s) => s.id === start));
     }
     setLoaded(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restore once; the session does not change on this page
   }, [initialStep, prefill.boxCode, prefill.pallets, prefill.days]);
 
   useEffect(() => {

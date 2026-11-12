@@ -87,6 +87,17 @@ export const EMPTY_WIZARD_STATE: WizardState = {
   storage: null,
 };
 
+/**
+ * The transport wizard offers neither storage (Deposito has its own wizard, D153) nor packing, and urgency is
+ * derived from the pickup date (D49) — a state saved by an older version of the wizard is brought in line.
+ */
+export function transportOnly(s: WizardState): WizardState {
+  return { ...s, urgent: false, storage: null, portersDelivery: null, packingItems: 0 };
+}
+
+/** Help with loading and unloading = the "parcels" porter package (1 h included) with the chosen persons. */
+export const LOADING_HELP_PACKAGE = "parcels" as const;
+
 /** Parses a stored state; anything invalid or from an older version is dropped. */
 export function parseStoredState(raw: string | null): WizardState | null {
   if (!raw) return null;

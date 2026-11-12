@@ -2,7 +2,7 @@
 import type { PricingError } from "../pricing/types";
 import type { PlanError } from "./build";
 
-export type BookingStep = "percorso" | "data" | "merce" | "veicolo" | "servizi" | "preventivo" | "account" | "contatti" | "riepilogo";
+export type BookingStep = "percorso" | "data" | "merce" | "veicolo" | "preventivo" | "account" | "contatti" | "riepilogo";
 
 export type BookingError =
   | PricingError
@@ -80,12 +80,13 @@ export function bookingErrorStep(e: BookingError): BookingStep {
     case "vehicle_not_priced":
       return "veicolo";
     case "service_unavailable":
-      return e.service === "porters" ? "merce" : "servizi";
+      return e.service === "porters" ? "percorso" : "preventivo";
+    // Storage and packing are no longer offered in the transport wizard (Deposito has its own wizard, D153).
     case "storage_unavailable":
     case "return_before_pickup":
     case "return_window_too_early":
     case "storage_too_long":
-      return "servizi";
+      return "preventivo";
     case "invalid_input":
     case "pricing_unavailable":
       return "preventivo";

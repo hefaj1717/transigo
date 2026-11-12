@@ -32,3 +32,15 @@ export function accountStepError(session: WizardSession): string | null {
       return "Il tuo account è sospeso.";
   }
 }
+
+/**
+ * Steps a wizard shows: the "Account" step only while the visitor is not a customer who may book (a signed-in
+ * customer has nothing to do there). A link back to "?passo=account" (after sign-in) then lands on `afterAccount`.
+ */
+export function wizardSteps<T extends { id: string }>(steps: readonly T[], session: WizardSession): T[] {
+  return session.kind === "customer" ? steps.filter((s) => s.id !== "account") : [...steps];
+}
+
+export function initialWizardStep(initialStep: string | null, session: WizardSession, afterAccount: string): string | null {
+  return initialStep === "account" && session.kind === "customer" ? afterAccount : initialStep;
+}
