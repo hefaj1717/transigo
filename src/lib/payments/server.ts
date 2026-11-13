@@ -10,7 +10,9 @@ import { recordRefundResult } from "@/lib/orders/refund-record";
 import { ORDER_SUMMARY_SELECT, toOrderSummary, type OrderSummaryRow } from "@/lib/orders/order-summary";
 import { chainParts, groupTotalCents, type GroupMemberRow } from "@/lib/orders/order-group";
 import { loadOrderGroup, type LoadedGroup } from "@/lib/orders/order-group-server";
+import { headers } from "next/headers";
 import { buildCheckoutSessionParams } from "./checkout-params";
+import { checkoutReturnBase } from "./return-url";
 import { handlePaidSession, type ConfirmResult, type WebhookDeps } from "./webhook";
 
 // Server side of the customer payment (Stage 3). `db` is always the service-role client; every function that
@@ -36,6 +38,17 @@ async function openPayment(db: SupabaseClient, orderId: string) {
   const { data, error } = await db.from("payments").select("id, stripe_checkout_session_id").eq("order_id", orderId).eq("status", "pending").maybeSingle();
   if (error) throw new Error(`load payment: ${error.message}`);
   return data as { id: string; stripe_checkout_session_id: string } | null;
+}
+
+/** The origin the customer is paying from (their session cookie lives there), else the configured app URL. */
+async function returnBase(): Promise<string> {
+  const fallback = getAppUrl();
+  try {
+    const h = await headers();
+    return checkoutReturnBase({ host: h.get("x-forwarded-host") ?? h.get("host"), proto: h.get("x-forwarded-proto") }, fallback);
+  } catch {
+    return fallback; // outside a request (scripts, tests)
+  }
 }
 
 export type CheckoutStart =
@@ -78,7 +91,7 @@ export async function startCheckout(db: SupabaseClient, customer: { id: string; 
       customerEmail: customer.email,
       paymentDueAt: new Date(order.payment_due_at),
     },
-    getAppUrl(),
+    await returnBase(),
     now,
   );
   const { count } = await db.from("payments").select("id", { count: "exact", head: true }).eq("order_id", orderId);
