@@ -235,6 +235,7 @@ Stan:
   - Pamiętać:
     - Każda strona/akcja zależna od sesji sprawdza dostęp przez DAL (`requireArea()` / `getAccountContext()` z `src/lib/auth/session.ts`) wewnątrz `<Suspense>`; layout i proxy nie wystarczą (proxy tylko przekierowuje niezalogowanych).
     - `getAccountContext()` woła `connection()` (inaczej błąd „Date.now() while prerendering” przy `partialPrefetching`); nie cache'ujemy kontekstu (`use cache: private`), żeby blokada konta działała od razu.
+    - Sesja (proxy i DAL) przez `auth.getClaims()` — lokalna weryfikacja tokenu, bez zapytania do Supabase Auth (D184); nie wracać do `getUser()` w ścieżce każdego żądania.
     - Zablokowany użytkownik nie czyta własnego profilu przez RLS — DAL czyta profil klientem service role (`src/lib/supabase/service.ts`, tylko po id z sesji).
     - Rejestracja: wiersz `customers`/`carriers` i zgody zapisuje serwer; przy błędzie konto auth jest usuwane (rollback).
     - Klient prywatny nie ma CF po rejestracji — przed utworzeniem Checkout (Etap 3) serwer musi wymagać CF i adresu z „Riepilogo” (D43).
