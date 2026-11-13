@@ -10,6 +10,7 @@ import { romeToday, TIME_WINDOW_LABEL, TIME_WINDOWS, type TimeWindow } from "@/l
 import { loadCheckoutDefaults, submitBooking } from "./actions";
 import { createQuoteMemo, keepQuoteResult } from "@/lib/booking/quote-memo";
 import { AccountStep } from "@/components/booking/account-step";
+import { useScrollTopOnStep } from "@/components/booking/use-step-scroll";
 import { BillingFields, EMPTY_BILLING, TermsCheckbox, type Billing } from "@/components/booking/billing-fields";
 import { accountStepError, initialWizardStep, wizardSteps } from "@/lib/booking/session";
 import { AddressField } from "@/components/address-field";
@@ -60,6 +61,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
   const [state, setState] = useState<WizardState>(EMPTY_WIZARD_STATE);
   const [loaded, setLoaded] = useState(false);
   const [step, setStep] = useState<BookingStep>("percorso");
+  const requestScrollTop = useScrollTopOnStep(step);
   const [maxStep, setMaxStep] = useState(0);
   const [contacts, setContacts] = useState<Contacts>(EMPTY_CONTACTS);
   const [billing, setBilling] = useState<Billing>(EMPTY_BILLING);
@@ -167,7 +169,9 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
     setStepError(null);
     setNotice(null);
     setOutOfArea(false);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    // Same step (e.g. an error sent back here): scroll now; otherwise after the new step has rendered.
+    if (to === step) window.scrollTo({ top: 0, behavior: "instant" });
+    else requestScrollTop();
   };
 
   /** Server check for the current step: errors that belong to this step or an earlier one block "Avanti". */

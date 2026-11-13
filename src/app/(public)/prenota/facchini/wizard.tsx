@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { AccountStep } from "@/components/booking/account-step";
+import { useScrollTopOnStep } from "@/components/booking/use-step-scroll";
 import { BillingFields, EMPTY_BILLING, TermsCheckbox, type Billing } from "@/components/booking/billing-fields";
 import { AddressField } from "@/components/address-field";
 import { isPortersOutOfArea, type PortersError, type PortersStep, type PublicPortersJob } from "@/lib/booking/porters/messages";
@@ -66,6 +67,7 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
   const [state, setState] = useState<PortersState>(EMPTY_PORTERS_STATE);
   const [loaded, setLoaded] = useState(false);
   const [step, setStep] = useState<PortersStep>("indirizzo");
+  const requestScrollTop = useScrollTopOnStep(step);
   const [maxStep, setMaxStep] = useState(0);
   const [contacts, setContacts] = useState<Contacts>(EMPTY_CONTACTS);
   const [billing, setBilling] = useState<Billing>(EMPTY_BILLING);
@@ -169,7 +171,9 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
     setStepError(null);
     setNotice(null);
     setOutOfArea(false);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    // Same step (e.g. an error sent back here): scroll now; otherwise after the new step has rendered.
+    if (to === step) window.scrollTo({ top: 0, behavior: "instant" });
+    else requestScrollTop();
   };
 
   /** Server check: errors of this step or an earlier one block "Avanti". */
