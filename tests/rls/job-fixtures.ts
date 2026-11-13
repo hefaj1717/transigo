@@ -78,6 +78,8 @@ export type OrderOpts = {
   item?: [number, number, number] | null;
   pallets?: number | null;
   storage?: boolean;
+  /** Overrides of leg 0 (e.g. loading / unloading help instead of the package porters, D182). */
+  leg0?: Record<string, unknown>;
 };
 
 function window(hoursAhead: number, extraHours = 0) {
@@ -120,7 +122,7 @@ function payload(o: OrderOpts) {
     delivery_contact_name: "Lucia Bianchi", delivery_contact_phone: "+393337654321",
     customer_notes: "Citofono Rossi, scala B",
     storage: null as Record<string, unknown> | null,
-    legs: [leg(0, hours)],
+    legs: [leg(0, hours, o.leg0)],
     charges: {
       price_list_id: priceList.id, price_list_version: priceList.version, customer_type: "private", vat_rate_bp: 2200,
       subtotal_cents: 16_000, vat_cents: 3_520, total_cents: 19_520, porter_overtime_rate_cents: 3_500,

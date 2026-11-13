@@ -117,9 +117,9 @@ describe("what the list shows (D119): no personal data before accepting", () => 
     ]);
     expect(Object.keys(job.legs[0]).sort()).toEqual([
       "carrier_amount_cents", "delivery_city", "delivery_floor", "delivery_has_elevator", "delivery_is_warehouse", "delivery_province",
-      "distance_m", "duration_s", "is_urgent", "leg_index", "pickup_city", "pickup_date", "pickup_floor", "pickup_has_elevator",
-      "pickup_is_warehouse", "pickup_province", "pickup_window_end", "pickup_window_start", "porter_package_code", "porters_count",
-      "porters_included_hours",
+      "distance_m", "duration_s", "is_urgent", "leg_index", "loading_hours", "loading_porters", "pickup_city", "pickup_date", "pickup_floor",
+      "pickup_has_elevator", "pickup_is_warehouse", "pickup_province", "pickup_window_end", "pickup_window_start", "porter_package_code",
+      "porters_count", "porters_included_hours", "unloading_hours", "unloading_porters",
     ]);
     expect(job).toMatchObject({ carrier_amount_cents: 11_800, transport_carrier_cents: 7_000, porters_carrier_cents: 4_800, weight_kg: 120, pallets_count: 2 });
     expect(job.legs[0]).toMatchObject({ pickup_city: "Milano", delivery_city: "Torino", distance_m: 143_122, duration_s: 5_400 });
