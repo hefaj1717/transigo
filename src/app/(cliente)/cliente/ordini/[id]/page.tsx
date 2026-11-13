@@ -605,11 +605,18 @@ function Note({ tone, children }: { tone: keyof typeof NOTE_TONE; children: Reac
 
 function Progress({ steps }: { steps: ProgressStep[] }) {
   return (
-    <ol className="mt-5 grid grid-cols-5 gap-1" aria-label="Avanzamento dell'ordine">
+    // One column per step (porters have 4). Columns are narrow on phones: min-w-0 lets a column shrink below
+    // its longest word, and long words ("Trasportatore") are hyphenated (lang="it") instead of overflowing
+    // into the next step; break-words is the fallback where hyphenation is unavailable.
+    <ol
+      className="mt-5 grid gap-2"
+      style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}
+      aria-label="Avanzamento dell'ordine"
+    >
       {steps.map((s) => (
-        <li key={s.key} className="flex flex-col gap-1.5" aria-current={s.state === "current" ? "step" : undefined}>
+        <li key={s.key} className="flex min-w-0 flex-col gap-1.5" aria-current={s.state === "current" ? "step" : undefined}>
           <span className={`h-1.5 rounded-full ${s.state === "done" ? "bg-accent-500" : s.state === "current" ? "bg-brand-600" : "bg-zinc-200"}`} />
-          <span className={`text-[11px] leading-tight sm:text-xs ${s.state === "todo" ? "text-zinc-400" : "font-medium text-zinc-800"}`}>{s.label}</span>
+          <span className={`hyphens-auto break-words text-[11px] leading-tight sm:text-xs ${s.state === "todo" ? "text-zinc-400" : "font-medium text-zinc-800"}`}>{s.label}</span>
           {s.at ? <span className="hidden text-[11px] text-zinc-500 sm:block">{rome(s.at, { day: "numeric", month: "short" })}, {time(s.at)}</span> : null}
         </li>
       ))}
