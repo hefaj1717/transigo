@@ -32,11 +32,9 @@ const input = "mt-1 block w-full rounded-md border border-zinc-300 px-3 py-2 tex
 const label = "block text-sm font-medium text-zinc-800";
 
 const STEPS: { id: PortersStep; label: string }[] = [
-  { id: "indirizzo", label: "Indirizzo" },
-  { id: "data", label: "Data e fascia" },
-  { id: "facchini", label: "Facchini" },
-  { id: "ore", label: "Ore stimate" },
-  { id: "piano", label: "Piano e ascensore" },
+  // Owner feedback 2026-11-13: fewer steps — address with floor and lift, date with team and hours.
+  { id: "indirizzo", label: "Indirizzo e piano" },
+  { id: "data", label: "Data, facchini e ore" },
   { id: "cosa", label: "Cosa spostare" },
   { id: "preventivo", label: "Preventivo" },
   { id: "account", label: "Account" },
@@ -177,11 +175,6 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
       case "data":
         error = state.date && state.window ? await blockingError(false) : "Scegli la data e la fascia oraria.";
         break;
-      case "facchini":
-      case "ore":
-      case "piano":
-        error = await blockingError(false);
-        break;
       case "cosa":
         error = state.description.trim() ? await blockingError(false) : "Descrivi cosa c'è da spostare.";
         break;
@@ -300,6 +293,22 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
                   })
                 }
               />
+              {place ? (
+                <div className="flex flex-wrap items-end gap-4">
+                  <div>
+                    <label htmlFor="porters-floor" className={label}>Piano</label>
+                    <select id="porters-floor" value={place.floor} onChange={(e) => update({ place: { ...place, floor: Number(e.target.value) } })} className={`${input} w-36`}>
+                      {Array.from({ length: 21 }, (_, n) => (
+                        <option key={n} value={n}>{floorLabel(n)}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <label className="flex items-center gap-2 pb-2 text-sm">
+                    <input type="checkbox" checked={place.hasElevator} onChange={(e) => update({ place: { ...place, hasElevator: e.target.checked } })} />
+                    Ascensore disponibile
+                  </label>
+                </div>
+              ) : null}
               <p className="text-xs text-zinc-500">Il facchinaggio è disponibile nelle province servite. Il trasporto non è incluso: per spostare la merce in un altro indirizzo prenota un trasporto.</p>
             </div>
           ) : null}
@@ -324,58 +333,34 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
               <p className="text-xs text-zinc-500">
                 Prenota almeno {options.minLeadHours} ore prima. I supplementi per lavori urgenti, nel fine settimana o nei giorni festivi vengono calcolati automaticamente.
               </p>
-            </div>
-          ) : null}
-
-          {step === "facchini" ? (
-            <fieldset>
-              <legend className={label}>Quanti facchini ti servono?</legend>
-              <div className="mt-2 flex flex-wrap gap-3">
-                {personsOptions.map((n) => (
-                  <label key={n} className={`flex cursor-pointer items-center gap-2 rounded-md border px-4 py-2 text-sm ${state.persons === n ? "border-blue-600 bg-blue-50" : "border-zinc-300"}`}>
-                    <input type="radio" name="persons" checked={state.persons === n} onChange={() => update({ persons: n })} />
-                    {n === 1 ? "1 facchino" : `${n} facchini`}
-                  </label>
-                ))}
-              </div>
-              <p className="mt-2 text-xs text-zinc-500">{options.minPersons > 1 ? `Minimo ${options.minPersons} facchini. ` : ""}Per mobili pesanti o tanti piani a piedi conviene una squadra più grande.</p>
-            </fieldset>
-          ) : null}
-
-          {step === "ore" ? (
-            <div>
-              <label htmlFor="porters-hours" className={label}>Ore stimate di lavoro</label>
-              <select id="porters-hours" value={state.hours} onChange={(e) => update({ hours: Number(e.target.value) })} className={`${input} w-40`}>
-                {Array.from({ length: PORTERS_MAX_HOURS }, (_, i) => i + 1).map((h) => (
-                  <option key={h} value={h}>{h} {h === 1 ? "ora" : "ore"}</option>
-                ))}
-              </select>
-              <p className="mt-2 text-xs text-zinc-500">
-                Minimo {options.minHours} {options.minHours === 1 ? "ora" : "ore"} per facchino{state.hours < options.minHours ? `: verranno conteggiate ${options.minHours} ore` : ""}. Le ore in più vengono calcolate a fine lavoro.
-              </p>
-            </div>
-          ) : null}
-
-          {step === "piano" ? (
-            place ? (
-              <div className="flex flex-wrap items-end gap-4">
-                <div>
-                  <label htmlFor="porters-floor" className={label}>Piano</label>
-                  <select id="porters-floor" value={place.floor} onChange={(e) => update({ place: { ...place, floor: Number(e.target.value) } })} className={`${input} w-36`}>
-                    {Array.from({ length: 21 }, (_, n) => (
-                      <option key={n} value={n}>{floorLabel(n)}</option>
-                    ))}
-                  </select>
+              <fieldset className="border-t border-zinc-100 pt-4">
+                <legend className={label}>Quanti facchini ti servono?</legend>
+                <div className="mt-2 flex flex-wrap gap-3">
+                  {personsOptions.map((n) => (
+                    <label key={n} className={`flex cursor-pointer items-center gap-2 rounded-md border px-4 py-2 text-sm ${state.persons === n ? "border-blue-600 bg-blue-50" : "border-zinc-300"}`}>
+                      <input type="radio" name="persons" checked={state.persons === n} onChange={() => update({ persons: n })} />
+                      {n === 1 ? "1 facchino" : `${n} facchini`}
+                    </label>
+                  ))}
                 </div>
-                <label className="flex items-center gap-2 pb-2 text-sm">
-                  <input type="checkbox" checked={place.hasElevator} onChange={(e) => update({ place: { ...place, hasElevator: e.target.checked } })} />
-                  Ascensore disponibile
-                </label>
+                <p className="mt-2 text-xs text-zinc-500">{options.minPersons > 1 ? `Minimo ${options.minPersons} facchini. ` : ""}Per mobili pesanti o tanti piani a piedi conviene una squadra più grande.</p>
+              </fieldset>
+              <div className="border-t border-zinc-100 pt-4">
+                <label htmlFor="porters-hours" className={label}>Ore stimate di lavoro</label>
+                <select id="porters-hours" value={state.hours} onChange={(e) => update({ hours: Number(e.target.value) })} className={`${input} w-40`}>
+                  {Array.from({ length: PORTERS_MAX_HOURS }, (_, i) => i + 1).map((h) => (
+                    <option key={h} value={h}>{h} {h === 1 ? "ora" : "ore"}</option>
+                  ))}
+                </select>
+                <p className="mt-2 text-xs text-zinc-500">
+                  Minimo {options.minHours} {options.minHours === 1 ? "ora" : "ore"} per facchino{state.hours < options.minHours ? `: verranno conteggiate ${options.minHours} ore` : ""}. Le ore in più vengono calcolate a fine lavoro.
+                </p>
               </div>
-            ) : (
-              <p className="text-sm text-zinc-500">Scegli prima l&apos;indirizzo.</p>
-            )
+            </div>
           ) : null}
+
+
+
 
           {step === "cosa" ? (
             <div>

@@ -66,9 +66,10 @@ Wypisany `whsec_…` musi być równy `STRIPE_WEBHOOK_SECRET` w `.env.local` (po
 
 1. `/facchinaggio` — kalkulator: 2 facchini, 1 h → cena orientacyjna; przycisk prowadzi do `/prenota/facchini` z
    wypełnionymi osobami i godzinami (nie do `/contatti`).
-2. Kreator: „Indirizzo” (adres w aktywnej prowincji; adres spoza obszaru → formularz kontaktu) → „Data e fascia” →
-   „Facchini” (mniej niż minimum niemożliwe) → „Ore stimate”: poniżej minimum z cennika tekst „verranno conteggiate N ore”
-   i w wycenie liczy się minimum → „Piano e ascensore” → „Cosa spostare” → „Preventivo”.
+2. Kreator (od 2026-11-13 mniej kroków): „Indirizzo e piano” (adres w aktywnej prowincji, piano i ascensore pod
+   adresem; adres spoza obszaru → formularz kontaktu) → „Data, facchini e ore” (mniej niż minimum osób niemożliwe;
+   poniżej minimum godzin tekst „verranno conteggiate N ore” i w wycenie liczy się minimum) → „Cosa spostare” →
+   „Preventivo”.
 3. **Dopłata weekendowa:** data w sobotę albo niedzielę → w „Preventivo” pozycja weekendowa; zmiana daty na dzień roboczy
    → pozycja znika, cena spada. Tak samo „pilne” (termin w ciągu X h z „Impostazioni”), jeśli dostępny.
 4. **Piętra:** 3° piano bez windy → dopłata za piętra (3 × stawka z cennika); „con ascensore” albo piano terra → bez

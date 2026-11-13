@@ -4,7 +4,7 @@ import type { PortersJobTerms } from "../../pricing/porters-service";
 import type { PricingError } from "../../pricing/types";
 
 export type PortersStep =
-  | "indirizzo" | "data" | "facchini" | "ore" | "piano" | "cosa" | "preventivo" | "account" | "contatti" | "riepilogo";
+  | "indirizzo" | "data" | "cosa" | "preventivo" | "account" | "contatti" | "riepilogo";
 
 export type PortersError =
   | PricingError
@@ -56,7 +56,7 @@ export function portersErrorStep(e: PortersError): PortersStep {
     case "invalid_window":
       return "data";
     case "invalid_input":
-      return "facchini";
+      return "data"; // team and hours are in the date step
     default:
       return "preventivo";
   }
