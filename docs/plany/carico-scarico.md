@@ -68,4 +68,4 @@ Każdą zaznacza się osobno, np. załadunek 1 osoba × 1 h, rozładunek 2 osoby
 - [x] 3. Kreator (`LoadingHelpField`), stan `loadingHelp` / `unloadingHelp`, payload.
 - [x] 4. Widoki: klient („Aiuto carico e scarico”), admin, PWA (karta kursu), czas pracy per strona (`porterTermsOfLeg`).
 - [x] 5. Seed: zlecenie „Lavatrice nuova da installare in cantina” (carico 1 × 1 h, scarico 2 × 2 h).
-- [ ] Staging: `db:push` za zgodą właściciela, **przed** wypchnięciem kodu na `main` (kreator wysyła nowe kolumny).
+- [x] Staging: migracja na stagingu od 2026-11-13 (za zgodą właściciela; `db:list` — lokalne = zdalne), potem kod na `main`.
