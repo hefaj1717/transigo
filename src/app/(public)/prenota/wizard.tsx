@@ -18,6 +18,7 @@ import { SHIPMENT_LABEL } from "@/lib/orders/shipment";
 import { sendOutOfAreaAction } from "./out-of-area-actions";
 import { Headline, QuoteBreakdown } from "./quote-view";
 import { LoadingHelpField } from "@/components/booking/loading-help-field";
+import { VehicleIllustration } from "@/components/site/vehicle-illustration";
 import { STEPS, type QuoteResponse, type WizardSession } from "./types";
 
 const input = "mt-1 block w-full rounded-md border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:ring-2 focus:ring-blue-500";
@@ -157,6 +158,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
 
   const display = quote?.ok ? (quote.selected?.quote.display ?? (quote.customerType === "business" ? "net_plus_vat" : "gross")) : session.kind === "customer" ? (session.customerType === "business" ? "net_plus_vat" : "gross") : "net_plus_vat";
   const selected = quote?.ok ? quote.selected : null;
+  const chosenVehicle = options.vehicles.find((v) => v.id === state.vehicleTypeId) ?? null;
 
   // --- navigation ------------------------------------------------------------------------------------------
   const go = (to: BookingStep) => {
@@ -316,10 +318,15 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
                       disabled={!!unavailable}
                       onClick={() => update({ vehicleTypeId: v.id })}
                       aria-pressed={chosen}
-                      className={`relative rounded-lg border p-4 text-left ${chosen ? "border-blue-600 bg-blue-50 ring-2 ring-blue-600" : recommended ? "border-green-600" : "border-zinc-300 hover:border-blue-400"} disabled:cursor-not-allowed disabled:opacity-60`}
+                      className={`relative overflow-hidden rounded-lg border text-left ${chosen ? "border-blue-600 bg-blue-50 ring-2 ring-blue-600" : recommended ? "border-green-600" : "border-zinc-300 hover:border-blue-400"} disabled:cursor-not-allowed disabled:opacity-60`}
                     >
                       {recommended ? <span className="absolute right-3 top-3 rounded-full bg-green-600 px-2 py-0.5 text-xs font-medium text-white">Consigliato</span> : null}
-                      <span className="block pr-24 font-semibold text-zinc-900">{v.nameIt}</span>
+                      {/* Same drawings as the vehicle cards on the public pages (D183); the panel colour matches the wheel arches. */}
+                      <span className="block bg-brand-50 px-6 pb-1 pt-4">
+                        <VehicleIllustration sizeRank={v.sizeRank} className="mx-auto h-20 w-full max-w-52" />
+                      </span>
+                      <span className="block px-4 pb-4 pt-3">
+                      <span className="block font-semibold text-zinc-900">{v.nameIt}</span>
                       <span className="mt-1 block text-xs text-zinc-600">
                         {[
                           v.payloadKg ? `Portata ${v.payloadKg.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".")} kg` : null,
@@ -337,6 +344,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
                       {check?.warning && !blocked.length ? <span className="mt-1 block text-xs text-amber-800">{check.warning}</span> : null}
                       <span className="mt-2 block">
                         {price && "headlineCents" in price ? <Headline cents={price.headlineCents} display={display} /> : price && "error" in price ? <span className="text-sm text-zinc-500">Non disponibile</span> : <span className="text-sm text-zinc-400">{quoting ? "Calcolo…" : "—"}</span>}
+                      </span>
                       </span>
                     </button>
                   );
@@ -608,7 +616,10 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
                   {[SHIPMENT_OPTIONS.find((o) => o.id === category)?.label, state.goods.description, isStackableCategory(category) && state.goods.stackable ? "sovrapponibile" : null].filter(Boolean).join(" · ")}
                 </dd>
                 <dt className="text-zinc-500">Veicolo</dt>
-                <dd>{options.vehicles.find((v) => v.id === state.vehicleTypeId)?.nameIt}</dd>
+                <dd className="flex items-center gap-2">
+                  {chosenVehicle ? <VehicleIllustration sizeRank={chosenVehicle.sizeRank} className="h-8 w-16 shrink-0 rounded bg-brand-50" /> : null}
+                  {chosenVehicle?.nameIt}
+                </dd>
                 {state.loadingHelp || state.unloadingHelp ? (
                   <>
                     <dt className="text-zinc-500">Aiuto</dt>
@@ -669,6 +680,12 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
           <div className="mt-2">
             <Headline cents={selected.quote.display === "gross" ? selected.quote.totalCents : selected.quote.subtotalCents} display={selected.quote.display} />
             {quoting ? <p className="text-xs text-zinc-400">Aggiornamento…</p> : null}
+            {chosenVehicle ? (
+              <div className="mt-3 overflow-hidden rounded-md bg-brand-50">
+                <VehicleIllustration sizeRank={chosenVehicle.sizeRank} className="mx-auto h-24 w-full max-w-56 px-4 pt-3" />
+                <p className="px-3 pb-2 text-center text-sm font-medium text-brand-900">{chosenVehicle.nameIt}</p>
+              </div>
+            ) : null}
           </div>
         ) : (
           <p className="mt-2 text-sm text-zinc-500">{quoting ? "Calcolo…" : "Il prezzo comparirà dopo la scelta del veicolo."}</p>
