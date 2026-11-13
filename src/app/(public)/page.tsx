@@ -4,7 +4,7 @@ import { AUDIENCES, HOME_FAQS, HOW_IT_WORKS, SERVICES } from "@/lib/public/conte
 import { getPublicCatalog, getPublicRates } from "@/lib/public/server";
 import { formatCents } from "@/lib/pricing/money";
 import { FaqList } from "@/components/site/faq-list";
-import { Check, SectionTitle, VehicleGrid } from "@/components/site/ui";
+import { Check, PrimaryCta, SectionTitle, VehicleGrid } from "@/components/site/ui";
 import { HeroTabs } from "./hero-tabs";
 
 export const metadata: Metadata = {
@@ -175,7 +175,7 @@ export default async function Home() {
       <section className="bg-brand-800 text-white">
         <div className="mx-auto flex max-w-6xl flex-col items-center gap-5 px-4 py-14 text-center">
           <h2 className="text-2xl font-bold sm:text-3xl">Pronto a partire?</h2>
-          <Link href="/prenota" className="rounded-md bg-accent-500 px-6 py-3 font-semibold text-white hover:bg-accent-600">Calcola il prezzo</Link>
+          <PrimaryCta />
         </div>
       </section>
     </main>

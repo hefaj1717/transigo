@@ -1,4 +1,3 @@
-import Link from "next/link";
 import type { PublicVehicle } from "@/lib/public/server";
 
 // Small building blocks shared by the public pages (home, services, …).
@@ -35,11 +34,18 @@ export function CheckList({ items, onDark = false }: { items: string[]; onDark?:
   );
 }
 
-export function PrimaryCta({ href = "/prenota", children = "Calcola il prezzo" }: { href?: string; children?: React.ReactNode }) {
+/** Path of the price calculator of the home page (hero card with the service tabs). */
+export const CALCULATOR_HREF = "/#calcola";
+
+/**
+ * "Calcola il prezzo" → the calculator of the home page (owner feedback 2026-11-13), not the transport wizard.
+ * Native anchor: scrolls to it on every click, also when already on the home page.
+ */
+export function PrimaryCta({ href = CALCULATOR_HREF, children = "Calcola il prezzo" }: { href?: string; children?: React.ReactNode }) {
   return (
-    <Link href={href} className="inline-block rounded-md bg-accent-500 px-6 py-3 font-semibold text-white hover:bg-accent-600">
+    <a href={href} className="inline-block rounded-md bg-accent-500 px-6 py-3 font-semibold text-white hover:bg-accent-600">
       {children}
-    </Link>
+    </a>
   );
 }
 

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PageHero } from "@/components/site/page-hero";
+import { CALCULATOR_HREF } from "@/components/site/ui";
 import { Suspense } from "react";
 import { getCompanyInfo, getPublicRates } from "@/lib/public/server";
 import { ContactForm } from "@/components/contact-form";
@@ -32,7 +33,7 @@ export default async function Page() {
           <div className="rounded-xl bg-brand-50 p-6">
             <h2 className="text-lg font-semibold text-brand-900">Vuoi un prezzo?</h2>
             <p className="mt-2 text-sm text-zinc-700">Il preventivo online è immediato e senza registrazione.</p>
-            <Link href="/prenota" className="mt-4 inline-block rounded-md bg-accent-600 px-4 py-2 text-sm font-semibold text-white hover:bg-accent-700">Calcola il prezzo</Link>
+            <a href={CALCULATOR_HREF} className="mt-4 inline-block rounded-md bg-accent-600 px-4 py-2 text-sm font-semibold text-white hover:bg-accent-700">Calcola il prezzo</a>
           </div>
           <div className="rounded-xl border border-zinc-200 p-6 text-sm text-zinc-700">
             <h2 className="text-lg font-semibold text-brand-900">{company.name}</h2>

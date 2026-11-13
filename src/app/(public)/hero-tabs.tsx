@@ -27,7 +27,7 @@ export function HeroTabs({ rates }: { rates: PublicRates | null }) {
   }
 
   return (
-    <div className="rounded-xl bg-white text-left shadow-xl ring-1 ring-black/5">
+    <div id="calcola" className="scroll-mt-24 rounded-xl bg-white text-left shadow-xl ring-1 ring-black/5">
       <div role="tablist" aria-label="Servizio" className="grid grid-cols-3 border-b border-zinc-200">
         {SERVICES.map((s, i) => (
           <button
