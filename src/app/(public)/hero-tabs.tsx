@@ -5,7 +5,7 @@ import { useRef, useState } from "react";
 import { PortersCalculator, StorageCalculator } from "@/components/site/calculators";
 import { SERVICES, type ServiceCode } from "@/lib/public/content";
 import { publicAvailability, type PublicRates } from "@/lib/public/rates";
-import { HeroForm } from "./hero-form";
+import { HeroForm } from "@/components/site/hero-form";
 
 /**
  * Home-page hero card with one tab per service (D151): Trasporto = the route form (→ /prenota),

@@ -6,8 +6,9 @@ import { publicAvailability, type PublicRates, type PublicSurcharge } from "@/li
 import { getPublicCatalog, getPublicRates } from "@/lib/public/server";
 import { faqPageJsonLd, jsonLdString } from "@/lib/public/seo";
 import { PortersCalculator, StorageCalculator } from "./calculators";
+import { HeroForm } from "./hero-form";
 import { FaqList } from "./faq-list";
-import { CheckList, PrimaryCta, SectionTitle, VehicleGrid } from "./ui";
+import { CheckList, SectionTitle, VehicleGrid } from "./ui";
 
 // Shared template of the three service pages (/trasporto, /facchinaggio, /deposito; D151, D158). Texts from
 // content.ts; indicative prices from the public customer rates of the active price list (D162) — net and
@@ -39,8 +40,6 @@ export async function ServicePage({ code }: { code: ServiceCode }) {
                 Al momento questo servizio non è prenotabile online.{" "}
                 <Link href="/contatti" className="font-semibold text-accent-300 underline hover:text-accent-200">Scrivici</Link> e ti aiutiamo noi.
               </p>
-            ) : code === "trasporto" ? (
-              <PrimaryCta />
             ) : (
               // Native anchor: scrolls to the calculator on every click (a Link to the current hash does it only once).
               <a href="#prezzi" className="inline-block rounded-md bg-accent-500 px-6 py-3 font-semibold text-white hover:bg-accent-600">Calcola il prezzo indicativo</a>
@@ -169,12 +168,11 @@ function Prices({ code, rates }: { code: ServiceCode; rates: PublicRates }) {
         </p>
         {/* Calculator first, the price list under it (owner feedback 2026-11-13) */}
         <div className="mt-8 space-y-10">
-          {code !== "trasporto" ? (
-            <div className="min-w-0 max-w-xl rounded-xl bg-white p-5 shadow-sm ring-1 ring-black/5 sm:p-6">
-              <h3 className="mb-4 text-lg font-semibold text-brand-900">Calcola il prezzo indicativo</h3>
-              {code === "facchinaggio" ? <PortersCalculator rates={rates} /> : <StorageCalculator rates={rates} />}
-            </div>
-          ) : null}
+          <div className="min-w-0 max-w-xl rounded-xl bg-white p-5 shadow-sm ring-1 ring-black/5 sm:p-6">
+            <h3 className="mb-4 text-lg font-semibold text-brand-900">{code === "trasporto" ? "Calcola il prezzo" : "Calcola il prezzo indicativo"}</h3>
+            {/* Trasporto: route form → wizard with the exact price (needs the distance); others: indicative price here */}
+            {code === "trasporto" ? <HeroForm embedded /> : code === "facchinaggio" ? <PortersCalculator rates={rates} /> : <StorageCalculator rates={rates} />}
+          </div>
           <div className="min-w-0 space-y-8">
             {code === "trasporto" ? (
               <>
