@@ -28,8 +28,15 @@ afterAll(async () => {
 });
 
 describe("vehicle capacities (D81)", () => {
-  it("placeholders are set and readable by anyone (the wizard works without login)", async () => {
-    const { data } = await anon.from("vehicle_types").select("code, payload_kg, cargo_length_cm, cargo_width_cm, cargo_height_cm, euro_pallets").order("size_rank");
+  it("D183: car is turned off, not deleted — anon sees only the three vans and the truck", async () => {
+    const { data } = await anon.from("vehicle_types").select("code").order("size_rank");
+    expect(data?.map((v) => v.code)).toEqual(["van_small", "van_medium", "van_large", "truck_tail_lift"]);
+    const { data: car } = await service.from("vehicle_types").select("is_active").eq("code", "car").single();
+    expect(car).toEqual({ is_active: false });
+  });
+
+  it("placeholders are set (anon reads the active ones, see D183 test)", async () => {
+    const { data } = await service.from("vehicle_types").select("code, payload_kg, cargo_length_cm, cargo_width_cm, cargo_height_cm, euro_pallets").order("size_rank");
     expect(data?.map((v) => [v.code, v.payload_kg, v.euro_pallets])).toEqual([
       ["car", 400, 0],
       ["van_small", 750, 2],

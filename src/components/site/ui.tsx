@@ -53,7 +53,8 @@ export function PrimaryCta({ href = CALCULATOR_HREF, children = "Calcola il prez
 export const numberIt = new Intl.NumberFormat("it-IT");
 
 export function VehicleCard({ v }: { v: PublicVehicle }) {
-  const dims = v.lengthCm && v.widthCm && v.heightCm ? `${numberIt.format(v.lengthCm)} × ${numberIt.format(v.widthCm)} × ${numberIt.format(v.heightCm)} cm` : null;
+  // Narrow no-break spaces (U+202F) around "×": one line also in the 4-column grid (D183).
+  const dims = v.lengthCm && v.widthCm && v.heightCm ? `${numberIt.format(v.lengthCm)}\u202f×\u202f${numberIt.format(v.widthCm)}\u202f×\u202f${numberIt.format(v.heightCm)}\u00a0cm` : null;
   const rows: [string, string | null][] = [
     ["Portata", v.payloadKg ? `${numberIt.format(v.payloadKg)} kg` : null],
     ["Vano di carico", dims],
@@ -65,13 +66,13 @@ export function VehicleCard({ v }: { v: PublicVehicle }) {
       <div className="bg-brand-50 px-6 pb-2 pt-5">
         <VehicleIllustration sizeRank={v.sizeRank} className="mx-auto h-28 w-full max-w-64" />
       </div>
-      <div className="p-5">
+      <div className="px-4 py-5">
         <h3 className="text-lg font-semibold text-brand-900">{v.name}</h3>
         <dl className="mt-3 space-y-1 text-sm">
           {rows.filter(([, value]) => value).map(([k, value]) => (
-            <div key={k} className="flex justify-between gap-4">
-              <dt className="text-zinc-500">{k}</dt>
-              <dd className="font-medium text-zinc-800">{value}</dd>
+            <div key={k} className="flex justify-between gap-3">
+              <dt className="whitespace-nowrap text-zinc-500">{k}</dt>
+              <dd className="whitespace-nowrap font-medium text-zinc-800">{value}</dd>
             </div>
           ))}
         </dl>
@@ -82,7 +83,8 @@ export function VehicleCard({ v }: { v: PublicVehicle }) {
 
 export function VehicleGrid({ vehicles }: { vehicles: PublicVehicle[] }) {
   return (
-    <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+    // D183: four vehicle types → one row of four on desktop; other counts keep rows of three.
+    <div className={`grid gap-5 sm:grid-cols-2 ${vehicles.length === 4 ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
       {vehicles.map((v) => (
         <VehicleCard key={v.id} v={v} />
       ))}

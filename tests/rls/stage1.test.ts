@@ -194,9 +194,9 @@ describe("carriers", () => {
 });
 
 describe("vehicle_types", () => {
-  it("anon reads the 5 starting types in size order", async () => {
+  it("anon reads the active starting types in size order (D183: car turned off)", async () => {
     const { data } = await anon.from("vehicle_types").select("code, size_rank").order("size_rank");
-    expect(data?.map((r) => r.code)).toEqual(["car", "van_small", "van_medium", "van_large", "truck_tail_lift"]);
+    expect(data?.map((r) => r.code)).toEqual(["van_small", "van_medium", "van_large", "truck_tail_lift"]);
   });
   it("anon, customer and carrier cannot create or edit types", async () => {
     for (const c of [anon, clienteA.client, carrierA.client]) {

@@ -59,7 +59,10 @@ describe("price tables are admin-only (D59)", () => {
   it("admin reads the active list with rates for every active vehicle type and all rules", async () => {
     const { data: rates } = await admin.client.from("price_list_vehicle_rates").select("vehicle_type_id").eq("price_list_id", activeId);
     const { data: types } = await service.from("vehicle_types").select("id").eq("is_active", true);
-    expect(rates?.length).toBe(types?.length);
+    // Every active type has a rate; the list may also keep rates of types turned off later (D183: car).
+    const rated = new Set(rates?.map((r) => r.vehicle_type_id));
+    expect(types?.length).toBeGreaterThan(0);
+    expect(types?.every((t) => rated.has(t.id))).toBe(true);
     const { data: rules } = await admin.client.from("price_rules").select("code").eq("price_list_id", activeId);
     // Every rule of the active list (the active version depends on earlier test files, e.g. orders.test.ts publishes one).
     const { count: allRules } = await service.from("price_rules").select("code", { count: "exact", head: true }).eq("price_list_id", activeId);
