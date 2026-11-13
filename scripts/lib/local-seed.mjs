@@ -454,7 +454,7 @@ async function loadBooking() {
 }
 
 /** Creates an order (pending payment) for a private customer, priced like the wizard. */
-export async function order(customer, { from, to, daysAhead, window = "10-12", vehicle = "van_medium", goods, packing = 0, storage = null, porters = null, portersDelivery = null, contacts, notes = "", shipment = null }) {
+export async function order(customer, { from, to, daysAhead, window = "10-12", vehicle = "van_medium", goods, packing = 0, storage = null, porters = null, portersDelivery = null, loadingHelp = null, unloadingHelp = null, contacts, notes = "", shipment = null }) {
   const b = await loadBooking();
   const vehicleId = await vehicleTypeId(vehicle);
   const A = { ...PLACES[from], warehouseId: null };
@@ -471,6 +471,8 @@ export async function order(customer, { from, to, daysAhead, window = "10-12", v
       shipmentCategory: shipment?.category ?? null, stackable: shipment?.stackable ?? false },
     portersPickup: porters ? { packageCode: porters } : null,
     portersDelivery: storage && portersDelivery ? { packageCode: portersDelivery } : null,
+    loadingHelp, // D182: { persons, hours } or null
+    unloadingHelp,
     packingItems: packing,
     storage: storage ? { returnDate: romeDate(daysAhead + storage.days), returnWindow: "14-16", pallets: storage.pallets } : null,
     vehicleTypeId: vehicleId,

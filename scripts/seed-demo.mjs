@@ -44,7 +44,7 @@ const EMAILS = { customer: "cliente@example.com", ferri: "padroncino@example.com
 // Orders of cliente@example.com: 25 + 4 Facchinaggio (step 6) + 4 Deposito (step 7: a box alone, a chain of 3)
 // + 6 for the wizard feedback (D176–D178: 4 shipment categories, 1 facchino, a box in Bologna).
 // Staging: seeded 2026-11-11 with 25, topped up 2026-11-12 to 33 — a run tops it up again (step 11).
-const EXPECTED_ORDERS = 39;
+const EXPECTED_ORDERS = 40;
 const ORDERS_BEFORE_SERVICES = 25;
 // Orders 18–21 by their goods (unique in the seed), for the guide printed at the end and for tests/e2e.
 const EXECUTION_DEMO = {
@@ -138,6 +138,10 @@ async function seedWizardFeedback({ admin, customer, ferri }) {
   // B1. Box S in Bologna (D178), "porto io" + "ritiro io", paid.
   const B1 = "Sci, scarponi e 4 scatoloni";
   const b1 = await paidOnce(customer, B1, () => storageOrder(customer, { box: "s", startIn: 6, days: 30, description: B1, warehouseAddress: BOLOGNA_ADDRESS }));
+  // H1. Help at loading 1 × 1 h and at unloading 2 × 2 h (D182), paid → "Da assegnare".
+  const H1 = "Lavatrice nuova da installare in cantina";
+  const h1 = await paidOnce(customer, H1, () => order(customer, { from: "milanoCentro", to: "monza", daysAhead: 4, window: "10-12", shipment: { category: "package", stackable: false }, loadingHelp: { persons: 1, hours: 1 }, unloadingHelp: { persons: 2, hours: 2 }, goods: { description: H1, items: 2, weightKg: 150, largest: { lengthCm: 70, widthCm: 70, heightCm: 180 } }, contacts: ["Giulia Conti", "Anna Conti"] }));
+  console.log(`\nAiuto carico/scarico: ${h1.number} (carico 1 × 1 h, scarico 2 × 2 h).`);
   console.log(`\nNovità prenotazione: ${t1.number} pallet sovrapponibili, ${t2.number} colli (Ferri), «${T3}», «${T4}» (da pagare), facchinaggio 1 persona, ${b1.number} box a Bologna.`);
 }
 

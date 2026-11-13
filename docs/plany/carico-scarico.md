@@ -57,3 +57,15 @@ Każdą zaznacza się osobno, np. załadunek 1 osoba × 1 h, rozładunek 2 osoby
 
 - Facchinaggio jako osobna usługa (kreator Facchini) — bez zmian.
 - Zlecenia już złożone — bez zmian (stary zapis).
+
+## Stan (2026-11-13)
+
+- [x] 1. Silnik cenowy (`calculate.ts`, testy).
+- [x] 2. Migracja `20261113100000_loading_help.sql` (**lokalnie**) + `tests/rls/loading-help.test.ts`. Kontrola
+  „pakiet albo strony” w CHECK i w `create_transport_order`; czas per strona: `order_loading_help_minutes()`, zapis
+  minut przy POD (trigger na `delivery_proofs`). Uprawnienia przewoźnika do kursu bez zmian (dziś też nie sprawdzają
+  liczby tragarzy).
+- [x] 3. Kreator (`LoadingHelpField`), stan `loadingHelp` / `unloadingHelp`, payload.
+- [x] 4. Widoki: klient („Aiuto carico e scarico”), admin, PWA (karta kursu), czas pracy per strona (`porterTermsOfLeg`).
+- [x] 5. Seed: zlecenie „Lavatrice nuova da installare in cantina” (carico 1 × 1 h, scarico 2 × 2 h).
+- [ ] Staging: `db:push` za zgodą właściciela, **przed** wypchnięciem kodu na `main` (kreator wysyła nowe kolumny).

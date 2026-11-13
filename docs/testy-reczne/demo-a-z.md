@@ -31,7 +31,8 @@ chyba że napisano inaczej. PWA przewoźnika, wypłaty, SMS — poza zakresem.
 
 ## B. Trasporto (`privato.test@`)
 
-1. `/prenota`: Milano → Monza; „Aiuto per carico e scarico” 2 osoby; „Cosa spedisci?” = Pallet ×2, „Sovrapponibile”.
+1. `/prenota`: Milano → Monza; „Aiuto per carico e scarico” (D182): „Aiuto al carico” 1 persona × 1 h i „Aiuto allo
+   scarico” 2 persone × 2 h — w „Preventivo” dwie pozycje; „Cosa spedisci?” = Pallet ×2, „Sovrapponibile”.
 2. Ceny z IVA; po zalogowaniu krok „Account” pominięty.
 3. „Riepilogo” → Stripe Checkout, karta 4242 → powrót: zlecenie najpierw „Pagamento in verifica”/„In attesa”, po
    chwili (webhook) „Confermato”.
