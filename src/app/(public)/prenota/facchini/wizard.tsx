@@ -148,7 +148,7 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
   }, [step, billingLoaded, session.kind]);
 
   const selected = quote?.ok ? quote : null;
-  const display = selected?.quote.display ?? (session.kind === "customer" ? (session.customerType === "business" ? "net_plus_vat" : "gross") : state.customerTypeView === "business" ? "net_plus_vat" : "gross");
+  const display = selected?.quote.display ?? (session.kind === "customer" ? (session.customerType === "business" ? "net_plus_vat" : "gross") : "net_plus_vat");
 
   const go = (to: PortersStep) => {
     setStep(to);
@@ -387,17 +387,7 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
           {step === "preventivo" ? (
             <div className="space-y-4">
               {session.kind === "customer" ? null : (
-                <fieldset>
-                  <legend className="text-sm text-zinc-700">Mostra i prezzi per</legend>
-                  <div className="mt-1 flex gap-4">
-                    {(["private", "business"] as const).map((t) => (
-                      <label key={t} className="flex items-center gap-2 text-sm">
-                        <input type="radio" name="customerTypeView" checked={state.customerTypeView === t} onChange={() => update({ customerTypeView: t })} />
-                        {t === "private" ? "Privato (IVA inclusa)" : "Azienda (IVA esclusa)"}
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
+                <p className="text-sm text-zinc-600">Prezzi IVA esclusa. Dopo l&apos;accesso vedrai il prezzo per il tuo account: ai privati IVA inclusa.</p>
               )}
               {selected ? (
                 <>

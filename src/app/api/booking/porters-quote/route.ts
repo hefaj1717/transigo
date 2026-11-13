@@ -21,10 +21,11 @@ export async function POST(request: Request) {
     ? { ...parsed.data.state, date: new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10), window: "10-12" as const }
     : parsed.data.state;
 
-  // Signed-in customers always get the price for their account type (D3); others use the toggle.
+  // Signed-in customers always get the price for their account type (D3); before signing in the price is net + IVA
+  // for everyone (D181) — after sign-in a private customer sees it with IVA.
   const ctx = await getAccountContext();
   const signedInCustomer = ctx.state === "signed_in" && ctx.role === "cliente" && !ctx.isBlocked && ctx.customerType ? ctx : null;
-  const customerType = signedInCustomer?.customerType ?? state.customerTypeView;
+  const customerType = signedInCustomer?.customerType ?? "business";
   const ownerId = signedInCustomer?.userId ?? null; // D76
 
   const db = createServiceClient();

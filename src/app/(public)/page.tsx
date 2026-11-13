@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { AUDIENCES, HOME_FAQS, HOW_IT_WORKS, SERVICES } from "@/lib/public/content";
 import { getPublicCatalog, getPublicRates } from "@/lib/public/server";
+import { formatCents } from "@/lib/pricing/money";
 import { FaqList } from "@/components/site/faq-list";
 import { Check, SectionTitle, VehicleGrid } from "@/components/site/ui";
 import { HeroTabs } from "./hero-tabs";
@@ -100,6 +101,50 @@ export default async function Home() {
           <p className="mt-3 max-w-2xl text-zinc-600">Nella prenotazione ti consigliamo il veicolo adatto in base a peso, misure e numero di pallet.</p>
           <div className="mt-8">
             <VehicleGrid vehicles={catalog.vehicles} />
+          </div>
+        </section>
+      ) : null}
+
+      {/* Facchini and warehouses (owner feedback 2026-11-13: not only vehicles) */}
+      {rates?.porters || catalog.warehouses.length ? (
+        <section className="bg-zinc-50">
+          <div className="mx-auto grid max-w-6xl gap-12 px-4 py-16 md:grid-cols-2">
+            {rates?.porters ? (
+              <div>
+                <SectionTitle eyebrow="Facchini" title="Squadre di facchini" />
+                <p className="mt-3 text-zinc-600">
+                  Per traslochi, carico e scarico o per spostare mobili e merce dentro casa o in ufficio. Scegli quante persone e per quante ore.
+                </p>
+                <dl className="mt-6 grid grid-cols-2 gap-4">
+                  <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-black/5">
+                    <dt className="text-sm text-zinc-500">Squadra</dt>
+                    <dd className="mt-1 text-xl font-semibold text-brand-900">
+                      {rates.porters.minPersons === rates.porters.maxPersons ? rates.porters.minPersons : `${rates.porters.minPersons}–${rates.porters.maxPersons}`} facchini
+                    </dd>
+                  </div>
+                  <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-black/5">
+                    <dt className="text-sm text-zinc-500">A persona, all&apos;ora</dt>
+                    <dd className="mt-1 text-xl font-semibold text-brand-900">{formatCents(rates.porters.perHourCents)} <span className="text-sm font-medium text-zinc-500">+ IVA</span></dd>
+                  </div>
+                </dl>
+                <Link href="/facchinaggio" className="mt-6 inline-block text-sm font-medium text-brand-700 hover:text-brand-900">Scopri il facchinaggio →</Link>
+              </div>
+            ) : null}
+            {catalog.warehouses.length ? (
+              <div>
+                <SectionTitle eyebrow="Magazzini" title="I nostri magazzini" />
+                <p className="mt-3 text-zinc-600">Box per i privati e posti pallet per le aziende. Porti tu la merce o la ritiriamo e la riconsegniamo noi.</p>
+                <ul className="mt-6 grid gap-4 sm:grid-cols-2">
+                  {catalog.warehouses.map((w) => (
+                    <li key={`${w.name}|${w.city}`} className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-black/5">
+                      <p className="text-lg font-semibold text-brand-900">{w.city} <span className="text-sm font-medium text-zinc-500">({w.province})</span></p>
+                      <p className="mt-1 text-sm text-zinc-600">{w.name}</p>
+                    </li>
+                  ))}
+                </ul>
+                <Link href="/deposito" className="mt-6 inline-block text-sm font-medium text-brand-700 hover:text-brand-900">Scopri il deposito →</Link>
+              </div>
+            ) : null}
           </div>
         </section>
       ) : null}

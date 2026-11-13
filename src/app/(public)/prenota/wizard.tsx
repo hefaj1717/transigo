@@ -139,7 +139,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
     });
   }, [step, billingLoaded, session.kind]);
 
-  const display = quote?.ok ? (quote.selected?.quote.display ?? (quote.customerType === "business" ? "net_plus_vat" : "gross")) : session.kind === "customer" ? (session.customerType === "business" ? "net_plus_vat" : "gross") : state.customerTypeView === "business" ? "net_plus_vat" : "gross";
+  const display = quote?.ok ? (quote.selected?.quote.display ?? (quote.customerType === "business" ? "net_plus_vat" : "gross")) : session.kind === "customer" ? (session.customerType === "business" ? "net_plus_vat" : "gross") : "net_plus_vat";
   const selected = quote?.ok ? quote.selected : null;
 
   // --- navigation ------------------------------------------------------------------------------------------
@@ -535,17 +535,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
           {step === "preventivo" ? (
             <div className="space-y-4">
               {session.kind === "customer" ? null : (
-                <fieldset>
-                  <legend className="text-sm text-zinc-700">Mostra i prezzi per</legend>
-                  <div className="mt-1 flex gap-4">
-                    {(["private", "business"] as const).map((t) => (
-                      <label key={t} className="flex items-center gap-2 text-sm">
-                        <input type="radio" name="customerTypeView" checked={state.customerTypeView === t} onChange={() => update({ customerTypeView: t })} />
-                        {t === "private" ? "Privato (IVA inclusa)" : "Azienda (IVA esclusa)"}
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
+                <p className="text-sm text-zinc-600">Prezzi IVA esclusa. Dopo l&apos;accesso vedrai il prezzo per il tuo account: ai privati IVA inclusa.</p>
               )}
               {selected ? (
                 <>

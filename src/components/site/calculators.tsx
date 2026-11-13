@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useState } from "react";
 import { formatCents } from "@/lib/pricing/money";
-import type { CustomerType } from "@/lib/pricing/types";
 import { portersEstimate, STORAGE_MAX_DAYS, PALLETS_MAX, storageEstimate, type Estimate, type PublicRates } from "@/lib/public/rates";
 import { portersRequestHref, storageRequestHref } from "@/lib/public/requests";
 
@@ -14,20 +13,19 @@ import { portersRequestHref, storageRequestHref } from "@/lib/public/requests";
 const field = "mt-1 block w-full rounded-md border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:ring-2 focus:ring-brand-500";
 const label = "block text-sm font-medium text-zinc-800";
 
-function CustomerToggle({ value, onChange, idPrefix }: { value: CustomerType; onChange: (v: CustomerType) => void; idPrefix: string }) {
+type StorageUnit = "box" | "pallet";
+
+/** Box (privati) or pallet (aziende) — D154. The price is always shown net + IVA on public pages (D181). */
+function UnitToggle({ value, onChange, units }: { value: StorageUnit; onChange: (v: StorageUnit) => void; units: StorageUnit[] }) {
+  const labels: Record<StorageUnit, string> = { box: "Box", pallet: "Pallet" };
   return (
     <fieldset>
-      <legend className="sr-only">Tipo di cliente</legend>
+      <legend className="sr-only">Cosa vuoi depositare</legend>
       <div className="grid grid-cols-2 gap-1 rounded-lg bg-zinc-100 p-1 text-sm">
-        {(
-          [
-            ["private", "Privato"],
-            ["business", "Azienda"],
-          ] as const
-        ).map(([v, l]) => (
-          <label key={v} htmlFor={`${idPrefix}-${v}`} className={`cursor-pointer rounded-md px-3 py-1.5 text-center font-medium has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand-500 ${value === v ? "bg-white text-brand-900 shadow-sm" : "text-zinc-600"}`}>
-            <input id={`${idPrefix}-${v}`} type="radio" name={`${idPrefix}-customer`} value={v} checked={value === v} onChange={() => onChange(v)} className="sr-only" />
-            {l}
+        {units.map((v) => (
+          <label key={v} htmlFor={`storage-unit-${v}`} className={`cursor-pointer rounded-md px-3 py-1.5 text-center font-medium has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand-500 ${value === v ? "bg-white text-brand-900 shadow-sm" : "text-zinc-600"}`}>
+            <input id={`storage-unit-${v}`} type="radio" name="storage-unit" value={v} checked={value === v} onChange={() => onChange(v)} className="sr-only" />
+            {labels[v]}
           </label>
         ))}
       </div>
@@ -64,20 +62,15 @@ function NumberField({ id, text, value, onChange, min, max, suffix }: { id: stri
   );
 }
 
-function PriceBox({ estimate, customerType, note, excluded }: { estimate: Estimate | null; customerType: CustomerType; note?: string | null; excluded: string }) {
+/** One price for everyone on public pages: net + IVA (D181); the wizard shows the price of the account type (D3). */
+function PriceBox({ estimate, note, excluded }: { estimate: Estimate | null; note?: string | null; excluded: string }) {
   return (
     <div className="rounded-lg bg-brand-50 p-4" aria-live="polite">
       <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Prezzo indicativo</p>
       {estimate ? (
-        customerType === "private" ? (
-          <p className="mt-1 text-2xl font-bold text-brand-900">
-            {formatCents(estimate.grossCents)} <span className="text-sm font-medium text-zinc-600">IVA inclusa</span>
-          </p>
-        ) : (
-          <p className="mt-1 text-2xl font-bold text-brand-900">
-            {formatCents(estimate.netCents)} <span className="text-sm font-medium text-zinc-600">+ IVA ({formatCents(estimate.grossCents)} totale)</span>
-          </p>
-        )
+        <p className="mt-1 text-2xl font-bold text-brand-900">
+          {formatCents(estimate.netCents)} <span className="text-sm font-medium text-zinc-600">+ IVA</span>
+        </p>
       ) : (
         <p className="mt-1 text-sm text-zinc-600">Completa i campi per vedere il prezzo.</p>
       )}
@@ -92,9 +85,11 @@ function RequestButton({ href, enabled, online = false }: { href: string; enable
   return (
     <div>
       {enabled ? (
-        <Link href={href} className="block w-full rounded-md bg-accent-600 px-4 py-3 text-center text-base font-semibold text-white hover:bg-accent-700">
+        // Full page load: the wizard always starts from these values, also on a second click after going back
+        // (a client navigation can reuse the wizard kept alive by the router, with the old values).
+        <a href={href} className="block w-full rounded-md bg-accent-600 px-4 py-3 text-center text-base font-semibold text-white hover:bg-accent-700">
           {text}
-        </Link>
+        </a>
       ) : (
         <span aria-disabled="true" className="block w-full cursor-not-allowed rounded-md bg-accent-600/50 px-4 py-3 text-center text-base font-semibold text-white">
           {text}
@@ -107,19 +102,17 @@ function RequestButton({ href, enabled, online = false }: { href: string; enable
 
 export function PortersCalculator({ rates }: { rates: PublicRates }) {
   const p = rates.porters!;
-  const [customerType, setCustomerType] = useState<CustomerType>("private");
   const [persons, setPersons] = useState(p.minPersons);
   const [hours, setHours] = useState<number | "">(p.minHours);
   const [floor, setFloor] = useState<number | "">(0);
   const [hasElevator, setHasElevator] = useState(false);
 
   const input = hours === "" || floor === "" ? null : { persons, hours, floor, hasElevator };
-  const estimate = input ? portersEstimate(rates, input, customerType) : null;
+  const estimate = input ? portersEstimate(rates, input, "business") : null;
   const personsOptions = Array.from({ length: p.maxPersons - p.minPersons + 1 }, (_, i) => p.minPersons + i);
 
   return (
     <div className="space-y-4">
-      <CustomerToggle value={customerType} onChange={setCustomerType} idPrefix="porters" />
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label htmlFor="porters-persons" className={label}>Facchini</label>
@@ -138,7 +131,6 @@ export function PortersCalculator({ rates }: { rates: PublicRates }) {
       </div>
       <PriceBox
         estimate={estimate}
-        customerType={customerType}
         note={input && input.hours < p.minHours ? `Minimo ${p.minHours} ore per facchino.` : null}
         excluded="Supplementi per urgenza, weekend e festivi esclusi."
       />
@@ -158,13 +150,14 @@ export function StorageCalculator({ rates }: { rates: PublicRates }) {
   const s = rates.storage!;
   const hasBoxes = s.boxes.length > 0;
   const hasPallets = !!s.pallets;
-  const [customerType, setCustomerType] = useState<CustomerType>(hasBoxes ? "private" : "business");
+  const units: StorageUnit[] = [...(hasBoxes ? ["box" as const] : []), ...(hasPallets ? ["pallet" as const] : [])];
+  const [chosen, setChosen] = useState<StorageUnit>(hasBoxes ? "box" : "pallet");
   const [boxCode, setBoxCode] = useState(s.boxes[0]?.code ?? "");
   const [pallets, setPallets] = useState<number | "">(1);
   const [days, setDays] = useState<number | "">(30);
 
   // D154: boxes for private customers, pallets for businesses.
-  const unit = customerType === "private" ? (hasBoxes ? "box" : null) : hasPallets ? "pallet" : null;
+  const unit = units.includes(chosen) ? chosen : null;
   const input =
     days === "" || !unit
       ? null
@@ -173,14 +166,14 @@ export function StorageCalculator({ rates }: { rates: PublicRates }) {
         : pallets === ""
           ? null
           : ({ unit: "pallet", pallets, days } as const);
-  const estimate = input ? storageEstimate(rates, input, customerType) : null;
+  const estimate = input ? storageEstimate(rates, input, input?.unit === "box" ? "private" : "business") : null;
 
   return (
     <div className="space-y-4">
-      <CustomerToggle value={customerType} onChange={setCustomerType} idPrefix="storage" />
+      {units.length > 1 ? <UnitToggle value={chosen} onChange={setChosen} units={units} /> : null}
       {unit === null ? (
         <p className="rounded-lg bg-zinc-50 p-4 text-sm text-zinc-700">
-          {customerType === "private" ? "Al momento non ci sono box disponibili online." : "Al momento lo stoccaggio di pallet non è prenotabile online."}{" "}
+          Al momento il deposito non è prenotabile online.{" "}
           <Link href="/contatti" className="font-semibold text-brand-700 underline">Scrivici</Link>.
         </p>
       ) : (
@@ -213,7 +206,7 @@ export function StorageCalculator({ rates }: { rates: PublicRates }) {
               ))}
             </div>
           </div>
-          <PriceBox estimate={estimate} customerType={customerType} excluded="Trasporto da e per il magazzino escluso." />
+          <PriceBox estimate={estimate} excluded="Trasporto da e per il magazzino escluso." />
           <RequestButton href={input ? storageRequestHref(input) : "#"} enabled={!!estimate && !!input} online />
         </>
       )}

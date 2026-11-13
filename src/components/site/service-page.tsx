@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { formatBp, formatCents } from "@/lib/pricing/money";
 import { SERVICE_PAGES, SERVICES, type ServiceCode } from "@/lib/public/content";
-import { publicAvailability, withVat, type PublicRates, type PublicSurcharge } from "@/lib/public/rates";
+import { publicAvailability, type PublicRates, type PublicSurcharge } from "@/lib/public/rates";
 import { getPublicCatalog, getPublicRates } from "@/lib/public/server";
 import { faqPageJsonLd, jsonLdString } from "@/lib/public/seo";
 import { PortersCalculator, StorageCalculator } from "./calculators";
@@ -42,7 +42,8 @@ export async function ServicePage({ code }: { code: ServiceCode }) {
             ) : code === "trasporto" ? (
               <PrimaryCta />
             ) : (
-              <PrimaryCta href="#prezzi">Calcola il prezzo indicativo</PrimaryCta>
+              // Native anchor: scrolls to the calculator on every click (a Link to the current hash does it only once).
+              <a href="#prezzi" className="inline-block rounded-md bg-accent-500 px-6 py-3 font-semibold text-white hover:bg-accent-600">Calcola il prezzo indicativo</a>
             )}
           </div>
         </div>
@@ -122,14 +123,6 @@ export async function ServicePage({ code }: { code: ServiceCode }) {
 const th = "py-3 pr-4 font-medium";
 const td = "py-3 pr-4 text-zinc-700";
 
-function Money({ net, vatRateBp }: { net: number; vatRateBp: number }) {
-  return (
-    <>
-      <td className={td}>{formatCents(net)}</td>
-      <td className={td}>{formatCents(withVat(net, vatRateBp))}</td>
-    </>
-  );
-}
 
 function PriceTable({ caption, head, children }: { caption: string; head: string; children: React.ReactNode }) {
   return (
@@ -139,8 +132,7 @@ function PriceTable({ caption, head, children }: { caption: string; head: string
         <thead>
           <tr className="border-b border-zinc-200 text-zinc-500">
             <th scope="col" className={th}>{head}</th>
-            <th scope="col" className={th}>IVA esclusa</th>
-            <th scope="col" className={th}>IVA inclusa</th>
+            <th scope="col" className={th}>Prezzo (IVA esclusa)</th>
           </tr>
         </thead>
         <tbody>{children}</tbody>
@@ -149,11 +141,11 @@ function PriceTable({ caption, head, children }: { caption: string; head: string
   );
 }
 
-function Row({ label, net, vatRateBp }: { label: React.ReactNode; net: number; vatRateBp: number }) {
+function Row({ label, net }: { label: React.ReactNode; net: number }) {
   return (
     <tr className="border-b border-zinc-100">
       <th scope="row" className="py-3 pr-4 font-medium text-brand-900">{label}</th>
-      <Money net={net} vatRateBp={vatRateBp} />
+      <td className={td}>{formatCents(net)}</td>
     </tr>
   );
 }
@@ -162,7 +154,6 @@ const surchargeText = (s: PublicSurcharge) => (s.kind === "percent" ? `+${format
 
 /** Indicative price tables (D162) + the calculator for facchinaggio and deposito. */
 function Prices({ code, rates }: { code: ServiceCode; rates: PublicRates }) {
-  const vat = rates.vatRateBp;
   const t = rates.transport;
   const surcharges = [
     t.urgent ? `Urgenza (meno di ${t.urgentLeadHours} ore prima): ${surchargeText(t.urgent)}` : null,
@@ -174,9 +165,16 @@ function Prices({ code, rates }: { code: ServiceCode; rates: PublicRates }) {
       <div className="mx-auto max-w-6xl px-4 py-16">
         <SectionTitle eyebrow="Prezzi indicativi" title="Quanto costa" />
         <p className="mt-3 max-w-2xl text-zinc-600">
-          Tariffe del listino in vigore. Il prezzo esatto è calcolato nella prenotazione e mostrato prima del pagamento: ai privati IVA inclusa, alle aziende IVA esclusa più IVA.
+          Tariffe del listino in vigore, IVA esclusa. Il prezzo esatto, con l&apos;IVA, è calcolato nella prenotazione e mostrato prima del pagamento.
         </p>
-        <div className={`mt-8 grid gap-10 ${code === "trasporto" ? "" : "lg:grid-cols-[3fr_2fr]"}`}>
+        {/* Calculator first, the price list under it (owner feedback 2026-11-13) */}
+        <div className="mt-8 space-y-10">
+          {code !== "trasporto" ? (
+            <div className="min-w-0 max-w-xl rounded-xl bg-white p-5 shadow-sm ring-1 ring-black/5 sm:p-6">
+              <h3 className="mb-4 text-lg font-semibold text-brand-900">Calcola il prezzo indicativo</h3>
+              {code === "facchinaggio" ? <PortersCalculator rates={rates} /> : <StorageCalculator rates={rates} />}
+            </div>
+          ) : null}
           <div className="min-w-0 space-y-8">
             {code === "trasporto" ? (
               <>
@@ -186,16 +184,16 @@ function Prices({ code, rates }: { code: ServiceCode; rates: PublicRates }) {
                     <thead>
                       <tr className="border-b border-zinc-200 text-zinc-500">
                         <th scope="col" className={th}>Veicolo</th>
-                        <th scope="col" className={th}>Al km (IVA escl. / incl.)</th>
-                        <th scope="col" className={th}>Prezzo minimo (IVA escl. / incl.)</th>
+                        <th scope="col" className={th}>Al km</th>
+                        <th scope="col" className={th}>Prezzo minimo</th>
                       </tr>
                     </thead>
                     <tbody>
                       {t.vehicles.map((v) => (
                         <tr key={v.vehicleTypeId} className="border-b border-zinc-100">
                           <th scope="row" className="py-3 pr-4 font-medium text-brand-900">{v.name}</th>
-                          <td className={td}>{formatCents(v.perKmCents)} / {formatCents(withVat(v.perKmCents, vat))}</td>
-                          <td className={td}>{formatCents(v.minCents)} / {formatCents(withVat(v.minCents, vat))}</td>
+                          <td className={td}>{formatCents(v.perKmCents)}</td>
+                          <td className={td}>{formatCents(v.minCents)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -206,7 +204,7 @@ function Prices({ code, rates }: { code: ServiceCode; rates: PublicRates }) {
                     <h3 className="text-base font-semibold text-brand-900">Supplementi</h3>
                     <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700">
                       {t.floorNoElevatorCents ? (
-                        <li>Ogni piano senza ascensore, al ritiro e alla consegna: {formatCents(t.floorNoElevatorCents)} ({formatCents(withVat(t.floorNoElevatorCents, vat))} IVA inclusa)</li>
+                        <li>Ogni piano senza ascensore, al ritiro e alla consegna: {formatCents(t.floorNoElevatorCents)}</li>
                       ) : null}
                       {surcharges.map((s) => (
                         <li key={s}>{s} sul trasporto</li>
@@ -220,8 +218,8 @@ function Prices({ code, rates }: { code: ServiceCode; rates: PublicRates }) {
             {code === "facchinaggio" && rates.porters ? (
               <>
                 <PriceTable caption="Facchinaggio" head="Voce">
-                  <Row label="Un facchino, all'ora" net={rates.porters.perHourCents} vatRateBp={vat} />
-                  {rates.porters.floorNoElevatorCents ? <Row label="Ogni piano senza ascensore" net={rates.porters.floorNoElevatorCents} vatRateBp={vat} /> : null}
+                  <Row label="Un facchino, all'ora" net={rates.porters.perHourCents} />
+                  {rates.porters.floorNoElevatorCents ? <Row label="Ogni piano senza ascensore" net={rates.porters.floorNoElevatorCents} /> : null}
                 </PriceTable>
                 <ul className="list-disc space-y-1 pl-5 text-sm text-zinc-700">
                   <li>Da {rates.porters.minPersons} a {rates.porters.maxPersons} facchini, minimo {rates.porters.minHours} ore per facchino.</li>
@@ -237,7 +235,7 @@ function Prices({ code, rates }: { code: ServiceCode; rates: PublicRates }) {
                 {rates.storage.boxes.length ? (
                   <div className="overflow-x-auto">
                     <table className="w-full min-w-[19rem] text-left text-sm">
-                      <caption className="pb-2 text-left text-base font-semibold text-brand-900">Privati – box (IVA inclusa)</caption>
+                      <caption className="pb-2 text-left text-base font-semibold text-brand-900">Privati – box (IVA esclusa)</caption>
                       <thead>
                         <tr className="border-b border-zinc-200 text-zinc-500">
                           <th scope="col" className={th}>Box</th>
@@ -251,8 +249,8 @@ function Prices({ code, rates }: { code: ServiceCode; rates: PublicRates }) {
                           <tr key={b.code} className="border-b border-zinc-100">
                             <th scope="row" className="py-3 pr-4 font-medium text-brand-900">{b.label}</th>
                             <td className={td}>{String(b.volumeM3).replace(".", ",")} m³</td>
-                            <td className={td}>{formatCents(withVat(b.dayCents, vat))}</td>
-                            <td className={td}>{formatCents(withVat(b.monthCents, vat))}</td>
+                            <td className={td}>{formatCents(b.dayCents)}</td>
+                            <td className={td}>{formatCents(b.monthCents)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -262,12 +260,12 @@ function Prices({ code, rates }: { code: ServiceCode; rates: PublicRates }) {
                 ) : null}
                 {rates.storage.pallets ? (
                   <PriceTable caption="Aziende – pallet" head="Voce">
-                    <Row label={`Pallet al giorno, fino a ${rates.storage.pallets.shortTermMaxDays} giorni`} net={rates.storage.pallets.shortDayCents} vatRateBp={vat} />
+                    <Row label={`Pallet al giorno, fino a ${rates.storage.pallets.shortTermMaxDays} giorni`} net={rates.storage.pallets.shortDayCents} />
                     {rates.storage.pallets.longDayCents !== null ? (
-                      <Row label={`Pallet al giorno, dal ${rates.storage.pallets.shortTermMaxDays + 1}° giorno`} net={rates.storage.pallets.longDayCents} vatRateBp={vat} />
+                      <Row label={`Pallet al giorno, dal ${rates.storage.pallets.shortTermMaxDays + 1}° giorno`} net={rates.storage.pallets.longDayCents} />
                     ) : null}
                     {rates.storage.pallets.transshipmentCents !== null ? (
-                      <Row label="Transbordo (in giornata, con il trasporto)" net={rates.storage.pallets.transshipmentCents} vatRateBp={vat} />
+                      <Row label="Transbordo (in giornata, con il trasporto)" net={rates.storage.pallets.transshipmentCents} />
                     ) : null}
                   </PriceTable>
                 ) : null}
@@ -275,12 +273,6 @@ function Prices({ code, rates }: { code: ServiceCode; rates: PublicRates }) {
             ) : null}
           </div>
 
-          {code !== "trasporto" ? (
-            <div className="min-w-0 rounded-xl bg-white p-5 shadow-sm ring-1 ring-black/5 sm:p-6">
-              <h3 className="mb-4 text-lg font-semibold text-brand-900">Calcola il prezzo indicativo</h3>
-              {code === "facchinaggio" ? <PortersCalculator rates={rates} /> : <StorageCalculator rates={rates} />}
-            </div>
-          ) : null}
         </div>
       </div>
     </section>

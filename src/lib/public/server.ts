@@ -1,7 +1,7 @@
 import "server-only";
 import { cacheLife, cacheTag } from "next/cache";
 import { COMPANY_INFO_CACHE_TAG } from "@/lib/admin/settings";
-import { loadActiveWarehouse, loadBookingOptions, loadFleet } from "@/lib/booking/server";
+import { loadActiveWarehouse, loadActiveWarehouses, loadBookingOptions, loadFleet } from "@/lib/booking/server";
 import { loadPricingConfig, PricingConfigError } from "@/lib/pricing/load";
 import { createServiceClient } from "@/lib/supabase/service";
 import { toCompanyInfo, type CompanyInfo } from "./company";
@@ -51,6 +51,8 @@ export type PublicCatalog = {
   storageMaxDays: number;
   storageBillingUnit: "day" | "pallet_day";
   warehouseCity: string | null;
+  /** Active warehouses (D178): name and city only, for the home page. */
+  warehouses: { name: string; city: string; province: string }[];
   maxDistanceKm: number;
   minLeadHours: number;
 };
@@ -60,7 +62,8 @@ export async function getPublicCatalog(): Promise<PublicCatalog> {
   "use cache";
   cacheLife("hours");
   try {
-    const o = await loadBookingOptions(createServiceClient());
+    const db = createServiceClient();
+    const [o, warehouses] = await Promise.all([loadBookingOptions(db), loadActiveWarehouses(db)]);
     return {
       bookingAvailable: o.available,
       vehicles: o.vehicles.map((v) => ({
@@ -80,12 +83,13 @@ export async function getPublicCatalog(): Promise<PublicCatalog> {
       storageMaxDays: o.storage.maxDays,
       storageBillingUnit: o.storage.billingUnit,
       warehouseCity: o.storage.warehouseCity,
+      warehouses: warehouses.map((w) => ({ name: w.name, city: w.city, province: w.province })),
       maxDistanceKm: o.maxDistanceKm,
       minLeadHours: o.minLeadHours,
     };
   } catch (e) {
     console.error("[public] catalog:", e instanceof Error ? e.message : e);
-    return { bookingAvailable: false, vehicles: [], portersAvailable: false, porterPackages: [], packingAvailable: false, storageAvailable: false, storageMaxDays: 0, storageBillingUnit: "pallet_day", warehouseCity: null, maxDistanceKm: 0, minLeadHours: 0 };
+    return { bookingAvailable: false, vehicles: [], portersAvailable: false, porterPackages: [], packingAvailable: false, storageAvailable: false, storageMaxDays: 0, storageBillingUnit: "pallet_day", warehouseCity: null, warehouses: [], maxDistanceKm: 0, minLeadHours: 0 };
   }
 }
 

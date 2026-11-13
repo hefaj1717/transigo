@@ -437,7 +437,7 @@ export function StorageWizard({ options, session, initialStep, prefill }: { opti
                     {(["private", "business"] as const).map((t) => (
                       <label key={t} className="flex items-center gap-2 text-sm">
                         <input type="radio" name="customerTypeView" checked={state.customerTypeView === t} onChange={() => update({ customerTypeView: t })} />
-                        {t === "private" ? "Privato – box (IVA inclusa)" : "Azienda – pallet (IVA esclusa)"}
+                        {t === "private" ? "Privato – box" : "Azienda – pallet"}
                       </label>
                     ))}
                   </div>
