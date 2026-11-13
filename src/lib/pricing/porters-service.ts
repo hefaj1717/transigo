@@ -31,7 +31,7 @@ export type PortersPriceInput = {
 };
 
 /** Overtime terms of the job (same shape as transport porters, without the load category). */
-export type PortersJobTerms = Omit<QuotePorters, "legIndex" | "packageCode">;
+export type PortersJobTerms = Omit<QuotePorters, "legIndex" | "packageCode" | "side">;
 
 export type PortersPriceResult = { ok: true; quote: Quote; job: PortersJobTerms } | { ok: false; error: PricingError };
 

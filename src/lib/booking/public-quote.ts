@@ -1,7 +1,7 @@
 // What the browser may see of a quote (D29, D76): customer amounts only — no carrier amounts, carrier
 // shares, margin or admin warnings. Every quote leaves the server through toPublicQuote().
 import { applyBp } from "../pricing/money";
-import type { OrderLineType, PorterPackageCode, Quote, StorageType } from "../pricing/types";
+import type { OrderLineType, PorterPackageCode, PorterSide, Quote, StorageType } from "../pricing/types";
 
 export type PublicQuoteLine = {
   lineType: OrderLineType;
@@ -16,7 +16,8 @@ export type PublicQuoteLine = {
 
 export type PublicPorterTerms = {
   legIndex: number;
-  packageCode: PorterPackageCode;
+  side: PorterSide; // D182
+  packageCode: PorterPackageCode | null;
   persons: number;
   includedHours: number;
   /** Per person, per started hour (D68); null = overtime not charged. Net and with VAT for display (D3). */
@@ -59,6 +60,7 @@ export function toPublicQuote(q: Quote): PublicQuote {
     storageType: q.storageType,
     porters: q.porters.map((p) => ({
       legIndex: p.legIndex,
+      side: p.side,
       packageCode: p.packageCode,
       persons: p.persons,
       includedHours: p.includedHours,

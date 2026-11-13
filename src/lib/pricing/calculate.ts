@@ -3,7 +3,7 @@ import { enabledRules, finalizeLines, porterShareTerms, type DraftLine } from ".
 import { applyBp } from "./money";
 import { PORTER_PACKAGE_LABEL } from "./rule-meta";
 import { storageCost } from "./storage";
-import { PORTER_PACKAGE_CODES } from "./types";
+import { isLoadingHelp, LOADING_HELP_MAX_HOURS, PORTER_PACKAGE_CODES } from "./types";
 import type {
   OrderLineType,
   PriceInput,
@@ -11,6 +11,7 @@ import type {
   PriceRuleCode,
   PricingConfig,
   PricingError,
+  PorterRequest,
   QuotePorters,
   StorageType,
 } from "./types";
@@ -45,13 +46,22 @@ function validate(input: PriceInput): string | null {
   const legIndexOk = (idx: number | undefined) => idx === undefined || isInt(idx, 0, input.legs.length - 1);
   if (input.porters !== undefined) {
     if (!Array.isArray(input.porters)) return "porters must be an array";
-    const seen = new Set<number>();
+    // Per leg: one package entry, or loading / unloading help (D182) with at most one entry per side — never both.
+    const seen = new Set<string>();
     for (const [k, p] of input.porters.entries()) {
-      if (!(PORTER_PACKAGE_CODES as readonly string[]).includes(p.packageCode)) return `porters[${k}].packageCode is unknown`;
-      if (p.count !== undefined && !isInt(p.count, 1, MAX_PORTERS)) return `porters[${k}].count must be 1–${MAX_PORTERS}`;
       if (!isInt(p.legIndex, 0, input.legs.length - 1)) return `porters[${k}].legIndex out of range`;
-      if (seen.has(p.legIndex)) return `porters: more than one entry for leg ${p.legIndex}`;
-      seen.add(p.legIndex);
+      if (isLoadingHelp(p)) {
+        if (p.side !== "loading" && p.side !== "unloading") return `porters[${k}].side is unknown`;
+        if (!isInt(p.persons, 1, MAX_PORTERS)) return `porters[${k}].persons must be 1–${MAX_PORTERS}`;
+        if (!isInt(p.hours, 1, LOADING_HELP_MAX_HOURS)) return `porters[${k}].hours must be 1–${LOADING_HELP_MAX_HOURS}`;
+        if (seen.has(`${p.legIndex}:both`) || seen.has(`${p.legIndex}:${p.side}`)) return `porters: more than one entry for leg ${p.legIndex}`;
+        seen.add(`${p.legIndex}:${p.side}`);
+      } else {
+        if (!(PORTER_PACKAGE_CODES as readonly string[]).includes(p.packageCode)) return `porters[${k}].packageCode is unknown`;
+        if (p.count !== undefined && !isInt(p.count, 1, MAX_PORTERS)) return `porters[${k}].count must be 1–${MAX_PORTERS}`;
+        if ([...seen].some((s) => s.startsWith(`${p.legIndex}:`))) return `porters: more than one entry for leg ${p.legIndex}`;
+        seen.add(`${p.legIndex}:both`);
+      }
     }
   }
   if (input.packing) {
@@ -146,9 +156,37 @@ export function calculatePrice(input: PriceInput, config: PricingConfig): PriceR
   // 3. Porters per leg (D67, D74): package = persons × included hours × porter_hour. The customer may add
   //    persons (each gets the package's hours) but not hours; extra time is settled after the job (D68, D69).
   const porterTerms: Omit<QuotePorters, "carrierShare">[] = [];
-  for (const req of [...(input.porters ?? [])].sort((a, b) => a.legIndex - b.legIndex)) {
-    const pkg = config.porterPackages.find((p) => p.code === req.packageCode);
+  const sideOrder = { both: 0, loading: 1, unloading: 2 } as const;
+  const sideOf = (r: PorterRequest) => (isLoadingHelp(r) ? r.side : "both");
+  const requests = [...(input.porters ?? [])].sort((a, b) => a.legIndex - b.legIndex || sideOrder[sideOf(a)] - sideOrder[sideOf(b)]);
+  for (const req of requests) {
     const perHour = amountOf("porter_hour");
+    if (isLoadingHelp(req)) {
+      // D182: loading / unloading help — persons × hours chosen by the customer × porter_hour, per side.
+      if (perHour === null) return fail({ code: "service_unavailable", service: "porters" });
+      const personHours = req.persons * req.hours;
+      const who = `${req.persons} ${req.persons === 1 ? "persona" : "persone"} × ${req.hours} h`;
+      push({
+        lineType: "porters",
+        labelIt: `${legPrefix(req.legIndex)}${req.side === "loading" ? "Aiuto al carico" : "Aiuto allo scarico"}: ${who}`,
+        legIndex: req.legIndex,
+        quantity: personHours,
+        unitAmountCents: perHour,
+        netCents: personHours * perHour,
+        carrierShareGroup: "porters",
+      });
+      porterTerms.push({
+        legIndex: req.legIndex,
+        side: req.side,
+        packageCode: null,
+        persons: req.persons,
+        includedHours: req.hours,
+        overtimeRatePerPersonCents: amountOf("porter_overtime_hour"),
+        overtimeGraceMinutes: config.porterOvertimeGraceMinutes,
+      });
+      continue;
+    }
+    const pkg = config.porterPackages.find((p) => p.code === req.packageCode);
     if (!pkg || !pkg.isEnabled || perHour === null) return fail({ code: "service_unavailable", service: "porters" });
     const count = req.count ?? pkg.portersCount;
     if (count < pkg.portersCount) return invalid(`porters.count must be at least ${pkg.portersCount} for ${pkg.code}`);
@@ -165,6 +203,7 @@ export function calculatePrice(input: PriceInput, config: PricingConfig): PriceR
     });
     porterTerms.push({
       legIndex: req.legIndex,
+      side: "both",
       packageCode: pkg.code,
       persons: count,
       includedHours: hours,

@@ -113,7 +113,19 @@ export type PriceLeg = {
   deliveryHasElevator: boolean;
 };
 
-export type PorterRequest = { legIndex: number; packageCode: PorterPackageCode; count?: number };
+/** Package porters of a leg (D67, D74): the same team loads and unloads. */
+export type PorterPackageRequest = { legIndex: number; packageCode: PorterPackageCode; count?: number };
+
+/** D182: help at loading (pickup) or at unloading (delivery), each with its own persons and hours. */
+export type LoadingHelpSide = "loading" | "unloading";
+export const LOADING_HELP_MAX_HOURS = 4;
+export type LoadingHelpRequest = { legIndex: number; side: LoadingHelpSide; persons: number; hours: number };
+
+export type PorterRequest = PorterPackageRequest | LoadingHelpRequest;
+export const isLoadingHelp = (p: PorterRequest): p is LoadingHelpRequest => "side" in p;
+
+/** Where the porters of a quote entry work: the whole leg (package) or one side of it (D182). */
+export type PorterSide = "both" | LoadingHelpSide;
 
 export type PriceInput = {
   customerType: CustomerType;
@@ -149,7 +161,8 @@ export type QuoteWarning = { code: "negative_margin"; group: CarrierShareGroup; 
  */
 export type QuotePorters = {
   legIndex: number; // D74: terms per leg
-  packageCode: PorterPackageCode;
+  side: PorterSide; // D182: "both" = package porters of the leg; otherwise one entry per side
+  packageCode: PorterPackageCode | null; // null for loading / unloading help (D182)
   persons: number;
   includedHours: number;
   overtimeRatePerPersonCents: number | null; // null = overtime disabled in the price list
@@ -172,7 +185,7 @@ export type Quote = {
   carrierAmountCents: number;
   carrierAmountByLegCents: number[];
   storageType: StorageType | null;
-  porters: QuotePorters[]; // one entry per leg with porters, ordered by legIndex (D74)
+  porters: QuotePorters[]; // per leg (D74) — one "both" entry, or up to one per side (D182); ordered by leg, then loading before unloading
   isUrgentByLeg: boolean[];
   warnings: QuoteWarning[];
 };

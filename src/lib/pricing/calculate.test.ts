@@ -180,6 +180,7 @@ describe("porters and packing (D54, D67, D74)", () => {
     const q = quote({ porters: [{ legIndex: 0, packageCode: "trilocale_plus", count: 4 }] });
     expect(q.porters).toEqual([{
       legIndex: 0,
+      side: "both",
       packageCode: "trilocale_plus",
       persons: 4,
       includedHours: 4,
@@ -188,6 +189,40 @@ describe("porters and packing (D54, D67, D74)", () => {
       carrierShare: { kind: "percent", percentBp: 8000 },
     }]);
     expect(quote({}).porters).toEqual([]);
+  });
+
+  it("D182: loading and unloading help — own persons and hours per side, same rate per person-hour", () => {
+    const q = quote({ porters: [
+      { legIndex: 0, side: "unloading", persons: 2, hours: 2 },
+      { legIndex: 0, side: "loading", persons: 1, hours: 1 },
+    ] });
+    const lines = q.lines.filter((l) => l.lineType === "porters");
+    expect(lines.map((l) => [l.labelIt, l.quantity, l.unitAmountCents, l.netCents])).toEqual([
+      ["Aiuto al carico: 1 persona × 1 h", 1, 3000, 3000],
+      ["Aiuto allo scarico: 2 persone × 2 h", 4, 3000, 12_000],
+    ]);
+    expect(q.porters.map((p) => [p.side, p.packageCode, p.persons, p.includedHours, p.overtimeRatePerPersonCents])).toEqual([
+      ["loading", null, 1, 1, 3500],
+      ["unloading", null, 2, 2, 3500],
+    ]);
+    // carrier share once per leg over both sides (80 % in the fixture)
+    expect(lines.reduce((s, l) => s + l.carrierAmountCents, 0)).toBe(12_000);
+    expect(q.porters[0].carrierShare).toEqual({ kind: "percent", percentBp: 8000 });
+  });
+
+  it("D182: only one side is fine; limits and duplicates are refused", () => {
+    expect(quote({ porters: [{ legIndex: 0, side: "unloading", persons: 3, hours: 4 }] }).porters).toHaveLength(1);
+    expect(error({ porters: [{ legIndex: 0, side: "loading", persons: 1, hours: 5 }] }).code).toBe("invalid_input");
+    expect(error({ porters: [{ legIndex: 0, side: "loading", persons: 5, hours: 1 }] }).code).toBe("invalid_input");
+    expect(error({ porters: [{ legIndex: 0, side: "loading", persons: 0, hours: 1 }] }).code).toBe("invalid_input");
+    expect(error({ porters: [{ legIndex: 0, side: "loading", persons: 1, hours: 1 }, { legIndex: 0, side: "loading", persons: 2, hours: 1 }] }).code).toBe("invalid_input");
+    expect(error({ porters: [{ legIndex: 0, side: "loading", persons: 1, hours: 1 }, { legIndex: 0, packageCode: "parcels" }] }).code).toBe("invalid_input");
+    expect(error({ porters: [{ legIndex: 0, packageCode: "parcels" }, { legIndex: 0, side: "unloading", persons: 1, hours: 1 }] }).code).toBe("invalid_input");
+  });
+
+  it("D182: help needs the porter_hour rule", () => {
+    const config = withRule(makeConfig(), "porter_hour", { isEnabled: false });
+    expect(error({ porters: [{ legIndex: 0, side: "loading", persons: 1, hours: 1 }] }, config)).toEqual({ code: "service_unavailable", service: "porters" });
   });
 
   it("porters: overtime rule disabled → no overtime rate in the terms", () => {

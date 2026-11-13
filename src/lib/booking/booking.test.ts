@@ -141,7 +141,7 @@ describe("browser view of a quote (D29, D76)", () => {
 
   it("porter terms with the overtime rate net and with VAT (D68, D3)", () => {
     expect(toPublicQuote(quote).porters).toEqual([
-      { legIndex: 0, packageCode: "monolocale", persons: 2, includedHours: 2, overtimeRateNetCents: 3500, overtimeRateGrossCents: 4270, overtimeGraceMinutes: 15 },
+      { legIndex: 0, side: "both", packageCode: "monolocale", persons: 2, includedHours: 2, overtimeRateNetCents: 3500, overtimeRateGrossCents: 4270, overtimeGraceMinutes: 15 },
     ]);
   });
 
