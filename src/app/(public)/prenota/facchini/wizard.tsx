@@ -27,6 +27,7 @@ import { Headline, QuoteBreakdown } from "../quote-view";
 import { submitPortersBooking } from "./actions";
 import { createQuoteMemo, keepQuoteResult } from "@/lib/booking/quote-memo";
 import { bookingDateLabel } from "@/lib/booking/date-label";
+import { StepTransition } from "@/components/booking/step-transition";
 
 // Facchinaggio wizard (D158). Same model as the transport wizard: the state (no personal data) is kept in
 // localStorage (D78); contacts and billing only in memory; every price comes from the server (D76).
@@ -298,6 +299,7 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
         </ol>
 
         <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+          <StepTransition step={step} index={stepIndex(step)}>
           <h2 className="mb-4 text-lg font-semibold text-zinc-900">{steps[stepIndex(step)]?.label}</h2>
 
           {step === "indirizzo" ? (
@@ -465,6 +467,7 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
             </p>
           ) : null}
 
+          </StepTransition>
           <div className="mt-6 flex justify-between gap-3">
             <button type="button" disabled={step === "indirizzo"} onClick={() => go(steps[stepIndex(step) - 1].id)} className="rounded-md border border-zinc-300 px-4 py-2 text-sm hover:bg-zinc-50 disabled:invisible">
               Indietro

@@ -22,6 +22,7 @@ import { LoadingHelpField } from "@/components/booking/loading-help-field";
 import { VehicleIllustration } from "@/components/site/vehicle-illustration";
 import { STEPS, type QuoteResponse, type WizardSession } from "./types";
 import { bookingDateLabel } from "@/lib/booking/date-label";
+import { StepTransition } from "@/components/booking/step-transition";
 
 const input = "mt-1 block w-full rounded-md border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:ring-2 focus:ring-blue-500";
 const label = "block text-sm font-medium text-zinc-800";
@@ -379,6 +380,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
         </ol>
 
         <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+          <StepTransition step={step} index={stepIndex(step)}>
           <h2 className="mb-4 text-lg font-semibold text-zinc-900">{steps[stepIndex(step)]?.label}</h2>
 
           {step === "percorso" ? (
@@ -663,6 +665,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
             </section>
           ) : null}
 
+          </StepTransition>
           <div className="mt-6 flex justify-between gap-3">
             <button type="button" disabled={step === "percorso"} onClick={() => go(steps[stepIndex(step) - 1].id)} className="rounded-md border border-zinc-300 px-4 py-2 text-sm hover:bg-zinc-50 disabled:invisible">
               Indietro
