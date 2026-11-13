@@ -32,6 +32,7 @@ import { BookingPhaseBadge } from "@/components/orders/booking-phase-badge";
 import { bookingPhase, romeToday, type BookingPhase } from "@/lib/orders/booking-phase";
 import { Money, type MoneyPayment, type MoneyRefund } from "./money";
 import { ADMIN_DOC_COLUMNS, AdminInvoiceTable, type AdminDoc, type DocTech } from "@/components/admin/invoice-table";
+import { facchiniLabel, personeLabel } from "@/lib/orders/order-summary";
 
 export const metadata = { title: "Ordine – Transigo" };
 
@@ -218,7 +219,7 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
         <span className={`rounded px-2 py-0.5 text-sm ${type === "transport" ? "bg-zinc-100 text-zinc-700" : "bg-violet-100 text-violet-900"}`}>{SERVICE_TYPE_LABEL[type]}</span>
         <span className="rounded bg-zinc-100 px-2 py-0.5 text-sm font-medium text-zinc-900">{orderStatusLabel(o.status, o.service_type)}</span>
         {teamTooSmall(o, o.order_porter_jobs?.persons, o.carriers) ? (
-          <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-900">Squadra insufficiente: il padroncino non può più coprire {o.order_porter_jobs?.persons} facchini</span>
+          <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-900">Squadra insufficiente: il padroncino non può più coprire {o.order_porter_jobs ? facchiniLabel(o.order_porter_jobs.persons) : "la squadra"}</span>
         ) : null}
         <span className="text-sm text-zinc-600">Pagamento: {PAYMENT_STATE_LABEL[pay]}{o.paid_at ? ` (${rome(o.paid_at)})` : ""}</span>
         {o.delivered_without_pod ? (
@@ -311,7 +312,7 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
                 <p className="mt-1 text-zinc-700">
                   {rome(l.pickup_window_start)}–{time(l.pickup_window_end)} · {km(l.distance_m)}{duration(l.duration_s) ? ` · ${duration(l.duration_s)}` : ""}
                   {l.is_urgent ? " · urgente" : ""}
-                  {l.porters_count ? ` · ${l.porters_count} facchini, ${l.porters_included_hours} h` : ""}
+                  {l.porters_count ? ` · ${facchiniLabel(l.porters_count)}, ${l.porters_included_hours} h` : ""}
                 </p>
               </li>
             ))}
@@ -393,7 +394,7 @@ function PorterJobSection({ job }: { job: PorterJob }) {
         <p><span className="text-zinc-500">Indirizzo:</span> {job.address} <span className="text-zinc-500">({floor(job.floor, job.has_elevator)})</span></p>
         <p className="mt-1 text-zinc-700">
           {rome(job.window_start)}–{time(job.window_end)}{job.is_urgent ? " · urgente" : ""}
-          {` · ${job.persons} facchini, ${job.billed_hours} h`}
+          {` · ${facchiniLabel(job.persons)}, ${job.billed_hours} h`}
           {job.billed_hours > job.requested_hours ? ` (richieste ${job.requested_hours} h, minimo del listino)` : ""}
         </p>
         {job.worked_minutes != null ? <p className="mt-1 text-zinc-700">Tempo lavorato: {Math.floor(job.worked_minutes / 60)} h {job.worked_minutes % 60} min</p> : null}
@@ -610,7 +611,7 @@ function PortersDispatch({ o, candidates }: { o: OrderDetail; candidates: Porter
                 <option key={c.carrier_id} value={c.carrier_id}>{c.company_name} — squadra di {c.porters_team_size}</option>
               ))}
             </select>
-            <p className="mt-1 text-xs text-zinc-500">Solo padroncini attivi con documenti approvati che offrono il facchinaggio con almeno {job?.persons ?? "?"} persone. Nessun veicolo richiesto.</p>
+            <p className="mt-1 text-xs text-zinc-500">Solo padroncini attivi con documenti approvati che offrono il facchinaggio con almeno {job ? personeLabel(job.persons) : "? persone"}. Nessun veicolo richiesto.</p>
           </ActionForm>
         ) : (
           <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-900">

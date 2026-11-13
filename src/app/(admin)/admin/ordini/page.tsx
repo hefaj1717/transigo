@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { REFUNDS_TO_COMPLETE_FILTER, refundsToComplete } from "@/lib/orders/admin-refunds";
 import Link from "next/link";
 import { Loading } from "@/components/panel-shell";
 import { AdminShell } from "@/components/admin/admin-nav";
@@ -187,8 +188,7 @@ async function orderIdsFor(db: Awaited<ReturnType<typeof createClient>>, kind: "
     if (error) throw new Error(`payments unavailable: ${error.code}`);
     return [...new Set(data.map((p) => p.order_id as string))];
   }
-  const { data, error } = await db.from("refunds").select("id, order_id, status, retry_of").neq("status", "succeeded");
+  const { data, error } = await db.from("refunds").select("id, order_id, status, retry_of").or(REFUNDS_TO_COMPLETE_FILTER);
   if (error) throw new Error(`refunds unavailable: ${error.code}`);
-  const retried = new Set(data.map((r) => r.retry_of).filter(Boolean));
-  return [...new Set(data.filter((r) => r.status === "pending" || !retried.has(r.id)).map((r) => r.order_id as string))];
+  return [...new Set(refundsToComplete(data).map((r) => r.order_id as string))];
 }

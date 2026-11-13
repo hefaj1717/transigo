@@ -69,7 +69,7 @@ export function calculatePortersPrice(input: PortersPriceInput, config: PricingC
   const lines: DraftLine[] = [
     {
       lineType: "porters",
-      labelIt: `Facchinaggio: ${input.persons} persone × ${hours} h${hours > input.hours ? " (minimo)" : ""}`,
+      labelIt: `Facchinaggio: ${input.persons} ${input.persons === 1 ? "persona" : "persone"} × ${hours} h${hours > input.hours ? " (minimo)" : ""}`,
       legIndex: 0,
       quantity: personHours,
       unitAmountCents: perHour,

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   activeRefundCents,
   canRetryRefund,
+  refundsToComplete,
   cancellationDecisionSuggestion,
   centsToInput,
   decideCancellationSchema,
@@ -89,5 +90,13 @@ describe("refund rows", () => {
     const failed = r({ id: "f", status: "failed", stripe_refund_id: "re_1" });
     expect(canRetryRefund(failed, [failed])).toBe(true);
     expect(canRetryRefund(failed, [failed, r({ id: "n", retry_of: "f" })])).toBe(false);
+  });
+});
+
+describe("refundsToComplete", () => {
+  const r = (id: string, status: string, retry_of: string | null = null) => ({ id, status, retry_of });
+  it("a failed refund retried successfully is done; pending and failed-not-retried stay", () => {
+    const rows = [r("a", "failed"), r("b", "succeeded", "a"), r("c", "failed"), r("d", "pending"), r("e", "failed"), r("f", "failed", "e")];
+    expect(refundsToComplete(rows).map((x) => x.id)).toEqual(["c", "d", "f"]);
   });
 });

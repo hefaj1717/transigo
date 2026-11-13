@@ -31,6 +31,7 @@ import { signedDocumentUrls } from "@/lib/carriers/pages";
 import { vehicleApprovalState } from "@/lib/carriers/vehicles";
 import { createClient } from "@/lib/supabase/server";
 import { approveVehicleAction, decideCarrierAction, reviewDocumentAction, setCarrierPortersAction, setSuspensionAction } from "../actions";
+import { facchiniLabel } from "@/lib/orders/order-summary";
 
 export const metadata = { title: "Padroncino – Transigo" };
 
@@ -345,7 +346,7 @@ function PortersSettings({ carrierId, offers, team, jobs }: { carrierId: string;
         <p className="mt-2 rounded-md bg-amber-50 p-3 text-sm text-amber-900">
           {jobs.length === 1 ? "1 lavoro di facchinaggio in corso" : `${jobs.length} lavori di facchinaggio in corso`}: restano al padroncino anche se cambi la squadra.{" "}
           {jobs.map((j, i) => (
-            <span key={j.id}>{i ? ", " : ""}<Link href={`/admin/ordini/${j.id}`} className="underline">{j.order_number}</Link> ({j.persons} facchini)</span>
+            <span key={j.id}>{i ? ", " : ""}<Link href={`/admin/ordini/${j.id}`} className="underline">{j.order_number}</Link> ({facchiniLabel(j.persons)})</span>
           ))}
         </p>
       ) : null}

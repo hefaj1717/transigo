@@ -84,8 +84,12 @@ export function summaryLine(s: OrderSummary): string {
   }
 }
 
-/** "2 facchini, 3 ore" */
-export const portersTeamLabel = (persons: number, hours: number) => `${persons} facchini, ${hours} ${hours === 1 ? "ora" : "ore"}`;
+/** "1 facchino" / "2 facchini" */
+export const facchiniLabel = (n: number) => (n === 1 ? "1 facchino" : `${n} facchini`);
+/** "1 persona" / "2 persone" */
+export const personeLabel = (n: number) => (n === 1 ? "1 persona" : `${n} persone`);
+/** "2 facchini, 3 ore" / "1 facchino, 1 ora" */
+export const portersTeamLabel = (persons: number, hours: number) => `${facchiniLabel(persons)}, ${hours} ${hours === 1 ? "ora" : "ore"}`;
 
 /** Label of the start of the service: "Ritiro" (transport), "Inizio lavoro" (porters), "Inizio deposito". */
 export function startLabel(s: OrderSummary): string {

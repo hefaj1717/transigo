@@ -141,6 +141,18 @@ export function canRetryRefund(r: RefundLike, all: readonly RefundLike[]): boole
   return false;
 }
 
+/**
+ * Refunds that still need the admin ("Rimborsi da completare"): pending, or failed and not retried. `rows` must
+ * include the retries whatever their status — a failed refund retried successfully is done (REFUNDS_TO_COMPLETE_FILTER).
+ */
+export function refundsToComplete<T extends { id: string; status: string; retry_of: string | null }>(rows: readonly T[]): T[] {
+  const retried = new Set(rows.map((r) => r.retry_of).filter(Boolean));
+  return rows.filter((r) => r.status === "pending" || (r.status === "failed" && !retried.has(r.id)));
+}
+
+/** PostgREST filter for refundsToComplete(): every refund not succeeded, plus every retry (also succeeded ones). */
+export const REFUNDS_TO_COMPLETE_FILTER = "status.neq.succeeded,retry_of.not.is.null";
+
 export type DecisionSuggestion = { refundCents: number; feeCents: number; late: boolean };
 
 /**

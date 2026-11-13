@@ -178,7 +178,7 @@ export type AvailablePorterJobRow = {
 
 /** The same card as a transport job: one place, the team, the floor; the whole amount is the porters' (D152). */
 export function toPorterJobCard(row: AvailablePorterJobRow): JobCard {
-  const team = `${row.persons} facchini, ${row.billed_hours} h`;
+  const team = `${row.persons === 1 ? "1 facchino" : `${row.persons} facchini`}, ${row.billed_hours} h`;
   return {
     orderId: row.order_id,
     orderNumber: row.order_number,

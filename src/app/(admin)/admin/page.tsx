@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { REFUNDS_TO_COMPLETE_FILTER, refundsToComplete } from "@/lib/orders/admin-refunds";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Loading } from "@/components/panel-shell";
@@ -49,7 +50,7 @@ async function Content({ searchParams }: Pick<PageProps<"/admin">, "searchParams
     db.from("settings").select("unassigned_alert_hours").single(),
     db.from("orders").select("id", head).eq("status", "cancellation_review"),
     db.from("payments").select("order_id").eq("status", "succeeded").not("review_reason", "is", null).is("reviewed_at", null),
-    db.from("refunds").select("id, status, retry_of").neq("status", "succeeded"),
+    db.from("refunds").select("id, status, retry_of").or(REFUNDS_TO_COMPLETE_FILTER),
     db.from("claims").select("id", head).eq("status", "open"),
     db.from("orders").select("id", head).in("status", ["picked_up", "in_transit"]).is("carrier_id", null).not("handover_required_at", "is", null),
     db.from("orders").select("status, carrier_id, paid_at").eq("status", "paid").is("carrier_id", null).neq("service_type", "storage"), // storage: never a carrier (D152)
@@ -68,8 +69,7 @@ async function Content({ searchParams }: Pick<PageProps<"/admin">, "searchParams
   ]);
 
   const alertHours = settings.data?.unassigned_alert_hours ?? 4;
-  const retried = new Set((openRefunds.data ?? []).map((r) => r.retry_of).filter(Boolean));
-  const refundsToComplete = (openRefunds.data ?? []).filter((r) => r.status === "pending" || !retried.has(r.id)).length;
+  const refundsOpen = refundsToComplete(openRefunds.data ?? []).length;
   const expiring = expiringDocuments(
     ((docs.data ?? []) as unknown as (DocLike & { carrier_vehicles: { is_active: boolean } | null })[]).filter((d) => !d.vehicle_id || d.carrier_vehicles?.is_active),
     now,
@@ -79,7 +79,7 @@ async function Content({ searchParams }: Pick<PageProps<"/admin">, "searchParams
   const tiles: { label: string; count: number | null; href: string; hint?: string }[] = [
     { label: "Annullamenti da decidere", count: cancellations.count, href: "/admin/ordini?filtro=annullamento" },
     { label: "Pagamenti da verificare", count: new Set((reviewPayments.data ?? []).map((p) => p.order_id)).size, href: "/admin/ordini?filtro=da-verificare" },
-    { label: "Rimborsi da completare", count: refundsToComplete, href: "/admin/ordini?filtro=rimborsi" },
+    { label: "Rimborsi da completare", count: refundsOpen, href: "/admin/ordini?filtro=rimborsi" },
     { label: "Ordini da gestire", count: handover.count, href: "/admin/ordini?filtro=da-gestire", hint: "padroncino rimosso con la merce" },
     { label: `Pagati senza padroncino da oltre ${alertHours} h`, count: unassignedTooLong(paidOrders.data ?? [], alertHours, now), href: "/admin/ordini?filtro=da-assegnare" },
     { label: "Fatture in errore", count: invoiceErrors.count, href: "/admin/fatture" },
