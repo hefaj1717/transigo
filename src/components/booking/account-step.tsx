@@ -25,7 +25,15 @@ export function AccountStep({ session, returnTo }: { session: WizardSession; ret
           <SignOutButton next={returnTo} label="Esci e accedi come cliente" className="rounded-md bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700" />
         </>
       ) : session.kind === "blocked" ? (
-        <p className="rounded-md bg-red-50 p-3 text-red-800">Il tuo account è sospeso. Contattaci per assistenza.</p>
+        // Plain text, not a red box: "Avanti" shows the red step error (accountStepError) — one alert, not two.
+        // The header shows "Accedi" to a blocked session, so the way out is here.
+        <>
+          <p>
+            Non è possibile prenotare con un account sospeso. Per assistenza{" "}
+            <Link className="text-blue-700 underline" href="/contatti">contattaci</Link>.
+          </p>
+          <SignOutButton next={returnTo} label="Esci" className="rounded-md border border-zinc-300 px-4 py-2 font-medium text-zinc-800 hover:bg-zinc-50" />
+        </>
       ) : (
         <>
           <p>Per confermare la prenotazione serve un account cliente. Il preventivo resta salvato su questo dispositivo.</p>
