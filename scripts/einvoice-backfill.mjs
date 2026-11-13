@@ -8,7 +8,7 @@
 //
 // Guards: dry run unless --apply; local = this repo's stack (127.0.0.1:55321 from `supabase status`); staging = the
 // exact ref above AND .env.local pointing at it; any other project (production) is refused; refused unless the
-// provider is DEMO (EINVOICE_PROVIDER unset or "demo") and outside production (VERCEL_ENV / SITE_INDEXING).
+// provider is DEMO (EINVOICE_PROVIDER unset or "demo") and outside production (VERCEL_ENV / SITE_INDEXING; the app itself allows Vercel production on staging, D180).
 // Uses the same code as the app: queue_invoice → DEMO adapter → record_invoice_result, then the credit notes of
 // succeeded refunds (src/lib/einvoice/flow.ts). No e-mails: old documents are not announced to customers.
 import { execFileSync } from "node:child_process";

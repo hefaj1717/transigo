@@ -86,6 +86,8 @@ describe("DEMO adapter", () => {
       expect(() => createDemoProvider({ reserveNumber: fakeReserve(), env })).toThrow(expect.objectContaining({ code: "demo_on_production" }));
     }
     expect(() => createDemoProvider({ reserveNumber: fakeReserve(), env: { VERCEL_ENV: "preview" } })).not.toThrow();
+    // the demo address = Vercel production on the staging database (D180)
+    expect(() => createDemoProvider({ reserveNumber: fakeReserve(), env: { VERCEL_ENV: "production", NEXT_PUBLIC_SUPABASE_URL: "https://bacabuzzevwwdxrswbnc.supabase.co" } })).not.toThrow();
   });
 });
 
@@ -127,8 +129,11 @@ describe("config", () => {
     expect(() => providerNameFrom({ EINVOICE_PROVIDER: "acme" })).toThrow(expect.objectContaining({ code: "provider_config" }));
   });
 
-  it("production = Vercel production or indexable site", () => {
+  it("production = indexable site, or Vercel production on a database other than staging", () => {
     expect(isProduction({ VERCEL_ENV: "production" })).toBe(true);
+    expect(isProduction({ VERCEL_ENV: "production", NEXT_PUBLIC_SUPABASE_URL: "https://otherproject.supabase.co" })).toBe(true);
+    expect(isProduction({ VERCEL_ENV: "production", NEXT_PUBLIC_SUPABASE_URL: "https://bacabuzzevwwdxrswbnc.supabase.co/" })).toBe(false);
+    expect(isProduction({ VERCEL_ENV: "production", NEXT_PUBLIC_SUPABASE_URL: "https://bacabuzzevwwdxrswbnc.supabase.co", SITE_INDEXING: "on" })).toBe(true);
     expect(isProduction({ SITE_INDEXING: "on" })).toBe(true);
     expect(isProduction({ VERCEL_ENV: "preview", SITE_INDEXING: "off" })).toBe(false);
     expect(() => assertDemoAllowed({})).not.toThrow();
