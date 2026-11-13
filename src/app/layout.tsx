@@ -29,7 +29,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="it"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      // Smooth scroll to in-page anchors ("Calcola il prezzo" → #prezzi / #calcola), not with "reduce motion".
+      // data-scroll-behavior: Next turns it off during route changes, so a new page still opens at the top at once.
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased motion-safe:scroll-smooth`}
+      data-scroll-behavior="smooth"
     >
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
