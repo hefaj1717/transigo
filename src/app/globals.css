@@ -52,3 +52,28 @@ body {
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
 
+
+/*
+ * Date/time inputs: iOS Safari gives them a native minimum width wider than a narrow card, so they
+ * stick out of the right edge (hero form, wizards). Let them shrink to their container everywhere;
+ * on iOS (only browser with -webkit-touch-callout) also drop the native look, keep the height when
+ * empty and align the value left like the other fields.
+ */
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"] {
+  min-width: 0;
+  max-width: 100%;
+}
+@supports (-webkit-touch-callout: none) {
+  input[type="date"],
+  input[type="time"],
+  input[type="datetime-local"] {
+    -webkit-appearance: none;
+    appearance: none;
+    min-height: 2.625rem;
+  }
+  input::-webkit-date-and-time-value {
+    text-align: left;
+  }
+}
