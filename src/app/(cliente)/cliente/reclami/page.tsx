@@ -1,7 +1,5 @@
-import { Suspense } from "react";
 import Link from "next/link";
 import { Card, CustomerShell } from "@/components/cliente/customer-shell";
-import { Loading } from "@/components/panel-shell";
 import { requireArea } from "@/lib/auth/session";
 import { CLAIM_CATEGORY_LABEL, CLAIM_MAX_PHOTOS, CLAIM_MSG, CLAIM_STATUS_LABEL, type ClaimCategory } from "@/lib/claims/claims";
 import { createClient } from "@/lib/supabase/server";
@@ -14,9 +12,7 @@ export const metadata = { title: "I miei reclami – Transigo" };
 export default function Page({ searchParams }: PageProps<"/cliente/reclami">) {
   return (
     <CustomerShell title="I miei reclami" subtitle="Per aprire un reclamo vai all'ordine consegnato e scegli «Apri un reclamo».">
-      <Suspense fallback={<Loading />}>
-        <Content searchParams={searchParams} />
-      </Suspense>
+      <Content searchParams={searchParams} />
     </CustomerShell>
   );
 }

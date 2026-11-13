@@ -1,6 +1,4 @@
-import { Suspense } from "react";
 import { Card, CustomerShell } from "@/components/cliente/customer-shell";
-import { Loading } from "@/components/panel-shell";
 import { requireArea } from "@/lib/auth/session";
 import { billingComplete, billingFormValues, type CustomerRow } from "@/lib/customers/profile";
 import { createClient } from "@/lib/supabase/server";
@@ -13,9 +11,7 @@ export const metadata = { title: "Profilo – Transigo" };
 export default function Page() {
   return (
     <CustomerShell title="Profilo" subtitle="I tuoi dati, i dati per la fattura e la password.">
-      <Suspense fallback={<Loading />}>
-        <Content />
-      </Suspense>
+      <Content />
     </CustomerShell>
   );
 }

@@ -1,8 +1,6 @@
-import { Suspense } from "react";
 import Link from "next/link";
 import { Card, CustomerShell } from "@/components/cliente/customer-shell";
 import { CUSTOMER_DOC_COLUMNS, InvoiceList, type CustomerDoc } from "@/components/cliente/invoice-list";
-import { Loading } from "@/components/panel-shell";
 import { requireArea } from "@/lib/auth/session";
 import { groupDocuments } from "@/lib/einvoice/view";
 import { createClient } from "@/lib/supabase/server";
@@ -14,9 +12,7 @@ export const metadata = { title: "Le mie fatture – Transigo" };
 export default function Page() {
   return (
     <CustomerShell title="Le mie fatture" subtitle="La fattura viene emessa dopo il pagamento; un rimborso genera una nota di credito.">
-      <Suspense fallback={<Loading />}>
-        <Content />
-      </Suspense>
+      <Content />
     </CustomerShell>
   );
 }

@@ -1,4 +1,4 @@
-import { Suspense, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { shipmentText } from "@/lib/orders/shipment";
 import type { ShipmentCategory } from "@/lib/booking/state";
 import Link from "next/link";
@@ -6,7 +6,6 @@ import { notFound } from "next/navigation";
 import { Card, CustomerShell, StatusBadge } from "@/components/cliente/customer-shell";
 import { CUSTOMER_DOC_COLUMNS, InvoiceList, type CustomerDoc } from "@/components/cliente/invoice-list";
 import { groupDocuments } from "@/lib/einvoice/view";
-import { Loading } from "@/components/panel-shell";
 import { requireArea } from "@/lib/auth/session";
 import { customerStatusLabel, orderTitle, progressSteps, type ProgressStep } from "@/lib/orders/customer-view";
 import { bookingDays, bookingUnitLabel, CUSTOMER_STORAGE_INTAKE_LABEL, CUSTOMER_STORAGE_OUTBOUND_LABEL, formatDateOnly, serviceTypeOf } from "@/lib/orders/service-type";
@@ -41,9 +40,7 @@ export const metadata = { title: "Ordine – Transigo" };
 // through the webhook (D89). Everything is read with the customer's own session (RLS, D77).
 export default function Page({ params, searchParams }: PageProps<"/cliente/ordini/[id]">) {
   return (
-    <Suspense fallback={<Loading />}>
-      <Content params={params} searchParams={searchParams} />
-    </Suspense>
+    <Content params={params} searchParams={searchParams} />
   );
 }
 

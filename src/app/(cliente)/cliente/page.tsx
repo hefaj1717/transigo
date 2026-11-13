@@ -1,7 +1,5 @@
-import { Suspense } from "react";
 import Link from "next/link";
 import { Card, CustomerShell, StatusBadge } from "@/components/cliente/customer-shell";
-import { Loading } from "@/components/panel-shell";
 import { requireArea } from "@/lib/auth/session";
 import { CHAIN_ROLE_LABEL } from "@/lib/orders/order-group";
 import { groupBookingPhase, isOpenBookingPhase, romeToday } from "@/lib/orders/booking-phase";
@@ -20,9 +18,7 @@ export const metadata = { title: "I miei ordini – Transigo" };
 // session: RLS returns only their orders and never carrier amounts (D29, D77).
 export default function Page({ searchParams }: PageProps<"/cliente">) {
   return (
-    <Suspense fallback={<Loading />}>
-      <Content searchParams={searchParams} />
-    </Suspense>
+    <Content searchParams={searchParams} />
   );
 }
 

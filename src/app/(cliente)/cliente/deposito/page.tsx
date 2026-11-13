@@ -1,7 +1,5 @@
-import { Suspense } from "react";
 import Link from "next/link";
 import { Card, CustomerShell, StatusBadge } from "@/components/cliente/customer-shell";
-import { Loading } from "@/components/panel-shell";
 import { requireArea } from "@/lib/auth/session";
 import { STORAGE_PHASE_LABEL, STORAGE_VISIBLE_STATUSES, storageView, type StorageLeg, type StorageStep } from "@/lib/orders/storage-view";
 import { createClient } from "@/lib/supabase/server";
@@ -20,9 +18,7 @@ export const metadata = { title: "Deposito – Transigo" };
 export default function Page() {
   return (
     <CustomerShell title="Deposito" subtitle="La merce che hai affidato al nostro magazzino.">
-      <Suspense fallback={<Loading />}>
-        <Content />
-      </Suspense>
+      <Content />
     </CustomerShell>
   );
 }

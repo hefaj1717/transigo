@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { AreaLink } from "./area-link";
 import { LogoLink } from "@/components/site/logo";
 import { SignOutButton } from "@/components/sign-out-button";
 import { customerStatusLabel, statusTone, type StatusTone } from "@/lib/orders/customer-view";
@@ -21,7 +22,7 @@ export function CustomerShell({ title, subtitle, children }: { title: string; su
           <LogoLink />
           <nav aria-label="Area cliente" className="flex items-center gap-3 sm:gap-4">
             {AREA_LINKS.map((l) => (
-              <Link key={l.href} href={l.href} className="hidden text-sm font-medium text-zinc-700 hover:text-brand-800 md:inline">{l.label}</Link>
+              <AreaLink key={l.href} href={l.href} className="hidden text-sm font-medium text-zinc-700 hover:text-brand-800 md:inline">{l.label}</AreaLink>
             ))}
             <Link href="/prenota" className="whitespace-nowrap rounded-md bg-brand-800 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-900">
               <span className="sm:hidden">Prenota</span>
@@ -34,7 +35,7 @@ export function CustomerShell({ title, subtitle, children }: { title: string; su
         <nav aria-label="Area cliente (mobile)" className="border-t border-zinc-100 md:hidden">
           <div className="mx-auto flex max-w-4xl gap-5 overflow-x-auto px-4 py-2 text-sm font-medium text-zinc-700">
             {AREA_LINKS.map((l) => (
-              <Link key={l.href} href={l.href} className="whitespace-nowrap hover:text-brand-800">{l.label}</Link>
+              <AreaLink key={l.href} href={l.href} className="whitespace-nowrap hover:text-brand-800">{l.label}</AreaLink>
             ))}
           </div>
         </nav>

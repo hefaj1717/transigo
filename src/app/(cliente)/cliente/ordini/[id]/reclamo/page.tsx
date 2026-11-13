@@ -1,8 +1,6 @@
-import { Suspense } from "react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Card, CustomerShell } from "@/components/cliente/customer-shell";
-import { Loading } from "@/components/panel-shell";
 import { requireArea } from "@/lib/auth/session";
 import { canOpenClaim, CLAIM_MSG, CLAIM_WINDOW_DAYS } from "@/lib/claims/claims";
 import { createClient } from "@/lib/supabase/server";
@@ -15,9 +13,7 @@ export const metadata = { title: "Apri un reclamo – Transigo" };
 export default function Page({ params }: PageProps<"/cliente/ordini/[id]/reclamo">) {
   return (
     <CustomerShell title="Apri un reclamo">
-      <Suspense fallback={<Loading />}>
-        <Content params={params} />
-      </Suspense>
+      <Content params={params} />
     </CustomerShell>
   );
 }
