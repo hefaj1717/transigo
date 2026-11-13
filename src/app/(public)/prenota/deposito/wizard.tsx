@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import { AccountStep } from "@/components/booking/account-step";
 import { useScrollTopOnStep } from "@/components/booking/use-step-scroll";
 import { BillingFields, EMPTY_BILLING, TermsCheckbox, type Billing } from "@/components/booking/billing-fields";
@@ -112,7 +112,8 @@ export function StorageWizard({ options, session, initialStep, prefill }: { opti
   }, [steps]);
 
   // Restore after mount; values from the calculator link win over the stored unit (D162).
-  useEffect(() => {
+  // Layout effect: runs before the first paint, so a tab switch (BookingHub) never flashes "Caricamento…".
+  useLayoutEffect(() => {
     let restored: StorageState | null = null;
     try {
       restored = parseStoredStorageState(window.localStorage.getItem(STORAGE_STORAGE_KEY));

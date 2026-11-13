@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import { AccountStep } from "@/components/booking/account-step";
 import { useScrollTopOnStep } from "@/components/booking/use-step-scroll";
 import { BillingFields, EMPTY_BILLING, TermsCheckbox, type Billing } from "@/components/booking/billing-fields";
@@ -88,7 +88,8 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
   const stepIndex = useCallback((id: PortersStep) => steps.findIndex((s) => s.id === id), [steps]);
 
   // Restore after mount; values from the calculator link win over the stored team and hours (D162).
-  useEffect(() => {
+  // Layout effect: runs before the first paint, so a tab switch (BookingHub) never flashes "Caricamento…".
+  useLayoutEffect(() => {
     let restored: PortersState | null = null;
     try {
       restored = parseStoredPortersState(window.localStorage.getItem(PORTERS_STORAGE_KEY));

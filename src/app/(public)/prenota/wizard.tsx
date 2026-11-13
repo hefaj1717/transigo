@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import { formatCents } from "@/lib/pricing/money";
 import { isOutOfArea, type BookingStep } from "@/lib/booking/messages";
 import type { BookingOptions } from "@/lib/booking/server";
@@ -84,7 +84,8 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
   const stepIndex = useCallback((id: BookingStep) => steps.findIndex((s) => s.id === id), [steps]);
 
   // Restore after mount (localStorage is not available during server rendering).
-  useEffect(() => {
+  // Layout effect: runs before the first paint, so a tab switch (BookingHub) never flashes "Caricamento…".
+  useLayoutEffect(() => {
     let restored: WizardState | null = null;
     try {
       restored = parseStoredState(window.localStorage.getItem(WIZARD_STORAGE_KEY));
