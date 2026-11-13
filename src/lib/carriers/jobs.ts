@@ -1,6 +1,7 @@
 // Carrier jobs screens — pure logic (D21, D116, D119–D121). Tested in jobs.test.ts.
 // Amounts stay in cents here; formatting to "1.234,56 €" happens only in the UI (formatCents).
 // Every time shown to the carrier is in Europe/Rome, whatever the server's time zone.
+import { loadingHelpLabels } from "../orders/order-summary";
 import { palletsText, shipmentText } from "../orders/shipment";
 import type { ShipmentCategory } from "../booking/state";
 import type { PorterPackageCode, StorageType } from "../pricing/types";
@@ -91,6 +92,11 @@ export type AvailableJobLeg = {
   porter_package_code: PorterPackageCode | null;
   porters_count: number | null;
   porters_included_hours: number | null;
+  /** D182: help per side (absent in rows from before the migration). */
+  loading_porters?: number | null;
+  loading_hours?: number | null;
+  unloading_porters?: number | null;
+  unloading_hours?: number | null;
   carrier_amount_cents: number | null;
 };
 
@@ -212,7 +218,9 @@ export function floorLabel(floor: number | null, hasElevator: boolean | null): s
   return `${f}, ${hasElevator ? "con ascensore" : "senza ascensore"}`;
 }
 
-function portersLabel(leg: Pick<AvailableJobLeg, "porter_package_code" | "porters_count" | "porters_included_hours">): string | null {
+function portersLabel(leg: Pick<AvailableJobLeg, "porter_package_code" | "porters_count" | "porters_included_hours" | "loading_porters" | "loading_hours" | "unloading_porters" | "unloading_hours">): string | null {
+  const help = loadingHelpLabels(leg);
+  if (help.length) return help.join(" · "); // D182
   if (!leg.porters_count) return null;
   const who = leg.porters_count === 1 ? "1 facchino" : `${leg.porters_count} facchini`;
   const pkg = leg.porter_package_code ? ` (${PORTER_PACKAGE_LABEL[leg.porter_package_code]})` : "";

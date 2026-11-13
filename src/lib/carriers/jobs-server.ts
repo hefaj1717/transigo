@@ -158,7 +158,7 @@ const MY_JOB_COLUMNS = [
 const LEG_COLUMNS = [
   "leg_index, pickup_city, pickup_province, pickup_warehouse_id, delivery_city, delivery_province, delivery_warehouse_id",
   "distance_m, duration_s, pickup_date, pickup_window_start, pickup_window_end, pickup_floor, pickup_has_elevator",
-  "delivery_floor, delivery_has_elevator, is_urgent, porter_package_code, porters_count, porters_included_hours",
+  "delivery_floor, delivery_has_elevator, is_urgent, porter_package_code, porters_count, porters_included_hours, loading_porters, loading_hours, unloading_porters, unloading_hours",
   "order_leg_carrier_terms(carrier_amount_cents, transport_carrier_cents, porters_carrier_cents, packing_carrier_cents)",
 ].join(", ");
 
@@ -224,6 +224,10 @@ function asJobRow(o: OrderRow): AvailableJobRow {
       porter_package_code: l.porter_package_code,
       porters_count: l.porters_count,
       porters_included_hours: l.porters_included_hours,
+      loading_porters: l.loading_porters,
+      loading_hours: l.loading_hours,
+      unloading_porters: l.unloading_porters,
+      unloading_hours: l.unloading_hours,
       carrier_amount_cents: l.order_leg_carrier_terms?.carrier_amount_cents ?? null,
     })),
   };

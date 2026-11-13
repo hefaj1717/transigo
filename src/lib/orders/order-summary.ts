@@ -116,3 +116,14 @@ export function checkoutProductName(orderNumber: string, s: OrderSummary): strin
   const what = s.service === "transport" ? "Trasporto e servizi" : s.service === "porters" ? "Facchinaggio" : "Deposito";
   return `Ordine ${orderNumber} – ${what}`;
 }
+
+/** "1 persona × 1 h" */
+const helpText = (persons: number, hours: number | null) => `${personeLabel(persons)} × ${hours ?? 0} h`;
+
+/** Loading / unloading help of a leg (D182): ["Carico: 1 persona × 1 h", "Scarico: 2 persone × 2 h"]. */
+export function loadingHelpLabels(l: { loading_porters?: number | null; loading_hours?: number | null; unloading_porters?: number | null; unloading_hours?: number | null }): string[] {
+  const out: string[] = [];
+  if ((l.loading_porters ?? 0) > 0) out.push(`Carico: ${helpText(l.loading_porters!, l.loading_hours ?? null)}`);
+  if ((l.unloading_porters ?? 0) > 0) out.push(`Scarico: ${helpText(l.unloading_porters!, l.unloading_hours ?? null)}`);
+  return out;
+}

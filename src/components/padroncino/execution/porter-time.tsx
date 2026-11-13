@@ -9,8 +9,9 @@ export function PorterTime({ porters, multiLeg, title = "Tempo di lavoro dei fac
       <p className="mt-1 text-xs text-zinc-500">Solo carico e scarico, senza il viaggio. Arrotondato per difetto al minuto.</p>
       <ul className="mt-3 space-y-2 text-sm">
         {porters.map((p) => (
-          <li key={p.legIndex} className="rounded-lg bg-zinc-50 p-2">
+          <li key={`${p.legIndex}-${p.side}`} className="rounded-lg bg-zinc-50 p-2">
             {multiLeg ? <span className="block text-zinc-500">Tratta {p.legIndex + 1}</span> : null}
+            {p.side !== "both" ? <span className="block text-zinc-500">{p.side === "loading" ? "Carico" : "Scarico"}</span> : null}
             <span className="block text-base font-semibold text-zinc-900">{p.workedLabel}</span>
             <span className="block text-zinc-600">Incluse nel prezzo: {p.includedLabel}</span>
             {p.overtimeHours > 0 ? (

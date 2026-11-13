@@ -61,10 +61,24 @@ describe("customer: «Prova di consegna»", () => {
     for (const p of view.photos) expect(p.url).toEqual(expect.stringContaining("/order-photos/"));
     expect((await fetch(view.proof!.signatureUrl!)).status).toBe(200);
     expect((await fetch(view.photos[0].url!)).status).toBe(200);
-    expect(view.porters).toEqual([{ legIndex: 0, workedLabel: expect.any(String), includedLabel: "1 h", complete: true }]);
+    expect(view.porters).toEqual([{ legIndex: 0, side: "both", workedLabel: expect.any(String), includedLabel: "1 h", complete: true }]);
 
     const json = JSON.stringify(view);
     expect(json).not.toMatch(/"lat"|"lng"|45\.46|45\.07|createdBy|storage_path/);
+  });
+
+  it("D182: loading / unloading help — time per side for the customer and the admin", async () => {
+    const HELP = { porter_package_code: null, porters_count: 0, porters_included_hours: null, porter_overtime_grace_minutes: 15, loading_porters: 1, loading_hours: 1, unloading_porters: 2, unloading_hours: 2 };
+    const { orderId, c } = await runningJob({ leg0: HELP });
+    await doLeg(c.user, orderId, 0);
+    expect((await complete(c.user, orderId, "Anna Verdi", await signature(c.user, orderId))).error).toBeNull();
+    const cols = "id, status, order_legs(leg_index, porters_count, porters_included_hours, porter_overtime_grace_minutes, loading_porters, loading_hours, unloading_porters, unloading_hours)";
+    const mine = await check(customer.client.from("orders").select(cols).eq("id", orderId).single());
+    const view = await loadCustomerExecution(customer.client, mine as never);
+    expect(view.porters.map((p) => [p.side, p.includedLabel, p.complete])).toEqual([["loading", "1 h", true], ["unloading", "2 h", true]]);
+    const adm = await check(admin.client.from("orders").select(cols).eq("id", orderId).single());
+    const aview = await loadAdminExecution(admin.client, adm as never);
+    expect(aview.porters.map((p) => [p.side, p.includedLabel])).toEqual([["loading", "1 h"], ["unloading", "2 h"]]);
   });
 
   it("before the delivery: no POD; pickup photos only once loaded", async () => {

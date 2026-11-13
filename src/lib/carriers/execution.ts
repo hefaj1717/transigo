@@ -137,10 +137,14 @@ export function formatWorkedMinutes(minutes: number): string {
   return rest === 0 ? `${h} h` : `${h} h ${String(rest).padStart(2, "0")} min`;
 }
 
-export type PorterLegTerms = { legIndex: number; persons: number; includedHours: number; graceMinutes: number };
-export type WorkedRow = { leg_index: number; worked_minutes: number; complete: boolean };
+/** "both" = package porters of the leg (D67); "loading" / "unloading" = help per side (D182). */
+export type PorterTimeSide = "both" | "loading" | "unloading";
+export type PorterLegTerms = { legIndex: number; side?: PorterTimeSide; persons: number; includedHours: number; graceMinutes: number };
+/** A row of order_porters_worked_minutes (no side = "both") or of order_loading_help_minutes (D182). */
+export type WorkedRow = { leg_index: number; side?: PorterTimeSide; worked_minutes: number; complete: boolean };
 export type PorterSummary = {
   legIndex: number;
+  side: PorterTimeSide;
   workedMinutes: number;
   workedLabel: string;
   includedLabel: string;
@@ -155,11 +159,13 @@ export type PorterSummary = {
  * rule as the billing (porterOvertimeCost), without amounts.
  */
 export function porterSummaries(terms: readonly PorterLegTerms[], worked: readonly WorkedRow[], overtimeEnabled: boolean): PorterSummary[] {
+  const order = { both: 0, loading: 1, unloading: 2 } as const;
   return terms
     .filter((t) => t.persons > 0)
-    .sort((a, b) => a.legIndex - b.legIndex)
+    .sort((a, b) => a.legIndex - b.legIndex || order[a.side ?? "both"] - order[b.side ?? "both"])
     .map((t) => {
-      const row = worked.find((w) => w.leg_index === t.legIndex);
+      const side = t.side ?? "both";
+      const row = worked.find((w) => w.leg_index === t.legIndex && (w.side ?? "both") === side);
       const workedMinutes = row?.worked_minutes ?? 0;
       const cost = porterOvertimeCost({
         workedMinutes,
@@ -168,6 +174,7 @@ export function porterSummaries(terms: readonly PorterLegTerms[], worked: readon
       });
       return {
         legIndex: t.legIndex,
+        side,
         workedMinutes,
         workedLabel: formatWorkedMinutes(workedMinutes),
         includedLabel: `${t.includedHours} h`,
@@ -176,6 +183,33 @@ export function porterSummaries(terms: readonly PorterLegTerms[], worked: readon
       };
     });
 }
+
+/** Porter columns of an order leg: package porters (D67) and / or help per side (D182). */
+export type PorterLegColumns = {
+  leg_index: number;
+  porters_count: number;
+  porters_included_hours: number | null;
+  porter_overtime_grace_minutes?: number | null;
+  loading_porters?: number | null;
+  loading_hours?: number | null;
+  unloading_porters?: number | null;
+  unloading_hours?: number | null;
+};
+
+/** The porter terms of a leg: one "both" entry for package porters, otherwise one per side with help. */
+export function porterTermsOfLeg(l: PorterLegColumns): PorterLegTerms[] {
+  const grace = l.porter_overtime_grace_minutes ?? 0;
+  const out: PorterLegTerms[] = [];
+  if (l.porters_count > 0) out.push({ legIndex: l.leg_index, side: "both", persons: l.porters_count, includedHours: Number(l.porters_included_hours ?? 0), graceMinutes: grace });
+  if ((l.loading_porters ?? 0) > 0) out.push({ legIndex: l.leg_index, side: "loading", persons: l.loading_porters!, includedHours: Number(l.loading_hours ?? 0), graceMinutes: grace });
+  if ((l.unloading_porters ?? 0) > 0) out.push({ legIndex: l.leg_index, side: "unloading", persons: l.unloading_porters!, includedHours: Number(l.unloading_hours ?? 0), graceMinutes: grace });
+  return out;
+}
+
+export const hasAnyPorters = (l: PorterLegColumns) => porterTermsOfLeg(l).length > 0;
+
+/** "Carico: " / "Scarico: " before the time of one side (D182); nothing for package porters. */
+export const porterSidePrefix = (side: PorterTimeSide) => (side === "loading" ? "Carico: " : side === "unloading" ? "Scarico: " : "");
 
 // ---------------------------------------------------------------------------
 // Photos and signature

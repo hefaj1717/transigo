@@ -26,6 +26,7 @@ import {
   liveSteps,
   photoPath,
   porterSummaries,
+  porterTermsOfLeg,
   signaturePath,
   type ExecLeg,
   type PhotoKind,
@@ -228,6 +229,10 @@ type LegExecRow = {
   porters_count: number | null;
   porters_included_hours: number | null;
   porter_overtime_grace_minutes: number | null;
+  loading_porters: number | null;
+  loading_hours: number | null;
+  unloading_porters: number | null;
+  unloading_hours: number | null;
 };
 
 /**
@@ -241,7 +246,7 @@ export async function loadJobExecution(db: SupabaseClient, userId: string, order
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId)) return null;
   const { data: order, error } = await db
     .from("orders")
-    .select("id, status, order_legs(leg_index, pickup_window_start, early_start_allowed_at, pickup_warehouse_id, delivery_warehouse_id, porters_count, porters_included_hours, porter_overtime_grace_minutes)")
+    .select("id, status, order_legs(leg_index, pickup_window_start, early_start_allowed_at, pickup_warehouse_id, delivery_warehouse_id, porters_count, porters_included_hours, porter_overtime_grace_minutes, loading_porters, loading_hours, unloading_porters, unloading_hours)")
     .eq("id", orderId)
     .eq("carrier_id", userId)
     .maybeSingle<{ id: string; status: string; order_legs: LegExecRow[] }>();
@@ -252,7 +257,7 @@ export async function loadJobExecution(db: SupabaseClient, userId: string, order
   if (!order) return null;
 
   const legRows = [...order.order_legs].sort((a, b) => a.leg_index - b.leg_index);
-  const [stepsRes, photosRes, handoverRes, proofRes, minutesRes] = await Promise.all([
+  const [stepsRes, photosRes, handoverRes, proofRes, minutesRes, helpRes] = await Promise.all([
     db.from("order_leg_steps").select("leg_index, step, created_at, reverted_at").eq("order_id", orderId).returns<StepRow[]>(),
     db.from("order_photos").select("id, leg_index, kind, storage_path, created_at").eq("order_id", orderId).order("created_at")
       .returns<{ id: string; leg_index: number; kind: PhotoKind; storage_path: string }[]>(),
@@ -260,8 +265,9 @@ export async function loadJobExecution(db: SupabaseClient, userId: string, order
       .returns<{ leg_index: number; address: string }[]>(),
     db.from("delivery_proofs").select("recipient_name, signed_at").eq("order_id", orderId).maybeSingle<{ recipient_name: string; signed_at: string }>(),
     db.rpc("order_porters_worked_minutes", { p_order_id: orderId }),
+    db.rpc("order_loading_help_minutes", { p_order_id: orderId }), // D182
   ]);
-  for (const [what, res] of [["steps", stepsRes], ["photos", photosRes], ["handover", handoverRes], ["proof", proofRes], ["minutes", minutesRes]] as const) {
+  for (const [what, res] of [["steps", stepsRes], ["photos", photosRes], ["handover", handoverRes], ["proof", proofRes], ["minutes", minutesRes], ["help minutes", helpRes]] as const) {
     if (res.error) {
       console.error(`[execution] loadJobExecution ${what}:`, res.error.code, res.error.message);
       throw new Error("execution unavailable");
@@ -275,12 +281,7 @@ export async function loadJobExecution(db: SupabaseClient, userId: string, order
     urls = new Map((signed ?? []).filter((s) => s.signedUrl && s.path).map((s) => [s.path as string, s.signedUrl as string]));
   }
 
-  const terms: PorterLegTerms[] = legRows.map((l) => ({
-    legIndex: l.leg_index,
-    persons: l.porters_count ?? 0,
-    includedHours: Number(l.porters_included_hours ?? 0),
-    graceMinutes: l.porter_overtime_grace_minutes ?? 0,
-  }));
+  const terms: PorterLegTerms[] = legRows.flatMap((l) => porterTermsOfLeg({ ...l, porters_count: l.porters_count ?? 0 }));
   const overtimeEnabled = terms.some((t) => t.persons > 0) ? await hasOvertimeRate(deps.serviceDb(), orderId) : false;
 
   const proof = proofRes.data;
@@ -297,7 +298,7 @@ export async function loadJobExecution(db: SupabaseClient, userId: string, order
     })),
     steps: liveSteps(stepsRes.data ?? []),
     photos: photoRows.map((p) => ({ id: p.id, legIndex: p.leg_index, kind: p.kind, path: p.storage_path, url: urls.get(p.storage_path) ?? null })),
-    porters: porterSummaries(terms, (minutesRes.data ?? []) as WorkedRow[], overtimeEnabled),
+    porters: porterSummaries(terms, [...((minutesRes.data ?? []) as WorkedRow[]), ...((helpRes.data ?? []) as WorkedRow[])], overtimeEnabled),
     handover: handover ? { legIndex: handover.leg_index, address: handover.address } : null,
     proof: proof ? { recipientName: proof.recipient_name, signedAt: proof.signed_at } : null,
   };

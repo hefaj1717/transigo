@@ -1,6 +1,6 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { formatWorkedMinutes, porterSummaries, type LegStep, type PhotoKind, type PorterSummary, type WorkedRow } from "@/lib/carriers/execution";
+import { formatWorkedMinutes, hasAnyPorters, porterSummaries, porterTermsOfLeg, type LegStep, type PhotoKind, type PorterLegColumns, type PorterSummary, type PorterTimeSide, type WorkedRow } from "@/lib/carriers/execution";
 import { customerVisiblePhotos, isDeliveredStatus, isLoadedOrLater } from "./execution-view";
 
 // Job execution as the customer and the admin see it (POD, photos, steps, porter time). Everything is read with the
@@ -47,17 +47,22 @@ async function withUrls(db: SupabaseClient, rows: PhotoRow[]): Promise<ViewPhoto
   return rows.map((p) => ({ id: p.id, legIndex: p.leg_index, kind: p.kind, createdAt: p.created_at, url: urls.get(p.storage_path) ?? null }));
 }
 
+/** Package porters (order_porters_worked_minutes) and help per side (order_loading_help_minutes, D182). */
 async function workedMinutes(db: SupabaseClient, orderId: string): Promise<WorkedRow[]> {
-  const { data, error } = await db.rpc("order_porters_worked_minutes", { p_order_id: orderId });
-  if (error) fail("porter minutes", error);
-  return (data ?? []) as WorkedRow[];
+  const [pkg, help] = await Promise.all([
+    db.rpc("order_porters_worked_minutes", { p_order_id: orderId }),
+    db.rpc("order_loading_help_minutes", { p_order_id: orderId }),
+  ]);
+  if (pkg.error) fail("porter minutes", pkg.error);
+  if (help.error) fail("loading help minutes", help.error);
+  return [...((pkg.data ?? []) as WorkedRow[]), ...((help.data ?? []) as WorkedRow[])];
 }
 
 // ---------------------------------------------------------------------------
 // Customer
 // ---------------------------------------------------------------------------
 
-export type CustomerPorterTime = { legIndex: number; workedLabel: string; includedLabel: string; complete: boolean };
+export type CustomerPorterTime = { legIndex: number; side: PorterTimeSide; workedLabel: string; includedLabel: string; complete: boolean };
 
 export type CustomerExecutionView = {
   photos: ViewPhoto[];
@@ -67,7 +72,7 @@ export type CustomerExecutionView = {
   porters: CustomerPorterTime[];
 };
 
-type CustomerLeg = { leg_index: number; porters_count: number; porters_included_hours: number | null };
+type CustomerLeg = PorterLegColumns;
 
 /**
  * The customer's view of its own order (the page already loaded the order with the same session, so it is the
@@ -78,7 +83,7 @@ export async function loadCustomerExecution(
   order: { id: string; status: string; order_legs: readonly CustomerLeg[] },
 ): Promise<CustomerExecutionView> {
   const delivered = isDeliveredStatus(order.status);
-  const hasPorters = order.order_legs.some((l) => l.porters_count > 0);
+  const hasPorters = order.order_legs.some(hasAnyPorters);
   const [rows, proofRes, worked] = await Promise.all([
     photoRows(db, order.id),
     delivered
@@ -94,14 +99,15 @@ export async function loadCustomerExecution(
   const signature = proofRow ? await signUrls(db, "pod-signatures", [proofRow.signature_path]) : new Map<string, string>();
 
   const porters = order.order_legs
-    .filter((l) => l.porters_count > 0)
-    .map((l) => ({ leg: l, row: worked.find((w) => w.leg_index === l.leg_index) }))
+    .flatMap(porterTermsOfLeg)
+    .map((t) => ({ t, row: worked.find((w) => w.leg_index === t.legIndex && (w.side ?? "both") === (t.side ?? "both")) }))
     .filter(({ row }) => row && (row.worked_minutes > 0 || row.complete || isLoadedOrLater(order.status)))
-    .sort((a, b) => a.leg.leg_index - b.leg.leg_index)
-    .map(({ leg, row }) => ({
-      legIndex: leg.leg_index,
+    .sort((a, b) => a.t.legIndex - b.t.legIndex)
+    .map(({ t, row }) => ({
+      legIndex: t.legIndex,
+      side: t.side ?? "both",
       workedLabel: formatWorkedMinutes(row!.worked_minutes),
-      includedLabel: `${Number(leg.porters_included_hours ?? 0)} h`,
+      includedLabel: `${t.includedHours} h`,
       complete: row!.complete,
     }));
 
@@ -132,14 +138,14 @@ export type AdminExecutionView = {
   actorIds: string[];
 };
 
-type AdminLeg = { leg_index: number; porters_count: number; porters_included_hours: number | null; porter_overtime_grace_minutes: number | null };
+type AdminLeg = PorterLegColumns;
 
 /** The admin's view (admin session; admin_order_execution / admin_delivery_proof check is_admin() themselves). */
 export async function loadAdminExecution(
   db: SupabaseClient,
   order: { id: string; order_legs: readonly AdminLeg[] },
 ): Promise<AdminExecutionView> {
-  const hasPorters = order.order_legs.some((l) => l.porters_count > 0);
+  const hasPorters = order.order_legs.some(hasAnyPorters);
   const [stepsRes, proofRes, notesRes, rows, worked, rateRes] = await Promise.all([
     db.rpc("admin_order_execution", { p_order_id: order.id }),
     db.rpc("admin_delivery_proof", { p_order_id: order.id }),
@@ -169,12 +175,7 @@ export async function loadAdminExecution(
   ]);
   const notes = (notesRes.data ?? []).map((n) => ({ id: n.id, kind: n.kind, legIndex: n.leg_index, body: n.body, createdBy: n.created_by, createdAt: n.created_at }));
 
-  const terms = order.order_legs.map((l) => ({
-    legIndex: l.leg_index,
-    persons: l.porters_count,
-    includedHours: Number(l.porters_included_hours ?? 0),
-    graceMinutes: l.porter_overtime_grace_minutes ?? 0,
-  }));
+  const terms = order.order_legs.flatMap(porterTermsOfLeg);
   const porters = porterSummaries(terms, worked, (rateRes.data?.porter_overtime_rate_cents ?? 0) > 0);
 
   const actorIds = [

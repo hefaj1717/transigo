@@ -32,7 +32,7 @@ import { BookingPhaseBadge } from "@/components/orders/booking-phase-badge";
 import { bookingPhase, romeToday, type BookingPhase } from "@/lib/orders/booking-phase";
 import { Money, type MoneyPayment, type MoneyRefund } from "./money";
 import { ADMIN_DOC_COLUMNS, AdminInvoiceTable, type AdminDoc, type DocTech } from "@/components/admin/invoice-table";
-import { facchiniLabel, personeLabel } from "@/lib/orders/order-summary";
+import { facchiniLabel, loadingHelpLabels, personeLabel } from "@/lib/orders/order-summary";
 
 export const metadata = { title: "Ordine – Transigo" };
 
@@ -55,6 +55,7 @@ type Leg = {
   leg_index: number; pickup_address: string; delivery_address: string; pickup_window_start: string; pickup_window_end: string;
   distance_m: number; duration_s: number | null; pickup_floor: number; pickup_has_elevator: boolean; delivery_floor: number;
   delivery_has_elevator: boolean; is_urgent: boolean; porters_count: number; porters_included_hours: number | null;
+  loading_porters: number; loading_hours: number | null; unloading_porters: number; unloading_hours: number | null;
   pickup_warehouse_id: string | null; delivery_warehouse_id: string | null;
   early_start_allowed_at: string | null; porter_overtime_grace_minutes: number | null;
   order_leg_carrier_terms: { carrier_amount_cents: number } | null;
@@ -103,7 +104,7 @@ const SELECT = [
   "carrier_id, assigned_at, picked_up_at, in_transit_at, delivered_at, delivered_without_pod, handover_required_at, handover_leg_index",
   "vehicle_types(name_it), carriers(company_name, offers_porters, porters_team_size), carrier_vehicles(plate, vehicle_types(name_it))",
   "customers(customer_type, profiles(first_name, last_name, email, phone))",
-  "order_legs(leg_index, pickup_address, delivery_address, pickup_window_start, pickup_window_end, distance_m, duration_s, pickup_floor, pickup_has_elevator, delivery_floor, delivery_has_elevator, is_urgent, porters_count, porters_included_hours, pickup_warehouse_id, delivery_warehouse_id, early_start_allowed_at, porter_overtime_grace_minutes, order_leg_carrier_terms(carrier_amount_cents))",
+  "order_legs(leg_index, pickup_address, delivery_address, pickup_window_start, pickup_window_end, distance_m, duration_s, pickup_floor, pickup_has_elevator, delivery_floor, delivery_has_elevator, is_urgent, porters_count, porters_included_hours, loading_porters, loading_hours, unloading_porters, unloading_hours, pickup_warehouse_id, delivery_warehouse_id, early_start_allowed_at, porter_overtime_grace_minutes, order_leg_carrier_terms(carrier_amount_cents))",
   "order_porter_jobs(address, city, province, window_start, window_end, floor, has_elevator, persons, requested_hours, billed_hours, is_urgent, worked_minutes, order_porter_carrier_terms(carrier_amount_cents))",
   "warehouse_bookings(unit, box_code, pallets, start_date, end_date, payment_plan, intake, outbound, status, warehouses(name, address))",
   "order_charges(total_cents, subtotal_cents, vat_cents, refunded_cents, cancellation_fee_cents)",
@@ -313,6 +314,7 @@ async function Content({ params }: Pick<PageProps<"/admin/ordini/[id]">, "params
                   {rome(l.pickup_window_start)}–{time(l.pickup_window_end)} · {km(l.distance_m)}{duration(l.duration_s) ? ` · ${duration(l.duration_s)}` : ""}
                   {l.is_urgent ? " · urgente" : ""}
                   {l.porters_count ? ` · ${facchiniLabel(l.porters_count)}, ${l.porters_included_hours} h` : ""}
+                  {loadingHelpLabels(l).map((t) => ` · ${t}`).join("")}
                 </p>
               </li>
             ))}

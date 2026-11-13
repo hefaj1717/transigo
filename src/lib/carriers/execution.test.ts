@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  porterSidePrefix,
+  porterTermsOfLeg,
   porterTimeSuffix,
   EXEC_MSG, executionDbError, formatWorkedMinutes, isAlreadyUploaded, isInWarehouse, isPhotoPath, isSignaturePath, LEG_STEPS,
   liveSteps, nextAction, photoKindForStep, photoPath, porterSummaries, recipientNameSchema, romeDateKey, scaledSize,
@@ -107,13 +109,29 @@ describe("porter time (D69) — minutes from the database", () => {
     const terms = [{ legIndex: 1, persons: 1, includedHours: 1, graceMinutes: 15 }, { legIndex: 0, persons: 2, includedHours: 3, graceMinutes: 15 }];
     const worked = [{ leg_index: 0, worked_minutes: 196, complete: true }, { leg_index: 1, worked_minutes: 75, complete: true }];
     expect(porterSummaries(terms, worked, true)).toEqual([
-      { legIndex: 0, workedMinutes: 196, workedLabel: "3 h 16 min", includedLabel: "3 h", complete: true, overtimeHours: 1 },
-      { legIndex: 1, workedMinutes: 75, workedLabel: "1 h 15 min", includedLabel: "1 h", complete: true, overtimeHours: 0 }, // within grace
+      { legIndex: 0, side: "both", workedMinutes: 196, workedLabel: "3 h 16 min", includedLabel: "3 h", complete: true, overtimeHours: 1 },
+      { legIndex: 1, side: "both", workedMinutes: 75, workedLabel: "1 h 15 min", includedLabel: "1 h", complete: true, overtimeHours: 0 }, // within grace
     ]);
     expect(porterSummaries(terms, worked, false).map((s) => s.overtimeHours)).toEqual([0, 0]);
     expect(porterSummaries(terms, [{ leg_index: 0, worked_minutes: 241, complete: true }], true).map((s) => s.overtimeHours)).toEqual([2, 0]);
     expect(porterSummaries([{ legIndex: 0, persons: 0, includedHours: 1, graceMinutes: 0 }], worked, true)).toEqual([]);
     expect(porterSummaries(terms, [], true).every((s) => !s.complete && s.workedMinutes === 0)).toBe(true);
+  });
+
+  it("D182: loading and unloading help — terms and overtime per side", () => {
+    const leg = { leg_index: 0, porters_count: 0, porters_included_hours: null, porter_overtime_grace_minutes: 15, loading_porters: 1, loading_hours: 1, unloading_porters: 2, unloading_hours: 2 };
+    const terms = porterTermsOfLeg(leg);
+    expect(terms.map((t) => [t.side, t.persons, t.includedHours])).toEqual([["loading", 1, 1], ["unloading", 2, 2]]);
+    const worked = [
+      { leg_index: 0, side: "unloading" as const, worked_minutes: 150, complete: true },
+      { leg_index: 0, side: "loading" as const, worked_minutes: 50, complete: true },
+    ];
+    expect(porterSummaries(terms, worked, true).map((s) => [s.side, s.workedMinutes, s.overtimeHours])).toEqual([
+      ["loading", 50, 0],
+      ["unloading", 150, 1], // 2 h + 15 min grace < 2 h 30 → 1 started hour
+    ]);
+    expect(porterTermsOfLeg({ leg_index: 0, porters_count: 2, porters_included_hours: 1 }).map((t) => t.side)).toEqual(["both"]);
+    expect(porterSidePrefix("loading")).toBe("Carico: ");
   });
 });
 

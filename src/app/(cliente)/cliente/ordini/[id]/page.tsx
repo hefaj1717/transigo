@@ -11,7 +11,8 @@ import { requireArea } from "@/lib/auth/session";
 import { customerStatusLabel, orderTitle, progressSteps, type ProgressStep } from "@/lib/orders/customer-view";
 import { bookingDays, bookingUnitLabel, CUSTOMER_STORAGE_INTAKE_LABEL, CUSTOMER_STORAGE_OUTBOUND_LABEL, formatDateOnly, serviceTypeOf } from "@/lib/orders/service-type";
 import { loadCustomerExecution, type CustomerExecutionView } from "@/lib/orders/execution-read";
-import { porterTimeSuffix } from "@/lib/carriers/execution";
+import { porterSidePrefix, porterTimeSuffix } from "@/lib/carriers/execution";
+import { loadingHelpLabels } from "@/lib/orders/order-summary";
 import { groupPhotos, PHOTO_KIND_LABEL } from "@/lib/orders/execution-view";
 import { canOpenClaim, claimDeadline } from "@/lib/claims/claims";
 import { groupCancellationPreview, type CancellationInput, type CancellationPreview } from "@/lib/orders/cancellation";
@@ -51,6 +52,7 @@ type Leg = {
   pickup_window_start: string; pickup_window_end: string; pickup_floor: number; pickup_has_elevator: boolean;
   delivery_floor: number; delivery_has_elevator: boolean; distance_m: number; is_urgent: boolean;
   porter_package_code: PorterPackageCode | null; porters_count: number; porters_included_hours: number | null;
+  loading_porters: number; loading_hours: number | null; unloading_porters: number; unloading_hours: number | null;
   pickup_warehouse_id: string | null; delivery_warehouse_id: string | null;
 };
 type PorterJob = {
@@ -110,7 +112,7 @@ const SELECT = [
   "order_lines(sort_order, label_it, line_type, net_cents, gross_cents)",
   "refunds(amount_cents, status)",
   "claims(id, status)",
-  "order_legs(leg_index, pickup_address, delivery_address, pickup_city, delivery_city, pickup_window_start, pickup_window_end, pickup_floor, pickup_has_elevator, delivery_floor, delivery_has_elevator, distance_m, is_urgent, porter_package_code, porters_count, porters_included_hours, pickup_warehouse_id, delivery_warehouse_id)",
+  "order_legs(leg_index, pickup_address, delivery_address, pickup_city, delivery_city, pickup_window_start, pickup_window_end, pickup_floor, pickup_has_elevator, delivery_floor, delivery_has_elevator, distance_m, is_urgent, porter_package_code, porters_count, porters_included_hours, loading_porters, loading_hours, unloading_porters, unloading_hours, pickup_warehouse_id, delivery_warehouse_id)",
   "order_porter_jobs(address, city, window_start, window_end, floor, has_elevator, persons, requested_hours, billed_hours, is_urgent)",
   "warehouse_bookings(unit, box_code, pallets, start_date, end_date, intake, outbound, status)",
   "order_status_history(id, to_status, created_at, note)",
@@ -354,6 +356,9 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
                 v={`${l.porters_count} ${l.porters_count === 1 ? "persona" : "persone"}${l.porters_included_hours ? `, ${l.porters_included_hours} h incluse` : ""}${l.porter_package_code ? ` · ${PORTER_PACKAGE_LABEL[l.porter_package_code]}` : ""}`}
               />
             ))}
+            {legs.filter((l) => loadingHelpLabels(l).length).map((l) => (
+              <Row key={`h${l.leg_index}`} k="Aiuto carico e scarico" v={loadingHelpLabels(l).join(" · ")} />
+            ))}
             {o.packing_items_count > 0 ? <Row k="Imballaggio" v={`${o.packing_items_count} colli`} /> : null}
             {o.storage_type ? (
               <Row k="Deposito" v={o.storage_type === "transshipment" ? "Transbordo (stesso giorno)" : `${o.storage_days} giorni${o.storage_pallets ? `, ${o.storage_pallets} pallet` : ""}`} />
@@ -474,8 +479,9 @@ function Execution({ exec, multiLeg, status }: { exec: CustomerExecutionView; mu
           <h3 className="text-sm font-semibold text-zinc-800">Tempo di lavoro dei facchini</h3>
           <ul className="mt-1 space-y-1 text-sm text-zinc-900">
             {exec.porters.map((p) => (
-              <li key={p.legIndex}>
+              <li key={`${p.legIndex}-${p.side}`}>
                 {multiLeg ? (p.legIndex === 0 ? "Ritiro: " : "Consegna: ") : ""}
+                {porterSidePrefix(p.side)}
                 <span className="font-medium">{p.workedLabel}</span>
                 <span className="text-zinc-600"> ({p.includedLabel} incluse nel prezzo){porterTimeSuffix(p.complete, status)}</span>
               </li>
