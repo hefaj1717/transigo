@@ -31,6 +31,8 @@ export async function getCompanyInfo(): Promise<CompanyInfo> {
 export type PublicVehicle = {
   id: string;
   name: string;
+  /** 1 = smallest; picks the illustration on the public pages. */
+  sizeRank: number;
   payloadKg: number | null;
   lengthCm: number | null;
   widthCm: number | null;
@@ -69,6 +71,7 @@ export async function getPublicCatalog(): Promise<PublicCatalog> {
       vehicles: o.vehicles.map((v) => ({
         id: v.id,
         name: v.nameIt,
+        sizeRank: v.sizeRank,
         payloadKg: v.payloadKg,
         lengthCm: v.lengthCm,
         widthCm: v.widthCm,

@@ -1,4 +1,5 @@
 import type { PublicVehicle } from "@/lib/public/server";
+import { VehicleIllustration } from "./vehicle-illustration";
 
 // Small building blocks shared by the public pages (home, services, …).
 
@@ -60,16 +61,21 @@ export function VehicleCard({ v }: { v: PublicVehicle }) {
     ["Pallet EUR", v.euroPallets ? String(v.euroPallets) : null],
   ];
   return (
-    <div className="rounded-xl border border-zinc-200 p-5">
-      <h3 className="text-lg font-semibold text-brand-900">{v.name}</h3>
-      <dl className="mt-3 space-y-1 text-sm">
-        {rows.filter(([, value]) => value).map(([k, value]) => (
-          <div key={k} className="flex justify-between gap-4">
-            <dt className="text-zinc-500">{k}</dt>
-            <dd className="font-medium text-zinc-800">{value}</dd>
-          </div>
-        ))}
-      </dl>
+    <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
+      <div className="bg-brand-50 px-6 pb-2 pt-5">
+        <VehicleIllustration sizeRank={v.sizeRank} className="mx-auto h-28 w-full max-w-64" />
+      </div>
+      <div className="p-5">
+        <h3 className="text-lg font-semibold text-brand-900">{v.name}</h3>
+        <dl className="mt-3 space-y-1 text-sm">
+          {rows.filter(([, value]) => value).map(([k, value]) => (
+            <div key={k} className="flex justify-between gap-4">
+              <dt className="text-zinc-500">{k}</dt>
+              <dd className="font-medium text-zinc-800">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
     </div>
   );
 }
