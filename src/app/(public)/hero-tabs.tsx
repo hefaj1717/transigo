@@ -62,7 +62,9 @@ export function HeroTabs({ rates }: { rates: PublicRates | null }) {
   }
 
   return (
-    <div id="calcola" className="scroll-mt-24 rounded-xl bg-white text-left shadow-xl ring-1 ring-black/5">
+    // min-w-0: the card is a grid item, so by default it may grow to its content's min-content width. While
+    // sliding, all three panels sit side by side and their summed width would widen the card for a moment.
+    <div id="calcola" className="min-w-0 scroll-mt-24 rounded-xl bg-white text-left shadow-xl ring-1 ring-black/5">
       <div role="tablist" aria-label="Servizio" className="relative grid grid-cols-3 border-b border-zinc-200">
         {SERVICES.map((s, i) => (
           <button
