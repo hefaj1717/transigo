@@ -306,3 +306,12 @@ export function executionDbError(error: DbError): ExecErrorView {
   }
   return fail(EXEC_MSG.generic);
 }
+
+/**
+ * Suffix of the porters' working time: " · in corso" while the job runs; once the order is delivered (e.g. closed
+ * by the admin without the app) an incomplete measurement is "non misurato", never "in corso".
+ */
+export function porterTimeSuffix(complete: boolean, orderStatus: string): string {
+  if (complete) return "";
+  return orderStatus === "delivered" || orderStatus === "completed" ? " · non misurato" : " · in corso";
+}

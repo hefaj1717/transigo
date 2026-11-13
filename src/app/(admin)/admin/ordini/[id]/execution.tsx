@@ -1,6 +1,7 @@
 import { ActionForm } from "@/components/admin/action-form";
 import { inputClass } from "@/components/admin/admin-nav";
 import type { AdminExecutionView, ViewPhoto } from "@/lib/orders/execution-read";
+import { porterTimeSuffix } from "@/lib/carriers/execution";
 import {
   ADMIN_NOTE_LABEL,
   earlyStartLegs,
@@ -109,7 +110,7 @@ export function Execution({ orderId, status, legs, exec, actorName }: {
                 <li key={p.legIndex}>
                   {multi ? `Tratta ${p.legIndex + 1}: ` : ""}
                   <span className="font-medium">{p.workedLabel}</span> lavorati ({p.workedMinutes} min) su {p.includedLabel} inclusi
-                  {p.complete ? "" : <span className="text-zinc-500"> · in corso</span>}
+                  {p.complete ? "" : <span className="text-zinc-500">{porterTimeSuffix(false, status)}</span>}
                   {p.overtimeHours > 0 ? <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-900">straordinario: {p.overtimeHours} h a persona</span> : null}
                 </li>
               ))}

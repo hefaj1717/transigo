@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  porterTimeSuffix,
   EXEC_MSG, executionDbError, formatWorkedMinutes, isAlreadyUploaded, isInWarehouse, isPhotoPath, isSignaturePath, LEG_STEPS,
   liveSteps, nextAction, photoKindForStep, photoPath, porterSummaries, recipientNameSchema, romeDateKey, scaledSize,
   signaturePath, stepButtonLabel, uploadErrorMessage, type ExecLeg, type LegStep, type StepRecord,
@@ -181,5 +182,14 @@ describe("executionDbError", () => {
     expect(executionDbError(null).message).toBe(EXEC_MSG.generic);
     // never the database text
     expect(executionDbError({ code: "55000", details: "something new", message: "relation secret" }).message).toBe(EXEC_MSG.generic);
+  });
+});
+
+describe("porterTimeSuffix", () => {
+  it("in corso while the job runs, non misurato once delivered without a measurement", () => {
+    expect(porterTimeSuffix(true, "delivered")).toBe("");
+    expect(porterTimeSuffix(false, "picked_up")).toBe(" · in corso");
+    expect(porterTimeSuffix(false, "delivered")).toBe(" · non misurato");
+    expect(porterTimeSuffix(false, "completed")).toBe(" · non misurato");
   });
 });

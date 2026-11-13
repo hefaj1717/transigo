@@ -11,6 +11,7 @@ import { requireArea } from "@/lib/auth/session";
 import { customerStatusLabel, orderTitle, progressSteps, type ProgressStep } from "@/lib/orders/customer-view";
 import { bookingDays, bookingUnitLabel, CUSTOMER_STORAGE_INTAKE_LABEL, CUSTOMER_STORAGE_OUTBOUND_LABEL, formatDateOnly, serviceTypeOf } from "@/lib/orders/service-type";
 import { loadCustomerExecution, type CustomerExecutionView } from "@/lib/orders/execution-read";
+import { porterTimeSuffix } from "@/lib/carriers/execution";
 import { groupPhotos, PHOTO_KIND_LABEL } from "@/lib/orders/execution-view";
 import { canOpenClaim, claimDeadline } from "@/lib/claims/claims";
 import { groupCancellationPreview, type CancellationInput, type CancellationPreview } from "@/lib/orders/cancellation";
@@ -275,7 +276,7 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
           />
         ) : null}
 
-        <Execution exec={exec} multiLeg={o.order_legs.length > 1} />
+        <Execution exec={exec} multiLeg={o.order_legs.length > 1} status={o.status} />
 
         {/* Claims (D138) */}
         {o.claims.some((c) => c.status === "open") ? (
@@ -445,7 +446,7 @@ async function Content({ params, searchParams }: Pick<PageProps<"/cliente/ordini
 }
 
 /** "Prova di consegna" after the delivery; before it only the pickup photos (once loaded) and the porter time. */
-function Execution({ exec, multiLeg }: { exec: CustomerExecutionView; multiLeg: boolean }) {
+function Execution({ exec, multiLeg, status }: { exec: CustomerExecutionView; multiLeg: boolean; status: string }) {
   if (!exec.proof && !exec.photos.length && !exec.porters.length) return null;
   return (
     <Card>
@@ -476,7 +477,7 @@ function Execution({ exec, multiLeg }: { exec: CustomerExecutionView; multiLeg: 
               <li key={p.legIndex}>
                 {multiLeg ? (p.legIndex === 0 ? "Ritiro: " : "Consegna: ") : ""}
                 <span className="font-medium">{p.workedLabel}</span>
-                <span className="text-zinc-600"> ({p.includedLabel} incluse nel prezzo){p.complete ? "" : " · in corso"}</span>
+                <span className="text-zinc-600"> ({p.includedLabel} incluse nel prezzo){porterTimeSuffix(p.complete, status)}</span>
               </li>
             ))}
           </ul>

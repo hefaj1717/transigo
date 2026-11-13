@@ -102,13 +102,13 @@ chyba że napisano inaczej. PWA przewoźnika, wypłaty, SMS — poza zakresem.
 
 | Część | Komputer | Telefon | Uwagi |
 |---|---|---|---|
-| A | | | |
-| B | | | |
-| C | | | |
-| D | | | |
-| E | | | |
-| F | | | |
-| G | | — | |
-| H | | | |
-| I | | | |
+| A | uwagi → poprawki 2026-11-13 (D181) | | ponownie po poprawkach |
+| B | ✓ poza B1 (do decyzji), faktury naprawione (D180) | | |
+| C | ✓, kreator skrócony | | |
+| D | ✓ po poprawce fazy „In arrivo” | | |
+| E | ✓ | | |
+| F | ✓ | | |
+| G | ✓ (Claude, `transigo-staging.vercel.app`, 2026-11-13: TG-46, 49, 50→51→52) | — | poprawione: „1 facchino/persona”, „non misurato” zamiast „in corso” po zamknięciu przez admina |
+| H | ✓ (Claude: H.1 TG-47, H.2 TG-46 10 €, H.3 TG-27/28/29; zwroty Stripe `succeeded`, noty kredytowe) | | poprawione: zwrot ponowiony z sukcesem nie wisi w „Rimborsi da completare” |
+| I | ✓ (Claude: TG-46 szczegóły, reklamacja ze zdjęciem → zamknięta, `claim_opened`/`claim_closed`; hasło nie zmieniane) | | |
 | J | | | |
