@@ -128,9 +128,11 @@ export function StorageWizard({ options, session, initialStep, prefill }: { opti
       setStep(start as StorageStep);
       setMaxStep(ALL_STEPS.findIndex((s) => s.id === start));
     }
+    // A page kept alive by the router (sign-in and back) gets a new session: no stale "Accedi o registrati" error.
+    setStepError(null);
     setLoaded(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- restore once; the session does not change on this page
-  }, [initialStep, prefill.boxCode, prefill.pallets, prefill.days]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs on mount, and again when the URL or the session changes
+  }, [initialStep, prefill.boxCode, prefill.pallets, prefill.days, session.kind]);
 
   useEffect(() => {
     if (!loaded || created) return;

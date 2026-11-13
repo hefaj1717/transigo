@@ -22,7 +22,10 @@ describe("bookingPhase", () => {
   it("'ritiro Transigo': follows the intake transport", () => {
     const t = { intake: "transigo" };
     expect(at("2026-11-18", { intakeStatus: "assigned" }, t)).toBe("booked");
-    expect(at("2026-11-20", { intakeStatus: "paid" }, t)).toBe("incoming"); // start day, not yet picked up
+    // start day, not yet picked up (e.g. pickup at 18:00, now 14:00): still booked
+    expect(at("2026-11-20", { intakeStatus: "paid" }, t)).toBe("booked");
+    expect(at("2026-11-20", { intakeStatus: "assigned" }, t)).toBe("booked");
+    expect(at("2026-11-20", { intakeStatus: "picked_up" }, t)).toBe("incoming");
     expect(at("2026-11-20", { intakeStatus: "in_transit" }, t)).toBe("incoming");
     expect(at("2026-11-20", { intakeStatus: "delivered" }, t)).toBe("stored");
     expect(at("2026-12-21", { intakeStatus: "completed" }, t)).toBe("ended");

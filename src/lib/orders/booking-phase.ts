@@ -67,7 +67,9 @@ export function bookingPhase(i: BookingPhaseInput): BookingPhase {
     // "La porti tu": no arrival is recorded — from the first day of the period the goods count as stored.
     inside = i.today >= b.start_date;
   }
-  if (!inside) return i.today >= b.start_date && b.intake === "transigo" ? "incoming" : "booked";
+  // With "Ritiro Transigo" the goods are on their way only once the transport picked them up — not from the date
+  // alone: a pickup at 18:00 is still "Prenotato" at 14:00 (owner feedback 2026-11-13).
+  if (!inside) return "booked";
   // Paid period over and nothing recorded the exit: the admin has to check (pickup, extension or a call).
   return ended ? "ended" : "stored";
 }

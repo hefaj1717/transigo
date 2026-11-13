@@ -102,9 +102,11 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
       setStep(start);
       setMaxStep(stepIndex(start));
     }
+    // A page kept alive by the router (sign-in and back) gets a new session: no stale "Accedi o registrati" error.
+    setStepError(null);
     setLoaded(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- restore once; the session does not change on this page
-  }, [initialStep, prefill.persons, prefill.hours, options.minPersons]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs on mount, and again when the URL or the session changes
+  }, [initialStep, prefill.persons, prefill.hours, options.minPersons, session.kind]);
 
   useEffect(() => {
     if (!loaded || created) return;
