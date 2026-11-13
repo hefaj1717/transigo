@@ -21,6 +21,7 @@ import { Headline, QuoteBreakdown } from "./quote-view";
 import { LoadingHelpField } from "@/components/booking/loading-help-field";
 import { VehicleIllustration } from "@/components/site/vehicle-illustration";
 import { STEPS, type QuoteResponse, type WizardSession } from "./types";
+import { bookingDateLabel } from "@/lib/booking/date-label";
 
 const input = "mt-1 block w-full rounded-md border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:ring-2 focus:ring-blue-500";
 const label = "block text-sm font-medium text-zinc-800";
@@ -612,7 +613,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
             <div className="space-y-6">
               <dl className="grid gap-2 text-sm sm:grid-cols-[10rem_1fr]">
                 <dt className="text-zinc-500">Ritiro</dt>
-                <dd>{state.pickup?.label} · {state.pickupDate} {state.pickupWindow ? TIME_WINDOW_LABEL[state.pickupWindow] : ""}</dd>
+                <dd>{state.pickup?.label} · {bookingDateLabel(state.pickupDate, { weekday: true })}, {state.pickupWindow ? TIME_WINDOW_LABEL[state.pickupWindow] : ""}</dd>
                 <dt className="text-zinc-500">Consegna</dt>
                 <dd>{state.delivery?.label}</dd>
                 <dt className="text-zinc-500">Merce</dt>

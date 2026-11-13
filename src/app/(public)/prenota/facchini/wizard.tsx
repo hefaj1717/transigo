@@ -26,6 +26,7 @@ import { loadCheckoutDefaults } from "../actions";
 import { Headline, QuoteBreakdown } from "../quote-view";
 import { submitPortersBooking } from "./actions";
 import { createQuoteMemo, keepQuoteResult } from "@/lib/booking/quote-memo";
+import { bookingDateLabel } from "@/lib/booking/date-label";
 
 // Facchinaggio wizard (D158). Same model as the transport wizard: the state (no personal data) is kept in
 // localStorage (D78); contacts and billing only in memory; every price comes from the server (D76).
@@ -438,7 +439,7 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
                 <dt className="text-zinc-500">Indirizzo</dt>
                 <dd>{place?.label} · {place ? floorLabel(place.floor) : ""}{place && place.floor > 0 ? (place.hasElevator ? ", con ascensore" : ", senza ascensore") : ""}</dd>
                 <dt className="text-zinc-500">Quando</dt>
-                <dd>{state.date} {state.window ? TIME_WINDOW_LABEL[state.window] : ""}</dd>
+                <dd>{bookingDateLabel(state.date, { weekday: true })}, {state.window ? TIME_WINDOW_LABEL[state.window] : ""}</dd>
                 <dt className="text-zinc-500">Squadra</dt>
                 <dd>{state.persons === 1 ? "1 facchino" : `${state.persons} facchini`}, {selected?.job.includedHours ?? state.hours} ore</dd>
                 <dt className="text-zinc-500">Cosa spostare</dt>

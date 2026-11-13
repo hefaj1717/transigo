@@ -29,6 +29,7 @@ import { loadCheckoutDefaults } from "../actions";
 import { Headline, PorterPicker, QuoteBreakdown } from "../quote-view";
 import { submitStorageBooking } from "./actions";
 import { createQuoteMemo, keepQuoteResult } from "@/lib/booking/quote-memo";
+import { bookingDateLabel } from "@/lib/booking/date-label";
 
 // Deposito wizard (D153–D158). Same model as the other wizards: the state (no personal data) is kept in localStorage
 // (D78); contacts and billing only in memory; every price and the availability come from the server (D76, D156).
@@ -74,7 +75,7 @@ const fetchQuote = (state: StorageState) =>
   post<QuoteResponse>("/api/booking/storage-quote", { state }, { ok: false, error: { code: "pricing_unavailable" }, message: OFFLINE, step: "preventivo" });
 
 const floorLabel = (n: number) => (n === 0 ? "Piano terra" : `${n}° piano`);
-const dateIt = (iso: string | null) => (iso ? new Date(`${iso}T12:00:00Z`).toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" }) : "");
+const dateIt = (iso: string | null) => bookingDateLabel(iso);
 
 export function StorageWizard({ options, session, initialStep, prefill }: { options: StorageOptions; session: WizardSession; initialStep: string | null; prefill: StoragePrefill }) {
   const [state, setState] = useState<StorageState>(EMPTY_STORAGE_STATE);

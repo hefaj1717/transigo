@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { NAV_LINKS, SERVICES } from "@/lib/public/content";
+import { AccountLink } from "./account-link";
 
 /**
  * Phone menu (below md): a side panel that slides in from the right over a dimmed page. Closes on navigation,
@@ -86,9 +87,7 @@ export function MobileMenu() {
           <Link href="/diventa-partner" className={`${item} text-accent-700`}>
             Diventa partner
           </Link>
-          <Link href="/accedi" className={item}>
-            Accedi
-          </Link>
+          <AccountLink className={item} />
           <Link href="/prenota" className="mt-2 block rounded-md bg-brand-800 px-3 py-3 text-center text-base font-semibold text-white hover:bg-brand-900">
             Prenota
           </Link>
