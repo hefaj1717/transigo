@@ -8,7 +8,7 @@ import { calculateStoragePrice } from "../../pricing/storage-service";
 import type { PorterPackageCode, PricingConfig, Quote } from "../../pricing/types";
 import type { Endpoint, ResolvedLeg } from "../build";
 import { toPublicQuote } from "../public-quote";
-import { loadActiveWarehouses, loadFleet, loadWarehouse, quoteValidMinutes, resolveItalianPlace, routeBetween } from "../server";
+import { loadActiveWarehouses, loadFleet, loadWarehouse, purgeOldQuotes, quoteValidMinutes, resolveItalianPlace, routeBetween } from "../server";
 import type { PublicWarehouse } from "./warehouses";
 import { assessVehicles } from "../vehicle-fit";
 import { romeToday, windowRange } from "../windows";
@@ -156,33 +156,46 @@ export async function quoteStorage(
   const period = checkPeriod(state, now);
   if ("code" in period) return fail(period);
 
+  // One parallel round: price list, warehouse, free space, fleet (only with transports) and quote validity.
+  const withTransport = state.intake === "transigo" || state.outbound === "transigo";
+  const configPromise = loadPricingConfig(db);
+  const fleetPromise = withTransport ? loadFleet(db, configPromise) : Promise.resolve(null);
+  const freePromise = state.warehouseId ? freeUnits(db, state.warehouseId, u, period) : Promise.resolve(0);
+  const validMinutesPromise = quoteValidMinutes(db);
+  // Awaited later, possibly after an early return.
+  for (const p of [fleetPromise, freePromise, validMinutesPromise]) p.catch(() => {});
+
   let config: PricingConfig;
+  let warehouse: Awaited<ReturnType<typeof loadWarehouse>>;
   try {
-    config = await loadPricingConfig(db);
+    [config, warehouse] = await Promise.all([configPromise, state.warehouseId ? loadWarehouse(db, state.warehouseId) : Promise.resolve(null)]);
   } catch (e) {
     if (e instanceof PricingConfigError) return fail({ code: "pricing_unavailable" });
     throw e;
   }
-  const warehouse = state.warehouseId ? await loadWarehouse(db, state.warehouseId) : null;
   if (!warehouse) return fail({ code: "no_warehouse" });
 
   const storage = calculateStoragePrice({ customerType, days: period.days, ...u }, config);
   if (!storage.ok) return fail(storage.error.code === "service_unavailable" ? { code: "storage_unavailable" } : { code: "invalid_period" });
-  if ((await freeUnits(db, warehouse.id, u, period)) < needed(u)) return fail({ code: "no_space" });
+  if ((await freePromise) < needed(u)) return fail({ code: "no_space" });
 
-  // Transports of the chain (D153): one leg each, to / from the warehouse of the booking.
+  // Transports of the chain (D153): one leg each, to / from the warehouse of the booking — both priced in parallel,
+  // errors reported in chain order (intake first).
   const { id: warehouseId, ...point } = warehouse;
   const warehouseEndpoint: Endpoint = { ...point, warehouseId };
-  const fleet = state.intake === "transigo" || state.outbound === "transigo" ? await loadFleet(db, config) : null;
+  const fleet = await fleetPromise;
   const transports: StoredStorageInput["transports"] = {};
-  for (const role of ["intake", "outbound"] as const) {
-    if ((role === "intake" ? state.intake : state.outbound) !== "transigo") continue;
-    const t = await quoteTransport(role, role === "intake" ? state.intakeTransport : state.outboundTransport, role === "intake" ? period.start : period.end);
+  const roles = (["intake", "outbound"] as const).filter((role) => (role === "intake" ? state.intake : state.outbound) === "transigo");
+  const results = await Promise.all(
+    roles.map((role) => quoteTransport(role, role === "intake" ? state.intakeTransport : state.outboundTransport, role === "intake" ? period.start : period.end)),
+  );
+  for (const [i, role] of roles.entries()) {
+    const t = results[i];
     if ("code" in t) return fail(t);
     transports[role] = t;
   }
 
-  const validUntil = new Date(now.getTime() + (await quoteValidMinutes(db)) * 60_000);
+  const validUntil = new Date(now.getTime() + (await validMinutesPromise) * 60_000);
   const input: StoredStorageInput = {
     kind: "storage",
     key: storagePriceKey(state, customerType),
@@ -200,7 +213,7 @@ export async function quoteStorage(
     .select("id")
     .single();
   if (error) throw error;
-  await db.from("quotes").delete().lt("created_at", new Date(now.getTime() - 86_400_000).toISOString()); // D76 housekeeping
+  purgeOldQuotes(db, now); // D76 housekeeping, after the response
 
   return {
     server: { quoteId: data.id, validUntil, input },

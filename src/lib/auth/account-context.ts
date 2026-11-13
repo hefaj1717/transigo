@@ -14,25 +14,26 @@ export async function loadAccountContext(
   userClient: SupabaseClient,
   serviceClient: SupabaseClient,
 ): Promise<AccountContext> {
-  const { data: { user } } = await userClient.auth.getUser(); // verifies the token with Supabase Auth
-  if (!user) return { state: "anonymous" };
+  // getClaims() verifies the access token locally against the project's JWKS (asymmetric signing keys, cached per
+  // instance) — no round trip to Supabase Auth on every request (D184). With symmetric keys (local stack) it falls
+  // back to getUser(). Blocking still takes effect immediately: the profile below is read on every request.
+  const { data: claimsData } = await userClient.auth.getClaims();
+  const userId = typeof claimsData?.claims?.sub === "string" ? claimsData.claims.sub : null;
+  if (!userId) return { state: "anonymous" };
 
+  // One query: profile + the role's own row (both keyed by profile_id, one-to-one).
   const { data: profile, error } = await serviceClient
     .from("profiles")
-    .select("role, is_blocked, first_name, last_name, email, terms_accepted_at, privacy_accepted_at")
-    .eq("id", user.id)
+    .select("role, is_blocked, first_name, last_name, email, terms_accepted_at, privacy_accepted_at, customers!profile_id(customer_type), carriers!profile_id(status)")
+    .eq("id", userId)
     .maybeSingle();
   if (error) throw error;
-  if (!profile) return { state: "no_profile", userId: user.id };
+  if (!profile) return { state: "no_profile", userId };
+  const one = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ? (v[0] ?? null) : (v ?? null));
 
   let carrierStatus: CarrierStatus | null = null;
   if (profile.role === "padroncino") {
-    const { data: carrier, error: carrierError } = await serviceClient
-      .from("carriers")
-      .select("status")
-      .eq("profile_id", user.id)
-      .maybeSingle();
-    if (carrierError) throw carrierError;
+    const carrier = one(profile.carriers as { status: string } | { status: string }[] | null);
     carrierStatus = (carrier?.status as CarrierStatus | undefined) ?? null;
   }
 
@@ -40,12 +41,7 @@ export async function loadAccountContext(
   let customerProfile: "complete" | "incomplete" | null = null;
   let customerType: "private" | "business" | null = null;
   if (profile.role === "cliente") {
-    const { data: customer, error: customerError } = await serviceClient
-      .from("customers")
-      .select("customer_type")
-      .eq("profile_id", user.id)
-      .maybeSingle();
-    if (customerError) throw customerError;
+    const customer = one(profile.customers as { customer_type: string } | { customer_type: string }[] | null);
     customerType = (customer?.customer_type as "private" | "business" | undefined) ?? null;
     const complete =
       !!customer &&
@@ -58,7 +54,7 @@ export async function loadAccountContext(
 
   return {
     state: "signed_in",
-    userId: user.id,
+    userId,
     email: profile.email as string,
     role: profile.role as Role,
     isBlocked: profile.is_blocked as boolean,

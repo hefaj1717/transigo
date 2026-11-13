@@ -24,6 +24,7 @@ import { portersContactHref } from "@/lib/public/requests";
 import { loadCheckoutDefaults } from "../actions";
 import { Headline, QuoteBreakdown } from "../quote-view";
 import { submitPortersBooking } from "./actions";
+import { createQuoteMemo, keepQuoteResult } from "@/lib/booking/quote-memo";
 
 // Facchinaggio wizard (D158). Same model as the transport wizard: the state (no personal data) is kept in
 // localStorage (D78); contacts and billing only in memory; every price comes from the server (D76).
@@ -121,21 +122,35 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
     if ("place" in patch) setOutOfArea(false);
   }, []);
 
+  // Same state + session within a minute → the same answer: "Avanti" reuses the live quote (quote-memo.ts).
+  const [quoteMemo] = useState(() => createQuoteMemo<QuoteResponse>({ keep: keepQuoteResult }));
+  const sessionKey = JSON.stringify(session);
+  const quoteOf = useCallback(
+    (s: PortersState, probe = false) => quoteMemo(`${probe ? "probe" : "quote"}|${sessionKey}|${JSON.stringify(s)}`, () => fetchQuote(s, probe)),
+    [quoteMemo, sessionKey],
+  );
   const runQuote = useCallback(async (s: PortersState) => {
     const seq = ++quoteSeq.current;
     setQuoting(true);
-    const result = await fetchQuote(s);
+    const result = await quoteOf(s);
     if (seq !== quoteSeq.current) return result;
     setQuote(result);
     setQuoting(false);
     return result;
-  }, []);
+  }, [quoteOf]);
 
   useEffect(() => {
     if (!loaded || !canQuote(state) || stepIndex(step) < stepIndex("data") || created) return;
-    const t = setTimeout(() => void runQuote(state), 500);
+    const t = setTimeout(() => void runQuote(state), 250);
     return () => clearTimeout(t);
   }, [state, step, loaded, runQuote, created, stepIndex]);
+
+  // Step "Indirizzo": check the address as soon as it is chosen, so "Avanti" usually has the answer already.
+  useEffect(() => {
+    if (!loaded || step !== "indirizzo" || !state.place || created) return;
+    const t = setTimeout(() => void quoteOf(state, true), 150);
+    return () => clearTimeout(t);
+  }, [state, step, loaded, quoteOf, created]);
 
   useEffect(() => {
     if (step !== "riepilogo" || billingLoaded || session.kind !== "customer") return;
@@ -159,7 +174,7 @@ export function PortersWizard({ options, session, initialStep, prefill }: { opti
 
   /** Server check: errors of this step or an earlier one block "Avanti". */
   async function blockingError(probe: boolean): Promise<string | null> {
-    const result = probe ? await fetchQuote(state, true) : await runQuote(state);
+    const result = probe ? await quoteOf(state, true) : await runQuote(state);
     setOutOfArea(!result.ok && isPortersOutOfArea(result.error));
     if (result.ok) return null;
     return stepIndex(result.step) <= stepIndex(step) ? result.message : null;

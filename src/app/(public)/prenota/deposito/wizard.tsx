@@ -27,6 +27,7 @@ import { formatCents } from "@/lib/pricing/money";
 import { loadCheckoutDefaults } from "../actions";
 import { Headline, PorterPicker, QuoteBreakdown } from "../quote-view";
 import { submitStorageBooking } from "./actions";
+import { createQuoteMemo, keepQuoteResult } from "@/lib/booking/quote-memo";
 
 // Deposito wizard (D153–D158). Same model as the other wizards: the state (no personal data) is kept in localStorage
 // (D78); contacts and billing only in memory; every price and the availability come from the server (D76, D156).
@@ -155,15 +156,18 @@ export function StorageWizard({ options, session, initialStep, prefill }: { opti
   const updateTransport = (role: "intake" | "outbound", patch: Partial<ChainTransportState>) =>
     update(role === "intake" ? { intakeTransport: { ...state.intakeTransport, ...patch } } : { outboundTransport: { ...state.outboundTransport, ...patch } });
 
+  // Same state + session within a minute → the same answer: "Avanti" reuses the live quote (quote-memo.ts).
+  const [quoteMemo] = useState(() => createQuoteMemo<QuoteResponse>({ keep: keepQuoteResult }));
+  const sessionKey = JSON.stringify(session);
   const runQuote = useCallback(async (s: StorageState) => {
     const seq = ++quoteSeq.current;
     setQuoting(true);
-    const result = await fetchQuote(s);
+    const result = await quoteMemo(`quote|${sessionKey}|${JSON.stringify(s)}`, () => fetchQuote(s));
     if (seq !== quoteSeq.current) return result;
     setQuote(result);
     setQuoting(false);
     return result;
-  }, []);
+  }, [quoteMemo, sessionKey]);
 
   // Live availability while the customer picks the unit and the dates (D156): yes / no only.
   const periodReady = !!(state.warehouseId && state.startDate && state.endDate && (isPrivate ? state.boxCode : state.pallets));
@@ -176,13 +180,13 @@ export function StorageWizard({ options, session, initialStep, prefill }: { opti
       const r = await post<{ ok: true; available: boolean } | { ok: false; message: string }>("/api/booking/storage-availability", { state }, { ok: false, message: OFFLINE });
       if (seq !== availSeq.current) return;
       setAvailability(r.ok ? { state: "result", available: r.available } : { state: "error", message: r.message });
-    }, 400);
+    }, 250);
     return () => clearTimeout(t);
   }, [state.warehouseId, state.startDate, state.endDate, state.boxCode, state.pallets, state.customerTypeView, periodReady, loaded, created]); // eslint-disable-line react-hooks/exhaustive-deps -- only warehouse, unit and period matter
 
   useEffect(() => {
     if (!loaded || !periodReady || stepIndex(step) < stepIndex("merce") || created) return;
-    const t = setTimeout(() => void runQuote(state), 500);
+    const t = setTimeout(() => void runQuote(state), 250);
     return () => clearTimeout(t);
   }, [state, step, loaded, runQuote, created, periodReady, stepIndex]);
 

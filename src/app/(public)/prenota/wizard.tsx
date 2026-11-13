@@ -8,6 +8,7 @@ import type { BookingOptions } from "@/lib/booking/server";
 import { EMPTY_WIZARD_STATE, goodsStepError, isStackableCategory, parseStoredState, transportOnly, WIZARD_STORAGE_KEY, type PlaceChoice, type ShipmentCategory, type WizardState } from "@/lib/booking/state";
 import { romeToday, TIME_WINDOW_LABEL, TIME_WINDOWS, type TimeWindow } from "@/lib/booking/windows";
 import { loadCheckoutDefaults, submitBooking } from "./actions";
+import { createQuoteMemo, keepQuoteResult } from "@/lib/booking/quote-memo";
 import { AccountStep } from "@/components/booking/account-step";
 import { BillingFields, EMPTY_BILLING, TermsCheckbox, type Billing } from "@/components/booking/billing-fields";
 import { accountStepError, initialWizardStep, wizardSteps } from "@/lib/booking/session";
@@ -115,21 +116,35 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
   }, []);
 
   // --- live quote ------------------------------------------------------------------------------------------
+  // Same state + session within a minute → the same answer: "Avanti" reuses the live quote (quote-memo.ts).
+  const [quoteMemo] = useState(() => createQuoteMemo<QuoteResponse>({ keep: keepQuoteResult }));
+  const sessionKey = JSON.stringify(session);
+  const quoteOf = useCallback(
+    (s: WizardState, probe = false) => quoteMemo(`${probe ? "probe" : "quote"}|${sessionKey}|${JSON.stringify(s)}`, () => fetchQuote(s, probe)),
+    [quoteMemo, sessionKey],
+  );
   const runQuote = useCallback(async (s: WizardState) => {
     const seq = ++quoteSeq.current;
     setQuoting(true);
-    const result = await fetchQuote(s);
+    const result = await quoteOf(s);
     if (seq !== quoteSeq.current) return result; // a newer request is on its way
     setQuote(result);
     setQuoting(false);
     return result;
-  }, []);
+  }, [quoteOf]);
 
   useEffect(() => {
     if (!loaded || !canQuote(state) || stepIndex(step) < stepIndex("data") || created) return;
-    const t = setTimeout(() => void runQuote(state), 500);
+    const t = setTimeout(() => void runQuote(state), 250);
     return () => clearTimeout(t);
   }, [state, step, loaded, runQuote, created, stepIndex]);
+
+  // Step "Percorso": check the route as soon as both addresses are chosen, so "Avanti" usually has the answer already.
+  useEffect(() => {
+    if (!loaded || step !== "percorso" || !state.pickup || !state.delivery || created) return;
+    const t = setTimeout(() => void quoteOf(state, true), 150);
+    return () => clearTimeout(t);
+  }, [state, step, loaded, quoteOf, created]);
 
   // Prefill billing data from the account (D36) when reaching "Riepilogo".
   useEffect(() => {
@@ -155,7 +170,7 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
 
   /** Server check for the current step: errors that belong to this step or an earlier one block "Avanti". */
   async function blockingError(probe: boolean): Promise<string | null> {
-    const result = probe ? await fetchQuote(state, true) : await runQuote(state);
+    const result = probe ? await quoteOf(state, true) : await runQuote(state);
     setOutOfArea(!result.ok && isOutOfArea(result.error));
     if (result.ok) return null;
     if (stepIndex(result.step) <= stepIndex(step)) return result.message;

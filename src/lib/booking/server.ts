@@ -1,4 +1,5 @@
 import "server-only";
+import { after } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getMapsProvider, MapsError, type PlaceDetails, type RoutePoint, type RouteResult } from "../maps";
 import { calculatePrice } from "../pricing/calculate";
@@ -145,15 +146,17 @@ export async function loadBookingOptions(db: SupabaseClient): Promise<BookingOpt
  */
 export async function loadFleet(
   db: SupabaseClient,
-  config: PricingConfig,
+  configOrPromise: PricingConfig | Promise<PricingConfig>,
 ): Promise<{ vehicles: (VehicleCapacity & { volumeDm3: number | null })[]; minimums: CategoryMinimums }> {
-  const [types, minimums] = await Promise.all([
+  // The config may still be loading: the fleet queries start right away, in parallel with it.
+  const [types, minimums, config] = await Promise.all([
     db
       .from("vehicle_types")
       .select("id, size_rank, payload_kg, cargo_length_cm, cargo_width_cm, cargo_height_cm, cargo_volume_dm3, euro_pallets")
       .eq("is_active", true)
       .order("size_rank"),
     db.from("porter_package_min_vehicle").select("package_code, vehicle_type_id"),
+    configOrPromise,
   ]);
   if (types.error) throw types.error;
   if (minimums.error) throw minimums.error;
@@ -342,14 +345,8 @@ export async function quoteBooking(
   const fail = (error: BookingError) => ({ outcome: { ok: false as const, error }, server: null });
   if (!state.pickup || !state.delivery || !state.pickupDate || !state.pickupWindow) return fail({ code: "incomplete" });
 
-  let config: PricingConfig;
-  try {
-    config = await loadPricingConfig(db);
-  } catch (e) {
-    if (e instanceof PricingConfigError) return fail({ code: "pricing_unavailable" });
-    throw e;
-  }
-
+  // Everything the quote needs is read in parallel (one round of DB queries + the Google lookups, D76).
+  const configPromise = loadPricingConfig(db);
   const maps = getMapsProvider();
   const resolve = async (placeId: string, which: "pickup" | "delivery") => {
     try {
@@ -360,11 +357,27 @@ export async function quoteBooking(
       return { error: mapsError(e, which) };
     }
   };
-  const [pickup, delivery, warehouse] = await Promise.all([
-    resolve(state.pickup.placeId, "pickup"),
-    resolve(state.delivery.placeId, "delivery"),
-    state.storage ? loadActiveWarehouse(db) : Promise.resolve(null),
-  ]);
+  const fleetPromise = loadFleet(db, configPromise);
+  const validMinutesPromise = state.vehicleTypeId ? quoteValidMinutes(db) : Promise.resolve(0);
+  // Unhandled-rejection guards: these are awaited later, possibly after an early return.
+  fleetPromise.catch(() => {});
+  validMinutesPromise.catch(() => {});
+
+  let config: PricingConfig;
+  let pickup: Awaited<ReturnType<typeof resolve>>;
+  let delivery: Awaited<ReturnType<typeof resolve>>;
+  let warehouse: WarehousePoint | null;
+  try {
+    [config, pickup, delivery, warehouse] = await Promise.all([
+      configPromise,
+      resolve(state.pickup.placeId, "pickup"),
+      resolve(state.delivery.placeId, "delivery"),
+      state.storage ? loadActiveWarehouse(db) : Promise.resolve(null),
+    ]);
+  } catch (e) {
+    if (e instanceof PricingConfigError) return fail({ code: "pricing_unavailable" });
+    throw e;
+  }
   if ("error" in pickup && pickup.error) return fail(pickup.error);
   if ("error" in delivery && delivery.error) return fail(delivery.error);
 
@@ -392,7 +405,7 @@ export async function quoteBooking(
       config,
     );
 
-  const fit = vehicleCheck(state, await loadFleet(db, config));
+  const fit = vehicleCheck(state, await fleetPromise);
   const isBlocked = (id: string) => (fit.byVehicle[id]?.blocked.length ?? 0) > 0;
 
   const vehicles: VehiclePrice[] = [];
@@ -414,7 +427,7 @@ export async function quoteBooking(
 
   let server: ServerQuote | null = null;
   if (selectedQuote && state.vehicleTypeId) {
-    const validUntil = new Date(now.getTime() + (await quoteValidMinutes(db)) * 60_000);
+    const validUntil = new Date(now.getTime() + (await validMinutesPromise) * 60_000);
     const input: StoredQuoteInput = {
       key: priceRelevantKey(state),
       ownerId,
@@ -431,8 +444,7 @@ export async function quoteBooking(
       .select("id")
       .single();
     if (error) throw error;
-    // Housekeeping (D76): quotes older than 24 h are no longer needed.
-    await db.from("quotes").delete().lt("created_at", new Date(now.getTime() - 86_400_000).toISOString());
+    purgeOldQuotes(db, now);
     server = { quoteId: data.id, validUntil, quote: selectedQuote, input };
   }
 
@@ -447,6 +459,22 @@ export async function quoteBooking(
       selected: server ? { quoteId: server.quoteId, validUntil: server.validUntil.toISOString(), quote: toPublicQuote(server.quote) } : null,
     },
   };
+}
+
+/**
+ * Housekeeping (D76): quotes older than 24 h are no longer needed. Runs after the response is sent (after()),
+ * so the customer does not wait for it; outside a request (tests, scripts) it simply runs in the background.
+ */
+export function purgeOldQuotes(db: SupabaseClient, now: Date): void {
+  const run = async () => {
+    const { error } = await db.from("quotes").delete().lt("created_at", new Date(now.getTime() - 86_400_000).toISOString());
+    if (error) console.error("[booking] quotes purge:", error.message);
+  };
+  try {
+    after(run);
+  } catch {
+    void run();
+  }
 }
 
 /** A stored quote (D76), or null when it does not exist. */

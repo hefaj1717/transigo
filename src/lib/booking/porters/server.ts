@@ -5,7 +5,7 @@ import { calculatePortersPrice, type PortersJobTerms } from "../../pricing/porte
 import type { PricingConfig, Quote } from "../../pricing/types";
 import type { Endpoint } from "../build";
 import { toPublicQuote, type PublicQuote } from "../public-quote";
-import { quoteValidMinutes, resolveItalianPlace } from "../server";
+import { purgeOldQuotes, quoteValidMinutes, resolveItalianPlace } from "../server";
 import { windowRange } from "../windows";
 import { toPublicPortersJob, type PortersError, type PublicPortersJob } from "./messages";
 import { portersPriceKey, type PortersState } from "./state";
@@ -59,15 +59,17 @@ export async function quotePorters(
   const range = windowRange(state.date, state.window);
   if (!range) return fail({ code: "invalid_window" });
 
+  // Price list, Google place and quote validity are read in parallel.
+  const validMinutesPromise = quoteValidMinutes(db);
+  validMinutesPromise.catch(() => {}); // awaited later, possibly after an early return
   let config: PricingConfig;
+  let resolved: Awaited<ReturnType<typeof resolveItalianPlace>>;
   try {
-    config = await loadPricingConfig(db);
+    [config, resolved] = await Promise.all([loadPricingConfig(db), resolveItalianPlace(state.place.placeId)]);
   } catch (e) {
     if (e instanceof PricingConfigError) return fail({ code: "pricing_unavailable" });
     throw e;
   }
-
-  const resolved = await resolveItalianPlace(state.place.placeId);
   if ("error" in resolved) return fail({ code: resolved.error });
   const place = resolved.endpoint;
 
@@ -86,7 +88,7 @@ export async function quotePorters(
   );
   if (!r.ok) return fail(r.error);
 
-  const validUntil = new Date(now.getTime() + (await quoteValidMinutes(db)) * 60_000);
+  const validUntil = new Date(now.getTime() + (await validMinutesPromise) * 60_000);
   const input: StoredPortersInput = {
     kind: "porters",
     key: portersPriceKey(state),
@@ -103,7 +105,7 @@ export async function quotePorters(
     .select("id")
     .single();
   if (error) throw error;
-  await db.from("quotes").delete().lt("created_at", new Date(now.getTime() - 86_400_000).toISOString()); // D76 housekeeping
+  purgeOldQuotes(db, now); // D76 housekeeping, after the response
 
   return {
     server: { quoteId: data.id, validUntil, quote: r.quote, input },

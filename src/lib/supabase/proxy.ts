@@ -28,11 +28,10 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  // Do not run code between createServerClient and getUser(): it validates the
-  // token with Supabase Auth and triggers the refresh if needed.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Do not run code between createServerClient and getClaims(): it refreshes an expired session and
+  // verifies the token locally with the project's JWKS (D184) — no Supabase Auth round trip per request.
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const user = claimsData?.claims?.sub ? { id: claimsData.claims.sub } : null;
 
   const { pathname, search } = request.nextUrl;
   if (!user && PANEL_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
