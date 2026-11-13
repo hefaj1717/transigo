@@ -1,3 +1,4 @@
+import { connection } from "next/server";
 import { Suspense } from "react";
 import { BookingServiceTabs } from "@/components/site/booking-service-tabs";
 import { Loading } from "@/components/panel-shell";
@@ -26,6 +27,9 @@ export default function Page({ searchParams }: PageProps<"/prenota/deposito">) {
 }
 
 async function Content({ searchParams }: Pick<PageProps<"/prenota/deposito">, "searchParams">) {
+  // Request-time render before loading the price list: it reads the clock (today's holidays, caches) and
+  // Next refuses `new Date()` while prerendering ("blocking-prerender-current-time").
+  await connection();
   const sp = await searchParams;
   const [ctx, options] = await Promise.all([getAccountContext(), loadStorageOptions(createServiceClient())]);
   if (!options.available) {
