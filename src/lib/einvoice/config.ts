@@ -15,7 +15,7 @@ export const STAGING_SUPABASE_URL = "https://bacabuzzevwwdxrswbnc.supabase.co";
 
 /**
  * Production = the indexable site (D126), or a Vercel production deployment on any database other than staging.
- * The demo address (transigo-psi.vercel.app) is the Vercel "production" deployment of the staging project, so
+ * The demo address (transigo-staging.vercel.app, alias of transigo-psi.vercel.app) is the Vercel "production" deployment of the staging project, so
  * VERCEL_ENV alone is not enough (D180).
  */
 export function isProduction(env: Env): boolean {
