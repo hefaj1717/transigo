@@ -125,6 +125,11 @@ export function portersFor(state: WizardState): PorterRequest[] {
   const list: PorterRequest[] = [];
   if (state.portersPickup) list.push({ legIndex: 0, ...state.portersPickup });
   if (state.storage && state.portersDelivery) list.push({ legIndex: 1, ...state.portersDelivery });
+  // D182: help per side of the (single) transport leg — never together with package porters on the same leg.
+  if (!state.portersPickup) {
+    if (state.loadingHelp) list.push({ legIndex: 0, side: "loading", ...state.loadingHelp });
+    if (state.unloadingHelp) list.push({ legIndex: 0, side: "unloading", ...state.unloadingHelp });
+  }
   return list;
 }
 

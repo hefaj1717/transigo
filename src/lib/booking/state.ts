@@ -2,7 +2,7 @@
 // route, schedule, goods and services only — never contacts or billing data (personal data stays in the
 // form's memory). The server always re-validates it with this schema.
 import { z } from "zod";
-import { PORTER_PACKAGE_CODES } from "../pricing/types";
+import { LOADING_HELP_MAX_HOURS, PORTER_PACKAGE_CODES } from "../pricing/types";
 import { isIsoDate, TIME_WINDOWS } from "./windows";
 
 export const WIZARD_STORAGE_KEY = "transigo.booking.v1";
@@ -21,6 +21,13 @@ export const placeChoice = z.object({
   floor: z.number().int().min(0).max(20),
   hasElevator: z.boolean(),
 });
+
+/** D182: help at loading or at unloading — persons 1–4, hours 1–4 (owner 2026-11-13). */
+const loadingHelpChoice = z.object({
+  persons: z.number().int().min(1).max(4),
+  hours: z.number().int().min(1).max(LOADING_HELP_MAX_HOURS),
+});
+export type LoadingHelpChoice = z.infer<typeof loadingHelpChoice>;
 
 const porterChoice = z.object({
   packageCode: z.enum(PORTER_PACKAGE_CODES),
@@ -53,6 +60,9 @@ export const wizardStateSchema = z.object({
   /** Porters at pickup (leg 1) and — with storage only — at delivery (leg 2), D74. */
   portersPickup: porterChoice.nullable(),
   portersDelivery: porterChoice.nullable(),
+  /** D182: help at loading (pickup) and at unloading (delivery), each on its own. Defaults keep older states valid. */
+  loadingHelp: loadingHelpChoice.nullable().default(null),
+  unloadingHelp: loadingHelpChoice.nullable().default(null),
   vehicleTypeId: z.uuid().nullable(),
   packingItems: z.number().int().min(0).max(500),
   storage: z
@@ -90,6 +100,8 @@ export const EMPTY_WIZARD_STATE: WizardState = {
   },
   portersPickup: null,
   portersDelivery: null,
+  loadingHelp: null,
+  unloadingHelp: null,
   vehicleTypeId: null,
   packingItems: 0,
   storage: null,
@@ -166,6 +178,8 @@ export function priceRelevantKey(state: WizardState): string {
     state.pickupWindow,
     porters(state.portersPickup),
     state.storage ? porters(state.portersDelivery) : null,
+    state.loadingHelp ? [state.loadingHelp.persons, state.loadingHelp.hours] : null,
+    state.unloadingHelp ? [state.unloadingHelp.persons, state.unloadingHelp.hours] : null,
     state.vehicleTypeId,
     state.packingItems,
     state.storage ? [state.storage.returnDate, state.storage.returnWindow, state.storage.pallets] : null,

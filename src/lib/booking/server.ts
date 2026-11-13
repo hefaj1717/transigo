@@ -32,6 +32,8 @@ export type BookingOptions = {
   /** Active, priced vehicle types with their capacity (D81), smallest first. */
   vehicles: (VehicleCapacity & { volumeDm3: number | null })[];
   porterPackages: { code: PorterPackageCode; labelIt: string; persons: number; includedHours: number }[];
+  /** D182: help at loading / unloading (rule porter_hour enabled). */
+  loadingHelpAvailable: boolean;
   packingAvailable: boolean;
   /** maxDays: last day for the pickup from the warehouse, counted from the first pickup (D117: short-term only). */
   storage: { available: boolean; billingUnit: StorageBillingUnit; warehouseCity: string | null; maxDays: number };
@@ -106,6 +108,7 @@ export async function loadBookingOptions(db: SupabaseClient): Promise<BookingOpt
       available: false,
       vehicles: [],
       porterPackages: [],
+      loadingHelpAvailable: false,
       packingAvailable: false,
       storage: { available: false, billingUnit: "pallet_day", warehouseCity: null, maxDays: 0 },
       minLeadHours: 3,
@@ -122,6 +125,7 @@ export async function loadBookingOptions(db: SupabaseClient): Promise<BookingOpt
     porterPackages: enabled(config, "porter_hour")
       ? config.porterPackages.filter((p) => p.isEnabled).map((p) => ({ code: p.code, labelIt: PORTER_PACKAGE_LABEL[p.code], persons: p.portersCount, includedHours: p.includedHours }))
       : [],
+    loadingHelpAvailable: enabled(config, "porter_hour"),
     packingAvailable: enabled(config, "packing_flat") || enabled(config, "packing_per_item"),
     storage: {
       available: !!warehouse && enabled(config, perPallet ? "storage_pallet_day" : "storage_day"),

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { formatCents } from "@/lib/pricing/money";
 import { isOutOfArea, type BookingStep } from "@/lib/booking/messages";
 import type { BookingOptions } from "@/lib/booking/server";
-import { EMPTY_WIZARD_STATE, goodsStepError, isStackableCategory, LOADING_HELP_PACKAGE, parseStoredState, transportOnly, WIZARD_STORAGE_KEY, type PlaceChoice, type ShipmentCategory, type WizardState } from "@/lib/booking/state";
+import { EMPTY_WIZARD_STATE, goodsStepError, isStackableCategory, parseStoredState, transportOnly, WIZARD_STORAGE_KEY, type PlaceChoice, type ShipmentCategory, type WizardState } from "@/lib/booking/state";
 import { romeToday, TIME_WINDOW_LABEL, TIME_WINDOWS, type TimeWindow } from "@/lib/booking/windows";
 import { loadCheckoutDefaults, submitBooking } from "./actions";
 import { AccountStep } from "@/components/booking/account-step";
@@ -16,6 +16,7 @@ import { ContactForm } from "@/components/contact-form";
 import { SHIPMENT_LABEL } from "@/lib/orders/shipment";
 import { sendOutOfAreaAction } from "./out-of-area-actions";
 import { Headline, QuoteBreakdown } from "./quote-view";
+import { LoadingHelpField } from "@/components/booking/loading-help-field";
 import { STEPS, type QuoteResponse, type WizardSession } from "./types";
 
 const input = "mt-1 block w-full rounded-md border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:ring-2 focus:ring-blue-500";
@@ -277,9 +278,8 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
     );
   }
 
-  const helpPackage = options.porterPackages.find((p) => p.code === LOADING_HELP_PACKAGE) ?? null;
-  const helpPersons = state.portersPickup ? (state.portersPickup.count ?? helpPackage?.persons ?? 1) : 0;
   const minDate = romeToday();
+  const helpText = (h: { persons: number; hours: number }) => `${h.persons === 1 ? "1 persona" : `${h.persons} persone`} × ${h.hours} h`;
   const fe = (k: string) => fieldErrors[k];
 
   const vehicleCards = () => (
@@ -380,25 +380,23 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
                   </div>
                 );
               })}
-              {helpPackage ? (
-                <fieldset className="rounded-md border border-zinc-200 p-4">
+              {options.loadingHelpAvailable ? (
+                <fieldset className="space-y-3 rounded-md border border-zinc-200 p-4">
                   <legend className="px-1 text-sm font-medium text-zinc-800">Aiuto per carico e scarico</legend>
-                  <div className="flex flex-wrap gap-2">
-                    {[0, ...Array.from({ length: 4 - helpPackage.persons + 1 }, (_, i) => helpPackage.persons + i)].map((n) => (
-                      <label key={n} className={`flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm ${helpPersons === n ? "border-blue-600 bg-blue-50" : "border-zinc-300"}`}>
-                        <input
-                          type="radio"
-                          name="loading-help"
-                          checked={helpPersons === n}
-                          onChange={() => update({ portersPickup: n === 0 ? null : { packageCode: helpPackage.code, count: n === helpPackage.persons ? undefined : n } })}
-                        />
-                        {n === 0 ? "Nessun aiuto" : `${n} ${n === 1 ? "persona" : "persone"}`}
-                      </label>
-                    ))}
-                  </div>
-                  <p className="mt-2 text-xs text-zinc-500">
-                    Le persone aiutano a caricare al ritiro e a scaricare alla consegna. Nel prezzo {helpPackage.includedHours} h di lavoro; il tempo di viaggio non conta.
-                  </p>
+                  {/* D182: loading and unloading help chosen separately, each with its own persons and hours */}
+                  <LoadingHelpField
+                    id="help-loading"
+                    label="Aiuto al carico (al ritiro)"
+                    value={state.loadingHelp}
+                    onChange={(v) => update({ loadingHelp: v, portersPickup: null })}
+                  />
+                  <LoadingHelpField
+                    id="help-unloading"
+                    label="Aiuto allo scarico (alla consegna)"
+                    value={state.unloadingHelp}
+                    onChange={(v) => update({ unloadingHelp: v, portersPickup: null })}
+                  />
+                  <p className="text-xs text-zinc-500">Il prezzo è per persona e per ora di lavoro sul posto; il tempo di viaggio non conta.</p>
                 </fieldset>
               ) : null}
               <p className="text-xs text-zinc-500">Il ritiro deve essere in una provincia servita; la consegna può essere ovunque in Italia entro {options.maxDistanceKm} km di percorso.</p>
@@ -543,8 +541,8 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
                   {selected.quote.porters.map((p) => {
                     const rate = p.overtimeRateNetCents == null ? null : selected.quote.display === "gross" ? formatCents(p.overtimeRateGrossCents ?? 0) : `${formatCents(p.overtimeRateNetCents)} + IVA`;
                     return (
-                      <p key={p.legIndex} className="text-sm text-zinc-700">
-                        Aiuto per carico e scarico — nel prezzo {p.includedHours} h di lavoro
+                      <p key={`${p.legIndex}-${p.side}`} className="text-sm text-zinc-700">
+                        {p.side === "loading" ? "Aiuto al carico" : p.side === "unloading" ? "Aiuto allo scarico" : "Aiuto per carico e scarico"} — nel prezzo {p.includedHours} h di lavoro
                         {rate ? `; ogni ora successiva iniziata ${rate} a persona.` : "."}
                       </p>
                     );
@@ -596,6 +594,17 @@ export function Wizard({ options, session, initialStep }: { options: BookingOpti
                 </dd>
                 <dt className="text-zinc-500">Veicolo</dt>
                 <dd>{options.vehicles.find((v) => v.id === state.vehicleTypeId)?.nameIt}</dd>
+                {state.loadingHelp || state.unloadingHelp ? (
+                  <>
+                    <dt className="text-zinc-500">Aiuto</dt>
+                    <dd>
+                      {[
+                        state.loadingHelp ? `carico: ${helpText(state.loadingHelp)}` : null,
+                        state.unloadingHelp ? `scarico: ${helpText(state.unloadingHelp)}` : null,
+                      ].filter(Boolean).join(" · ")}
+                    </dd>
+                  </>
+                ) : null}
               </dl>
 
               {selected ? <QuoteBreakdown quote={selected.quote} /> : null}

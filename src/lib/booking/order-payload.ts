@@ -34,7 +34,11 @@ export function buildOrderPayload(a: OrderPayloadArgs) {
   const warehouseId = a.legs[0]?.delivery.warehouseId ?? null;
 
   const legs = a.legs.map((l, i) => {
-    const porters = quote.porters.find((p) => p.legIndex === i) ?? null;
+    const porters = quote.porters.find((p) => p.legIndex === i && p.side === "both") ?? null;
+    const side = (s: "loading" | "unloading") => quote.porters.find((p) => p.legIndex === i && p.side === s) ?? null;
+    const loading = side("loading");
+    const unloading = side("unloading");
+    const anyPorters = porters ?? loading ?? unloading;
     return {
       leg_index: i,
       pickup_address: l.pickup.address,
@@ -67,7 +71,12 @@ export function buildOrderPayload(a: OrderPayloadArgs) {
       porter_package_code: porters?.packageCode ?? null,
       porters_count: porters?.persons ?? 0,
       porters_included_hours: porters?.includedHours ?? null,
-      porter_overtime_grace_minutes: porters ? porters.overtimeGraceMinutes : null,
+      porter_overtime_grace_minutes: anyPorters ? anyPorters.overtimeGraceMinutes : null,
+      // D182: help per side
+      loading_porters: loading?.persons ?? 0,
+      loading_hours: loading?.includedHours ?? null,
+      unloading_porters: unloading?.persons ?? 0,
+      unloading_hours: unloading?.includedHours ?? null,
     };
   });
 

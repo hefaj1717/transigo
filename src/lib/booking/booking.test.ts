@@ -214,9 +214,35 @@ describe("create_order payload (D77)", () => {
     expect(payload.carrier_terms.every((t) => t.porter_share_kind === "percent")).toBe(true);
   });
 
+  it("D182: loading and unloading help per side — own persons and hours, no package, grace and share set", () => {
+    const { quote, payload } = payloadFor(state({ loadingHelp: { persons: 1, hours: 1 }, unloadingHelp: { persons: 2, hours: 2 } }), [50_000]);
+    consistent(quote, payload);
+    expect(payload.legs[0]).toMatchObject({
+      porter_package_code: null, porters_count: 0, porters_included_hours: null, porter_overtime_grace_minutes: 15,
+      loading_porters: 1, loading_hours: 1, unloading_porters: 2, unloading_hours: 2,
+    });
+    expect(payload.lines.filter((l) => l.line_type === "porters").map((l) => [l.label_it, l.net_cents])).toEqual([
+      ["Aiuto al carico: 1 persona × 1 h", 3000],
+      ["Aiuto allo scarico: 2 persone × 2 h", 12_000],
+    ]);
+    expect(payload.carrier_terms[0]).toMatchObject({ porter_share_kind: "percent", porter_share_bp: 8000 });
+    expect(payload.charges.porter_overtime_rate_cents).toBe(3500);
+    // only unloading
+    const one = payloadFor(state({ unloadingHelp: { persons: 3, hours: 4 } }), [50_000]).payload;
+    expect(one.legs[0]).toMatchObject({ loading_porters: 0, loading_hours: null, unloading_porters: 3, unloading_hours: 4 });
+  });
+
+  it("D182: a stored state from before the change is still valid (help defaults to none)", () => {
+    const { loadingHelp: _l, unloadingHelp: _u, ...old } = state();
+    void _l;
+    void _u;
+    expect(parseStoredState(JSON.stringify(old))).toMatchObject({ loadingHelp: null, unloadingHelp: null });
+    expect(portersFor(state({ loadingHelp: { persons: 2, hours: 3 } }))).toEqual([{ legIndex: 0, side: "loading", persons: 2, hours: 3 }]);
+  });
+
   it("without porters: no porter columns and no overtime rate", () => {
     const { payload } = payloadFor(state(), [50_000]);
-    expect(payload.legs[0]).toMatchObject({ porter_package_code: null, porters_count: 0, porters_included_hours: null, porter_overtime_grace_minutes: null });
+    expect(payload.legs[0]).toMatchObject({ porter_package_code: null, porters_count: 0, porters_included_hours: null, porter_overtime_grace_minutes: null, loading_porters: 0, unloading_porters: 0 });
     expect(payload.carrier_terms[0].porter_share_kind).toBeNull();
     expect(payload.charges.porter_overtime_rate_cents).toBeNull();
   });
