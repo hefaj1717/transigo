@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PortersCalculator, StorageCalculator } from "@/components/site/calculators";
 import { SERVICES, type ServiceCode } from "@/lib/public/content";
 import { publicAvailability, type PublicRates } from "@/lib/public/rates";
@@ -14,36 +14,41 @@ import { HeroForm } from "@/components/site/hero-form";
  */
 export function HeroTabs({ rates }: { rates: PublicRates | null }) {
   const [active, setActive] = useState<ServiceCode>("trasporto");
-  const [direction, setDirection] = useState<"left" | "right" | null>(null);
   const tabs = useRef<Record<string, HTMLButtonElement | null>>({});
   const available = publicAvailability(rates);
   const activeIndex = SERVICES.findIndex((s) => s.code === active);
 
-  // Smooth height change between panels of different size: the outer box animates to the measured
-  // height of the inner content (ResizeObserver also follows content changes inside a panel).
-  const content = useRef<HTMLDivElement | null>(null);
-  const [height, setHeight] = useState<number | null>(null);
-  // Clip only while the height animates — otherwise the address suggestions dropdown would be cut off.
-  const [animating, setAnimating] = useState(false);
+  // Carousel-like switch: while sliding, all panels sit side by side in a track that moves from the old
+  // panel to the new one and the box animates between their heights. At rest only the active panel is
+  // shown, with no clipping (the address suggestions dropdown of Trasporto must not be cut off).
+  const panels = useRef<(HTMLDivElement | null)[]>([]);
+  const [slide, setSlide] = useState<Slide | null>(null);
+
+  useLayoutEffect(() => {
+    if (!slide || slide.phase !== "measure") return;
+    const hFrom = panels.current[slide.from]?.offsetHeight ?? 0;
+    const hTo = panels.current[slide.to]?.offsetHeight ?? 0;
+    setSlide({ ...slide, hFrom, hTo, phase: "start" });
+  }, [slide]);
+
   useEffect(() => {
-    const el = content.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setHeight(el.offsetHeight));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  // Timer instead of `transitionend`: it also ends when the heights are equal or motion is reduced.
-  useEffect(() => {
-    if (!animating) return;
-    const t = setTimeout(() => setAnimating(false), 320);
+    if (!slide || slide.phase === "measure") return;
+    if (slide.phase === "start") {
+      // Two frames: the browser must paint the start position before the transition begins.
+      let id = requestAnimationFrame(() => {
+        id = requestAnimationFrame(() => setSlide((cur) => (cur ? { ...cur, phase: "run" } : cur)));
+      });
+      return () => cancelAnimationFrame(id);
+    }
+    const t = setTimeout(() => setSlide(null), SLIDE_MS + 30);
     return () => clearTimeout(t);
-  }, [animating, active]);
+  }, [slide]);
 
   function select(code: ServiceCode) {
     if (code === active) return;
     const to = SERVICES.findIndex((s) => s.code === code);
-    setDirection(to > activeIndex ? "right" : "left");
-    setAnimating(true);
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    setSlide(reduce ? null : { from: activeIndex, to, hFrom: 0, hTo: 0, phase: "measure" });
     setActive(code);
   }
 
@@ -86,28 +91,61 @@ export function HeroTabs({ rates }: { rates: PublicRates | null }) {
         />
       </div>
       <div
-        className={`motion-safe:transition-[height] motion-safe:duration-300 motion-safe:ease-out ${animating ? "overflow-hidden" : ""}`}
-        style={height === null || !animating ? undefined : { height }}
+        className={slide ? "overflow-hidden" : undefined}
+        style={
+          slide && slide.phase !== "measure"
+            ? {
+                height: slide.phase === "run" ? slide.hTo : slide.hFrom,
+                transition: slide.phase === "run" ? `height ${SLIDE_MS}ms ${EASE}` : undefined,
+              }
+            : undefined
+        }
       >
-      <div ref={content}>
-      {SERVICES.map((s) => (
-        <div key={s.code} id={`hero-panel-${s.code}`} role="tabpanel" aria-labelledby={`hero-tab-${s.code}`} hidden={active !== s.code} className={`p-5 sm:p-6 ${direction === "right" ? "motion-safe:animate-tab-in-right" : direction === "left" ? "motion-safe:animate-tab-in-left" : ""}`}>
-          {active !== s.code ? null : !available[s.code] && s.code !== "trasporto" ? (
-            <Unavailable />
-          ) : s.code === "trasporto" ? (
-            <HeroForm embedded />
-          ) : s.code === "facchinaggio" ? (
-            <PortersCalculator rates={rates!} />
-          ) : (
-            <StorageCalculator rates={rates!} />
-          )}
+        <div
+          className="flex items-start"
+          style={
+            slide
+              ? {
+                  transform: `translateX(-${(slide.phase === "run" ? slide.to : slide.from) * 100}%)`,
+                  transition: slide.phase === "run" ? `transform ${SLIDE_MS}ms ${EASE}` : undefined,
+                }
+              : undefined
+          }
+        >
+          {SERVICES.map((s, i) => (
+            <div
+              key={s.code}
+              ref={(el) => {
+                panels.current[i] = el;
+              }}
+              id={`hero-panel-${s.code}`}
+              role="tabpanel"
+              aria-labelledby={`hero-tab-${s.code}`}
+              hidden={!slide && active !== s.code}
+              inert={active !== s.code}
+              className="w-full shrink-0 p-5 sm:p-6"
+            >
+              {!available[s.code] && s.code !== "trasporto" ? (
+                <Unavailable />
+              ) : s.code === "trasporto" ? (
+                <HeroForm embedded />
+              ) : s.code === "facchinaggio" ? (
+                <PortersCalculator rates={rates!} />
+              ) : (
+                <StorageCalculator rates={rates!} />
+              )}
+            </div>
+          ))}
         </div>
-      ))}
-      </div>
       </div>
     </div>
   );
 }
+
+const SLIDE_MS = 350;
+const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
+
+type Slide = { from: number; to: number; hFrom: number; hTo: number; phase: "measure" | "start" | "run" };
 
 function Unavailable() {
   return (
