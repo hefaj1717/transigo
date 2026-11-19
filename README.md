@@ -7,6 +7,12 @@ Payments run in Stripe **test mode**. Use the card `4242 4242 4242 4242`, any fu
 
 > The app interface is in Italian (the target market). Code, database names and comments are in English.
 
+## Screenshots
+
+| Home page with live quote | Booking wizard |
+|---|---|
+| ![Home page](docs/screenshots/home.png) | ![Booking wizard](docs/screenshots/booking-wizard.png) |
+
 ## What it does
 
 | Area | Highlights |
@@ -97,3 +103,7 @@ Working demo of the public site, booking and payment, customer panel, admin pane
 ## Author
 
 Karol Wlosek
+
+## License
+
+© 2026 Karol Wlosek. All rights reserved. The source code is public for portfolio and review purposes only; it may not be copied, modified or used without written permission.
