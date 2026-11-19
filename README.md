@@ -13,6 +13,18 @@ Payments run in Stripe **test mode**. Use the card `4242 4242 4242 4242`, any fu
 |---|---|
 | ![Home page](docs/screenshots/home.png) | ![Booking wizard](docs/screenshots/booking-wizard.png) |
 
+| Admin dashboard | Admin orders |
+|---|---|
+| ![Admin dashboard](docs/screenshots/admin-dashboard.png) | ![Admin orders](docs/screenshots/admin-orders.png) |
+
+**Carrier app (PWA, mobile):** available jobs (anonymised until accepted), my jobs, job execution
+
+<p>
+  <img src="docs/screenshots/carrier-available-jobs.png" alt="Available jobs" width="260">
+  <img src="docs/screenshots/carrier-my-jobs.png" alt="My jobs" width="260">
+  <img src="docs/screenshots/carrier-job.png" alt="Job execution" width="260">
+</p>
+
 ## What it does
 
 | Area | Highlights |
